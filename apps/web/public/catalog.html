@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Furniture Asset Catalog</title>
+  <style>
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: #121214;
+      color: #e1e1e6;
+      margin: 0;
+      padding: 24px;
+    }
+    h1 {
+      font-size: 24px;
+      margin-bottom: 8px;
+      color: #ffffff;
+    }
+    p {
+      color: #a8a8b3;
+      margin-top: 0;
+      margin-bottom: 24px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 16px;
+    }
+    .card {
+      background-color: #202024;
+      border: 1px solid #29292e;
+      border-radius: 8px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      transition: transform 0.2s, border-color 0.2s;
+    }
+    .card:hover {
+      transform: translateY(-2px);
+      border-color: #6c5ce7;
+    }
+    .image-container {
+      background-color: #121214;
+      border-radius: 6px;
+      width: 160px;
+      height: 160px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 12px;
+      overflow: hidden;
+      padding: 8px;
+    }
+    .image-container img {
+      max-width: 100%;
+      max-height: 100%;
+      image-rendering: pixelated;
+    }
+    .name {
+      font-weight: 600;
+      font-size: 14px;
+      margin-bottom: 4px;
+      color: #ffffff;
+    }
+    .info {
+      font-size: 12px;
+      color: #8d8d99;
+    }
+  </style>
+</head>
+<body>
+  <h1>Furniture Asset Catalog</h1>
+  <p>Available assets in <code>public/assets/furniture/</code></p>
+  <div class="grid" id="grid"></div>
+  <script>
+    const grid = document.getElementById('grid');
+    const totalPieces = 24;
+    const piecesData = [
+      { id: 0, width: 184, height: 188 },
+      { id: 1, width: 140, height: 124 },
+      { id: 2, width: 88, height: 136 },
+      { id: 3, width: 96, height: 124 },
+      { id: 4, width: 96, height: 124 },
+      { id: 5, width: 96, height: 124 },
+      { id: 6, width: 100, height: 112 },
+      { id: 7, width: 148, height: 72 },
+      { id: 8, width: 136, height: 72 },
+      { id: 9, width: 160, height: 56 },
+      { id: 10, width: 128, height: 60 },
+      { id: 11, width: 152, height: 48 },
+      { id: 12, width: 80, height: 80 },
+      { id: 13, width: 72, height: 88 },
+      { id: 14, width: 132, height: 48 },
+      { id: 15, width: 80, height: 76 },
+      { id: 16, width: 80, height: 76 },
+      { id: 17, width: 100, height: 60 },
+      { id: 18, width: 96, height: 60 },
+      { id: 19, width: 100, height: 52 },
+      { id: 20, width: 64, height: 80 },
+      { id: 21, width: 64, height: 72 },
+      { id: 22, width: 80, height: 56 },
+      { id: 23, width: 56, height: 80 }
+    ];
+
+    piecesData.forEach(p => {
+      const card = document.createElement('div');
+      card.className = 'card';
+
+      const imgContainer = document.createElement('div');
+      imgContainer.className = 'image-container';
+
+      const img = document.createElement('img');
+      img.src = `./assets/furniture/piece_${p.id}.png`;
+      img.alt = `Piece ${p.id}`;
+      imgContainer.appendChild(img);
+
+      const name = document.createElement('div');
+      name.className = 'name';
+      name.textContent = `piece_${p.id}.png`;
+
+      const info = document.createElement('div');
+      info.className = 'info';
+      const wTiles = Math.round(p.width / 32);
+      const hTiles = Math.round(p.height / 32);
+      info.textContent = `${p.width}x${p.height}px (${wTiles}x${hTiles} tiles)`;
+
+      card.appendChild(imgContainer);
+      card.appendChild(name);
+      card.appendChild(info);
+      grid.appendChild(card);
+    });
+  </script>
+</body>
+</html>

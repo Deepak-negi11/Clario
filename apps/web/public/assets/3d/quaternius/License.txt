@@ -1,0 +1,14 @@
+Characters, hairstyles and animations in this folder are by Quaternius (https://quaternius.com).
+
+- Universal Base Characters, Standard (free) version: https://quaternius.itch.io/universal-base-characters
+- Universal Animation Library, Standard (free) version: https://opengameart.org/content/universal-animation-library
+
+- Office Chair (OfficeChair.glb), downloaded unchanged from Poly Pizza: https://poly.pizza/m/UfKvrZBK6C
+
+All are released under:
+CC0 1.0 Universal (CC0 1.0) Public Domain Dedication
+https://creativecommons.org/publicdomain/zero/1.0/
+
+Changes made for this app: textures resized to 1024/512 px JPEGs, normal and roughness maps removed,
+glTF files rewritten to use those textures, and four clips (Idle_Loop, Walk_Loop, Jog_Fwd_Loop,
+Sitting_Idle_Loop) cut from AL_Standard.fbx into animations.json.

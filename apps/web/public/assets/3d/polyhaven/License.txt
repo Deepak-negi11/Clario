@@ -1,0 +1,8 @@
+3D seating models from Poly Haven (https://polyhaven.com), 1k glTF versions, unchanged:
+
+- sofa_02              "Sofa 02"              https://polyhaven.com/a/sofa_02
+- modern_arm_chair_01  "Modern Arm Chair 01"  https://polyhaven.com/a/modern_arm_chair_01
+- dining_chair_02      "Dining Chair 02"      https://polyhaven.com/a/dining_chair_02
+
+License: CC0 1.0 Universal (public domain). See https://polyhaven.com/license
+Attribution is not required; credit to Poly Haven and its artists is appreciated.

@@ -1,0 +1,20 @@
+<svg width="360" height="96" viewBox="0 0 360 96" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Viora</title>
+  <desc id="desc">Viora wordmark with two presence points converging into a V</desc>
+
+  <rect x="10" y="12" width="72" height="72" rx="18" fill="#111A16"/>
+  <path d="M29 30L45 66" stroke="#C7FF5E" stroke-width="8" stroke-linecap="round"/>
+  <path d="M63 30L47 66" stroke="#C7FF5E" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="29" cy="30" r="4" fill="#F8FAF8"/>
+  <circle cx="63" cy="30" r="4" fill="#F8FAF8"/>
+
+  <g stroke="#111A16" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M108 29L124 68L140 29"/>
+    <path d="M157 42V68"/>
+    <circle cx="157" cy="30" r="4" fill="#111A16" stroke="none"/>
+    <circle cx="188" cy="52" r="16"/>
+    <path d="M219 68V39M219 48C225 39 235 38 242 43"/>
+    <circle cx="270" cy="52" r="16"/>
+    <path d="M286 38V68"/>
+  </g>
+</svg>
