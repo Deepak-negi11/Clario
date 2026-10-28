@@ -10,6 +10,15 @@ A TypeScript monorepo for a simple 2D metaverse app. The backend handles auth, s
 - `packages/shared` - Shared Zod schemas and TypeScript types.
 - `packages/ui` - Shared React UI components.
 
+## Technology Stack
+
+- **TypeScript** - Type-safe application development
+- **JavaScript** - Frontend and application logic
+- **Python** - Backend services and AI-related functionality
+- **WebSockets** - Real-time, bidirectional communication
+- **WebRTC** - Real-time audio, video, and peer-to-peer communication
+- **Redis** - Caching, fast data access, and real-time state management
+
 ## Main Commands
 
 ```bash
