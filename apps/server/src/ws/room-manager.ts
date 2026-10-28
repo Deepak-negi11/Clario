@@ -121,6 +121,11 @@ export function updatePosition(spaceId: string, userId: string, x: number, y: nu
 }
 
 
+export function isInRoom(spaceId: string, userId: string) {
+  return rooms.get(spaceId)?.has(userId) ?? false;
+}
+
+
 export function sendToUser(spaceId:string , userId:string,message:unknown){
   const member = rooms.get(spaceId)?.get(userId)
   if(member) member.socket.send(JSON.stringify(message))

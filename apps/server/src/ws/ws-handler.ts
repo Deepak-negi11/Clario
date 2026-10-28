@@ -38,13 +38,23 @@ import {
   unsubscribeFromSpaceEvents,
 } from "./pubsub";
 
-import { sendToUser } from "./room-manager";
+import { isInRoom, sendToUser } from "./room-manager";
+import {
+  answerDirectChat,
+  canDirectMessage,
+  forgetDirectChats,
+  requestDirectChat,
+} from "./direct-chat";
 
 type JoinPayload = Extract<ClientMessage, { type: "join" }>["payload"];
 type MovePayload = Extract<ClientMessage, { type: "move" }>["payload"];
 type ChatPayload = Extract<ClientMessage, { type: "chat" }>["payload"];
 type ReactionPayload = Extract<ClientMessage, { type: "reaction" }>["payload"];
+type LookPayload = Extract<ClientMessage, { type: "look" }>["payload"];
 type SignalPayload = Extract<ClientMessage, { type: "webrtc-signal" }>["payload"];
+type DirectRequestPayload = Extract<ClientMessage, { type: "dm-request" }>["payload"];
+type DirectResponsePayload = Extract<ClientMessage, { type: "dm-response" }>["payload"];
+type DirectMessagePayload = Extract<ClientMessage, { type: "dm" }>["payload"];
 
 
 export function makeSocketData(): SocketData {
@@ -84,8 +94,16 @@ export async function onMessage(ws: Socket, raw: string | Buffer) {
       return handleChat(ws, parsed.data.payload);
     case "reaction":
       return handleReaction(ws, parsed.data.payload);
+    case "look":
+      return handleLook(ws, parsed.data.payload);
     case "webrtc-signal":
       return handleSignal(ws, parsed.data.payload)
+    case "dm-request":
+      return handleDirectRequest(ws, parsed.data.payload);
+    case "dm-response":
+      return handleDirectResponse(ws, parsed.data.payload);
+    case "dm":
+      return handleDirectMessage(ws, parsed.data.payload);
   }
 }
 
@@ -225,6 +243,67 @@ async function handleSignal(ws:Socket , payload:SignalPayload){
 }
 
 
+// Like webrtc signals, these go to sockets on this server only.
+function handleDirectRequest(ws: Socket, payload: DirectRequestPayload) {
+  const { spaceId, userId } = ws.data;
+  if (!spaceId || !userId) {
+    return send(ws, { type: "error", message: "Join a space first" });
+  }
+  const targetId = payload.targetUserId;
+  if (targetId === userId) return;
+  if (!isInRoom(spaceId, targetId)) {
+    return send(ws, { type: "error", message: "That person is no longer in this space" });
+  }
+
+  const result = requestDirectChat(spaceId, userId, targetId);
+  if (result === "sent") {
+    sendToUser(spaceId, targetId, {
+      type: "dm-request",
+      payload: { fromUserId: userId, at: Date.now() },
+    });
+  } else if (result === "already-open" || result === "declined-recently") {
+    // Nothing to ask: tell the asker where things stand, as if the other person answered again.
+    send(ws, {
+      type: "dm-response",
+      payload: { fromUserId: targetId, accept: result === "already-open", at: Date.now() },
+    });
+  }
+}
+
+
+function handleDirectResponse(ws: Socket, payload: DirectResponsePayload) {
+  const { spaceId, userId } = ws.data;
+  if (!spaceId || !userId) {
+    return send(ws, { type: "error", message: "Join a space first" });
+  }
+  const requesterId = payload.targetUserId;
+  if (!answerDirectChat(spaceId, userId, requesterId, payload.accept)) {
+    return send(ws, { type: "error", message: "That chat request is no longer open" });
+  }
+  sendToUser(spaceId, requesterId, {
+    type: "dm-response",
+    payload: { fromUserId: userId, accept: payload.accept, at: Date.now() },
+  });
+}
+
+
+function handleDirectMessage(ws: Socket, payload: DirectMessagePayload) {
+  const { spaceId, userId } = ws.data;
+  if (!spaceId || !userId) {
+    return send(ws, { type: "error", message: "Join a space first" });
+  }
+  const text = payload.text.trim().slice(0, 500);
+  if (!text) return;
+  if (!canDirectMessage(spaceId, userId, payload.targetUserId)) {
+    return send(ws, { type: "error", message: "Ask to chat first" });
+  }
+  sendToUser(spaceId, payload.targetUserId, {
+    type: "dm",
+    payload: { fromUserId: userId, text, at: Date.now() },
+  });
+}
+
+
 async function handleChat(ws: Socket, payload: ChatPayload) {
   const { spaceId, userId, x, y } = ws.data;
   if (!spaceId || !userId) {
@@ -303,6 +382,20 @@ async function handleReaction(ws: Socket, payload: ReactionPayload) {
 }
 
 
+// The look is already validated by the schema and saved through the profile API;
+// this only tells the rest of the space to redraw the sender.
+async function handleLook(ws: Socket, look: LookPayload) {
+  const { spaceId, userId } = ws.data;
+  if (!spaceId || !userId) {
+    return send(ws, { type: "error", message: "Join a space first" });
+  }
+
+  const message = { type: "look", payload: { userId, look } } as const;
+  broadcast(spaceId, userId, message);
+  await publishRoomEvent(spaceId, userId, message);
+}
+
+
 export async function onClose(ws: Socket) {
   const { spaceId, userId } = ws.data;
   if (!spaceId || !userId) return;
@@ -310,6 +403,7 @@ export async function onClose(ws: Socket) {
   const removed = removeFromRoom(spaceId, userId, ws);
   if (!removed) return;
 
+  forgetDirectChats(spaceId, userId);
   await removeUser(spaceId, userId);
   await clearCurrentSpace(userId);
   await clearAgentActivity(spaceId, userId);

@@ -384,4 +384,78 @@ describe("WebSocket", () => {
       wsB.close();
     });
   });
+
+  describe("direct chat", () => {
+    async function joinThree() {
+      const { token: tokenA, spaceId } = await setupUserAndSpace();
+      const { token: tokenB } = await setupUserAndSpace();
+      const { token: tokenC } = await setupUserAndSpace();
+
+      const sockets: TestSocket[] = [];
+      const ids: string[] = [];
+      for (const token of [tokenA, tokenB, tokenC]) {
+        const ws = new TestSocket(WS_URL);
+        await ws.waitForOpen();
+        ws.send({ type: "join", payload: { spaceId, token } });
+        const joined = await ws.nextMessage();
+        ids.push(joined.payload?.userId as string);
+        // Everyone already inside hears this join.
+        for (const earlier of sockets) await earlier.nextMessage();
+        sockets.push(ws);
+      }
+      const [wsA, wsB, wsC] = sockets as [TestSocket, TestSocket, TestSocket];
+      const [userIdA, userIdB] = ids as [string, string, string];
+      return { wsA, wsB, wsC, userIdA, userIdB };
+    }
+
+    test("a private message needs an accepted request and reaches only that person", async () => {
+      const { wsA, wsB, wsC, userIdA, userIdB } = await joinThree();
+
+      wsA.send({ type: "dm", payload: { targetUserId: userIdB, text: "too early" } });
+      const early = await wsA.nextMessage();
+      expect(early.type).toBe("error");
+
+      wsA.send({ type: "dm-request", payload: { targetUserId: userIdB } });
+      const request = await wsB.nextMessage();
+      expect(request.type).toBe("dm-request");
+      expect(request.payload?.fromUserId).toBe(userIdA);
+
+      wsB.send({ type: "dm-response", payload: { targetUserId: userIdA, accept: true } });
+      const response = await wsA.nextMessage();
+      expect(response.type).toBe("dm-response");
+      expect(response.payload?.fromUserId).toBe(userIdB);
+      expect(response.payload?.accept).toBe(true);
+
+      wsA.send({ type: "dm", payload: { targetUserId: userIdB, text: "hi there" } });
+      const dm = await wsB.nextMessage();
+      expect(dm.type).toBe("dm");
+      expect(dm.payload?.fromUserId).toBe(userIdA);
+      expect(dm.payload?.text).toBe("hi there");
+
+      await expect(wsC.nextMessage(300)).rejects.toThrow();
+
+      wsA.close();
+      wsB.close();
+      wsC.close();
+    });
+
+    test("a declined request tells the asker and blocks messages", async () => {
+      const { wsA, wsB, wsC, userIdA, userIdB } = await joinThree();
+
+      wsA.send({ type: "dm-request", payload: { targetUserId: userIdB } });
+      await wsB.nextMessage();
+      wsB.send({ type: "dm-response", payload: { targetUserId: userIdA, accept: false } });
+      const response = await wsA.nextMessage();
+      expect(response.type).toBe("dm-response");
+      expect(response.payload?.accept).toBe(false);
+
+      wsA.send({ type: "dm", payload: { targetUserId: userIdB, text: "please" } });
+      expect((await wsA.nextMessage()).type).toBe("error");
+      await expect(wsB.nextMessage(300)).rejects.toThrow();
+
+      wsA.close();
+      wsB.close();
+      wsC.close();
+    });
+  });
 });

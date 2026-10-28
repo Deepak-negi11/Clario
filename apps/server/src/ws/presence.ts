@@ -149,7 +149,14 @@ export async function clearCurrentSpace(userId: string) {
 
 
 
-export type AgentActivity = { text: string; state: "cooking" | "done"; at: number };
+export type AgentActivity = {
+  text: string;
+  state: "cooking" | "done";
+  at: number;
+  project?: string;
+  branch?: string;
+  commit?: string;
+};
 
 function activityKey(spaceId: string): string {
   return `space:${spaceId}:activity`;
