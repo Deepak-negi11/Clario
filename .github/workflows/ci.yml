@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify application
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.13"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: bun run --cwd packages/db generate
+
+      - name: Check server types
+        run: bun run --cwd apps/server check-types
+
+      - name: Lint web
+        run: bun run --cwd apps/web lint
+
+      - name: Check web types
+        run: bun run --cwd apps/web check-types
+
+      - name: Build web
+        env:
+          NEXT_PUBLIC_API_BASE_URL: https://api.vioraa.tech
+        run: bun run --cwd apps/web build
