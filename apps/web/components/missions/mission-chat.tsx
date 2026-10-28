@@ -104,12 +104,18 @@ export function MissionChat({
   showXp,
   nextHref,
   onRunChange,
+  onNext,
+  embedded = false,
 }: {
   mission: Mission;
   number: number;
   showXp: boolean;
   nextHref?: string;
   onRunChange?: (run: MissionRun) => void;
+  /** "Next mission" calls this instead of following nextHref (a link would leave the map). */
+  onNext?: () => void;
+  /** Inside another panel (the Practice Session): no card border or shadow of its own. */
+  embedded?: boolean;
 }) {
   const [run, setRun] = useState<MissionRun>(() => ({ ...emptyRun(), thread: openingThread(mission) }));
   const [draft, setDraft] = useState("");
@@ -181,7 +187,11 @@ export function MissionChat({
   }
 
   return (
-    <article className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-black/5 bg-white text-[#12151c] shadow-[0_18px_44px_-18px_rgba(18,21,28,0.45)]">
+    <article
+      className={`flex h-full min-h-0 flex-col overflow-hidden bg-white text-[#12151c] ${
+        embedded ? "" : "rounded-2xl border border-black/5 shadow-[0_18px_44px_-18px_rgba(18,21,28,0.45)]"
+      }`}
+    >
       <header className="flex items-center gap-3 border-b border-[#eceef1] px-5 py-4">
         <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[#e9e4fb] text-lg font-semibold text-[#3d2f8f]" aria-hidden="true">
           {name.charAt(0)}
@@ -294,7 +304,16 @@ export function MissionChat({
               <RotateCcw size={14} aria-hidden="true" />
               {run.completed ? "Practise again" : "Start again"}
             </button>
-            {run.completed && nextHref && (
+            {run.completed && onNext && (
+              <button
+                type="button"
+                onClick={onNext}
+                className="cursor-pointer rounded-xl bg-[#12151c] px-4 py-2 text-sm font-semibold text-white transition hover:bg-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#12151c]"
+              >
+                Next mission
+              </button>
+            )}
+            {run.completed && !onNext && nextHref && (
               <Link href={nextHref} className="rounded-xl bg-[#12151c] px-4 py-2 text-sm font-semibold text-white transition hover:bg-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#12151c]">
                 Next mission
               </Link>
