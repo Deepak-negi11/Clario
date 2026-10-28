@@ -6,10 +6,14 @@ import {
   getCurrentSpace,
   setAgentActivity,
 } from "../ws/presence";
+import { parseAgentGitInfo } from "./git-info";
 
 type AgentActivityBody = {
   text?: unknown;
   state?: unknown;
+  project?: unknown;
+  branch?: unknown;
+  commit?: unknown;
 };
 
 const MAX_TEXT_LENGTH = 200;
@@ -37,9 +41,11 @@ export async function handleAgentActivity(req: Request): Promise<Response> {
     return Response.json({ message: "text is required" }, { status: 400 });
   }
 
+  // Only "cooking" updates are throttled. A "done" usually arrives right after the
+  // last tool call; dropping it would leave the badge and card stuck on "cooking".
   const now = Date.now();
   const last = lastActivityAt.get(userId) ?? 0;
-  if (now - last < THROTTLE_MS) {
+  if (state === "cooking" && now - last < THROTTLE_MS) {
     return Response.json({ delivered: false, reason: "throttled" });
   }
   lastActivityAt.set(userId, now);
@@ -49,10 +55,13 @@ export async function handleAgentActivity(req: Request): Promise<Response> {
     return Response.json({ delivered: false, reason: "not-in-space" });
   }
 
+  // Project, branch and commit only describe a running agent; "done" clears them.
+  const git = state === "cooking" ? parseAgentGitInfo(body) : {};
+
   if (state === "done") {
     await clearAgentActivity(spaceId, userId);
   } else {
-    await setAgentActivity(spaceId, userId, { text, state, at: now });
+    await setAgentActivity(spaceId, userId, { text, state, at: now, ...git });
   }
 
   const message = {
@@ -62,6 +71,7 @@ export async function handleAgentActivity(req: Request): Promise<Response> {
       text: state === "done" ? "" : text,
       state,
       at: now,
+      ...git,
     },
   } as const;
 
