@@ -1,7 +1,5 @@
 # 2D Metaverse
 
-> Built on our earlier open-source project [Viora](https://github.com/Deepak-negi11/Viora). Everything added during Graphite 26 is listed in [HACKATHON_LOG.md](HACKATHON_LOG.md).
-
 A TypeScript monorepo for a simple 2D metaverse app. The backend handles auth, spaces, maps, elements, avatars, and WebSocket movement. The frontend is a Next.js app that will become the client experience.
 
 ## Repository Layout
