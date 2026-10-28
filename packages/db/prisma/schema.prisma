@@ -1,0 +1,135 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  Admin
+  User
+}
+
+model User {
+  id        String   @id @default(cuid())
+  username  String
+  password  String
+  email     String   @unique
+  role      Role     @default(User)
+  avatarId  String?
+  avatar    Avatar?  @relation(fields: [avatarId], references: [id])
+  // JSON of AvatarLook (@repo/shared): base character plus skin, hair and top colours.
+  avatarLook String?
+  spaces    Space[]
+  tasksAssigned Task[] @relation("TasksAssigned")
+  tasksReceived Task[] @relation("TasksReceived")
+  createdAt DateTime @default(now())
+}
+
+model Avatar {
+  id       String  @id @default(cuid())
+  imageUrl String?
+  name     String?
+  users    User[]
+}
+
+model Elements {
+  id       String          @id @default(cuid())
+  width    Int
+  height   Int
+  imageUrl String
+  static   Boolean
+  spaces   spaceElements[]
+  maps     mapElements[]
+}
+
+model Map {
+  id          String        @id @default(cuid())
+  name        String
+  width       Int
+  height      Int
+  thumbnail   String?
+  mapElements mapElements[]
+  spaces      Space[]
+}
+
+model Space {
+  id        String          @id @default(cuid())
+  name      String
+  width     Int
+  height    Int
+  thumbnail String?
+  creatorId String
+  creator   User            @relation(fields: [creatorId], references: [id])
+  mapId       String?
+  map         Map?            @relation(fields: [mapId], references: [id])
+  mapTemplate String          @default("classic-office")
+  elements    spaceElements[]
+  tasks       Task[]
+  createdAt DateTime        @default(now())
+}
+
+model spaceElements {
+  id        String   @id @default(cuid())
+  elementId String
+  element   Elements @relation(fields: [elementId], references: [id])
+  spaceId   String
+  space     Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  x         Int
+  y         Int
+}
+
+model mapElements {
+  id        String    @id @default(cuid())
+  mapId     String
+  map       Map       @relation(fields: [mapId], references: [id], onDelete: Cascade)
+  elementId String?
+  element   Elements? @relation(fields: [elementId], references: [id])
+  x         Int?
+  y         Int?
+}
+
+
+enum ChatScope {
+  General
+  Room
+}
+
+model ChatMessage {
+  id        String    @id @default(cuid())
+  spaceId   String
+  userId    String
+  text      String
+  scope     ChatScope @default(General)
+  roomId    String?
+  createdAt DateTime  @default(now())
+
+  @@index([spaceId, scope, roomId, createdAt])
+}
+
+enum TaskStatus {
+  Todo
+  InProgress
+  Done
+}
+
+// A task the space owner gives to someone in the space. Only the owner (Space.creatorId) assigns.
+model Task {
+  id          String     @id @default(cuid())
+  spaceId     String
+  space       Space      @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  assignerId  String
+  assigner    User       @relation("TasksAssigned", fields: [assignerId], references: [id], onDelete: Cascade)
+  assigneeId  String
+  assignee    User       @relation("TasksReceived", fields: [assigneeId], references: [id], onDelete: Cascade)
+  subject     String
+  description String     @default("")
+  status      TaskStatus @default(Todo)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([spaceId, assigneeId])
+  @@index([spaceId, assignerId])
+}
