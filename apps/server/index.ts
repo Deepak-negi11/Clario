@@ -10,6 +10,7 @@ import {
   handleBulkMetadata,
   handleGetAvatars,
   handleUpdateProfile,
+  handleGetProfile,
 } from "./src/user/user";
 import {
   handleCreateSpace,
@@ -24,6 +25,13 @@ import { makeSocketData, onMessage, onClose } from "./src/ws/ws-handler";
 import type { SocketData } from "./src/ws/room-manager";
 import { stopAllRoomEventSubscriptions } from "./src/ws/pubsub";
 import { handleAgentActivity } from "./src/agent/agent-activity";
+import { handleSendEmail } from "./src/email/email";
+import {
+  handleListTasks,
+  handleCreateTask,
+  handleUpdateTaskStatus,
+  handleDeleteTask,
+} from "./src/task/task";
 
 let activeServers = 0;
 
@@ -96,6 +104,7 @@ export function startServer(port: number) {
         OPTIONS: handleCorsPreflight,
       },
       "/api/v1/user/profile": {
+        GET: withCors(handleGetProfile),
         POST: withCors(handleUpdateProfile),
         OPTIONS: handleCorsPreflight,
       },
@@ -130,6 +139,23 @@ export function startServer(port: number) {
       },
       "/api/v1/space/:spaceId/messages": {
         GET: withCors(handleGetMessages),
+        OPTIONS: handleCorsPreflight,
+      },
+      "/api/v1/space/:spaceId/tasks": {
+        GET: withCors(handleListTasks),
+        POST: withCors(handleCreateTask),
+        OPTIONS: handleCorsPreflight,
+      },
+      "/api/v1/space/:spaceId/tasks/:taskId": {
+        DELETE: withCors(handleDeleteTask),
+        OPTIONS: handleCorsPreflight,
+      },
+      "/api/v1/space/:spaceId/tasks/:taskId/status": {
+        POST: withCors(handleUpdateTaskStatus),
+        OPTIONS: handleCorsPreflight,
+      },
+      "/api/v1/space/:spaceId/email": {
+        POST: withCors(handleSendEmail),
         OPTIONS: handleCorsPreflight,
       },
       "/api/v1/elements": { GET: withCors(handleListElements), OPTIONS: handleCorsPreflight },
