@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ImageUp, LoaderCircle, RotateCcw } from "lucide-react";
-import { AVATAR_BASES, type AvatarBase, type AvatarLook } from "@repo/shared";
-import { readPhotoLook } from "../../lib/avatar/photo-look";
+import { AVATAR_BASES, type AvatarBase, type AvatarLook, type HairShape } from "@repo/shared";
+import { readPhoto } from "../../lib/avatar/photo-detect";
 import { FRAME_HEIGHT, FRAME_WIDTH, originalLook, recolorSheet, sheetUrl } from "../../lib/avatar/recolor";
 
 const STYLE_LABELS: Record<AvatarBase, string> = {
@@ -27,6 +27,15 @@ const FACE_DETAILS = [
   { key: "glasses", label: "Glasses" },
   { key: "beard", label: "Beard" },
 ] as const;
+
+// Changes to the style's own hair. "As styled" keeps it.
+const HAIR_SHAPES: { value: HairShape | undefined; label: string }[] = [
+  { value: undefined, label: "As styled" },
+  { value: "bald", label: "Shaved" },
+  { value: "curly", label: "Curly" },
+  { value: "bun", label: "Bun" },
+];
+const SHAPE_NAMES: Record<HairShape, string> = { bald: "shaved head", curly: "curly hair", bun: "bun" };
 
 // Walking-down frames of the character sheet (see the "walk-down" animation in the map).
 const WALK_DOWN = [18, 19, 20, 21, 22, 23];
@@ -76,8 +85,14 @@ export function AvatarPicker({ look, onChange }: { look: AvatarLook; onChange: (
   const sheets = useSheets();
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [frameIndex, setFrameIndex] = useState(0);
-  const [reading, setReading] = useState(false);
+  const [stage, setStage] = useState<"loading" | "reading" | null>(null);
+  const reading = stage !== null;
   const [note, setNote] = useState<{ tone: "ok" | "warn"; text: string } | null>(null);
+  // The photo, shown beside the avatar to compare. It stays in this browser tab.
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  useEffect(() => () => {
+    if (photoUrl) URL.revokeObjectURL(photoUrl);
+  }, [photoUrl]);
 
   // Every style in the current colours, so the style buttons preview the result.
   const recolored = useMemo(() => {
@@ -100,14 +115,17 @@ export function AvatarPicker({ look, onChange }: { look: AvatarLook; onChange: (
       setNote({ tone: "warn", text: "That photo is too large. Try one under 15 MB." });
       return;
     }
-    setReading(true);
+    setStage("reading");
     setNote(null);
+    setPhotoUrl(URL.createObjectURL(file));
     try {
-      const photo = await readPhotoLook(file);
-      if (!photo) {
-        setNote({ tone: "warn", text: "Couldn't find a face in that photo. Try a front-facing one, or pick colours below." });
+      const result = await readPhoto(file, setStage);
+      if (result.method === "none") {
+        setNote({ tone: "warn", text: "Couldn't find a face in that photo. Try a clear, front-facing one, or pick below." });
         return;
       }
+      const photo = result.look;
+      const hairShape = result.method === "detected" ? result.look.hairShape : null;
       onChange({
         base: photo.style ?? look.base,
         skin: photo.skin,
@@ -115,30 +133,40 @@ export function AvatarPicker({ look, onChange }: { look: AvatarLook; onChange: (
         top: photo.top ?? look.top,
         glasses: photo.glasses,
         beard: photo.beard,
+        ...(hairShape ? { hairShape } : {}),
       });
       // Say what was read, so a wrong guess is easy to spot and undo below.
       const found = [
         "skin",
         photo.hair && "hair colour",
-        photo.style && `hairstyle (${STYLE_LABELS[photo.style].toLowerCase()})`,
+        hairShape ? SHAPE_NAMES[hairShape] : photo.style && `hairstyle (${STYLE_LABELS[photo.style].toLowerCase()})`,
         photo.glasses && "glasses",
         photo.beard && "beard",
         photo.top && "top",
       ].filter((item): item is string => Boolean(item));
       const list = found.length > 1 ? `${found.slice(0, -1).join(", ")} and ${found.at(-1)}` : found[0];
-      setNote({ tone: "ok", text: `From your photo: ${list}. Change anything below.` });
+      const how = result.method === "colours" ? " Face detection couldn't load, so this is from colours only." : "";
+      setNote({ tone: result.method === "detected" ? "ok" : "warn", text: `From your photo: ${list}.${how} Change anything below.` });
     } catch {
       setNote({ tone: "warn", text: "That file couldn't be read as an image." });
     } finally {
-      setReading(false);
+      setStage(null);
     }
   }
 
   return (
     <div className="mb-5 rounded-[14px] border border-[#e1e1e1] bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
       <div className="flex items-start gap-4">
-        <div className="grid h-[136px] w-[88px] shrink-0 place-items-center rounded-[10px] bg-[#eef0f6]">
+        <div className="relative grid h-[136px] w-[88px] shrink-0 place-items-center rounded-[10px] bg-[#eef0f6]">
           <Character sheet={recolored[look.base] ?? null} frame={WALK_DOWN[frameIndex]!} scale={4} label="Your avatar" />
+          {photoUrl && (
+            // eslint-disable-next-line @next/next/no-img-element -- a local blob URL, which next/image can't optimise
+            <img
+              src={photoUrl}
+              alt="The photo your avatar was matched to"
+              className="absolute -bottom-2 -right-2 h-11 w-11 rounded-lg object-cover ring-2 ring-white shadow-[0_2px_6px_rgba(0,0,0,0.18)]"
+            />
+          )}
         </div>
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold text-[#1a1a1a]">Your avatar</p>
@@ -185,7 +213,7 @@ export function AvatarPicker({ look, onChange }: { look: AvatarLook; onChange: (
           className="flex h-9 flex-1 cursor-pointer items-center justify-center gap-2 rounded-[10px] border border-[#c9c9c9] bg-white px-3 text-sm font-medium text-[#202020] transition hover:bg-[#f6f6f7] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#3f4ae8] disabled:cursor-wait disabled:opacity-60"
         >
           {reading ? <LoaderCircle size={16} className="animate-spin" aria-hidden="true" /> : <ImageUp size={16} aria-hidden="true" />}
-          {reading ? "Reading photo…" : "Match a photo"}
+          {stage === "loading" ? "Loading face detection…" : stage === "reading" ? "Reading photo…" : "Match a photo"}
         </button>
         <button
           type="button"
@@ -200,7 +228,11 @@ export function AvatarPicker({ look, onChange }: { look: AvatarLook; onChange: (
           <RotateCcw size={15} aria-hidden="true" />
         </button>
       </div>
-      <p className="mt-1.5 text-[11px] leading-4 text-[#7a7a7a]">Your photo stays on this device. Only the avatar made from it is saved.</p>
+      <p className="mt-1.5 text-[11px] leading-4 text-[#7a7a7a]">
+        {stage === "loading"
+          ? "The first time, this downloads the face detector (about 8 MB). Your photo isn't uploaded."
+          : "Your photo stays on this device. Only the avatar made from it is saved."}
+      </p>
       {note && (
         <p role="status" className={`mt-1.5 text-xs leading-4 ${note.tone === "ok" ? "text-[#1f7a4a]" : "text-amber-700"}`}>
           {note.text}
@@ -243,6 +275,32 @@ export function AvatarPicker({ look, onChange }: { look: AvatarLook; onChange: (
             </div>
           </div>
         ))}
+        <div className="flex items-center gap-2" role="radiogroup" aria-label="Hair shape">
+          <span className="w-9 shrink-0 text-xs font-medium text-[#606060]">Shape</span>
+          <div className="flex flex-1 flex-wrap items-center gap-1.5">
+            {HAIR_SHAPES.map(({ value, label }) => {
+              const active = look.hairShape === value;
+              return (
+                <button
+                  key={label}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  onClick={() => {
+                    const next: AvatarLook = { ...look, hairShape: value };
+                    if (!value) delete next.hairShape;
+                    onChange(next);
+                  }}
+                  className={`h-6 cursor-pointer rounded-full px-2.5 text-xs font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#3f4ae8] ${
+                    active ? "bg-[#e6e8fd] text-[#2f39c9] ring-2 ring-[#3f4ae8]" : "bg-[#f4f4f5] text-[#404040] ring-1 ring-black/10 hover:bg-[#ebebee]"
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
         <div className="flex items-center gap-2" role="group" aria-label="Face details">
           <span className="w-9 shrink-0 text-xs font-medium text-[#606060]">Face</span>
           <div className="flex flex-1 flex-wrap items-center gap-1.5">
