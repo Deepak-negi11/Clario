@@ -5,7 +5,7 @@ import Phaser from "phaser";
 import { ArenaScene } from "./scenes/arena-scene";
 import type { RefObject } from "react";
 import type { Others,Position,Reaction,AgentActivities } from "../../hooks/use-space-socket";
-import type { AvatarLook, MapTemplateId } from "@repo/shared";
+import type { AvatarLook, CustomMap, MapTemplateId } from "@repo/shared";
 import type { SceneBridge } from "./scene-bridge";
 
 type PhaserGameProps ={
@@ -25,16 +25,21 @@ type PhaserGameProps ={
     playerClickRef?:RefObject<((userId:string|null)=>void)|null>;
     bridgeRef?:RefObject<SceneBridge>;
     selfId?: string | null;
+    // The layout of a map built in the map builder ("custom-office" spaces).
+    customMap?: CustomMap | null;
     // Called once the map scene has loaded its art and drawn itself.
     onReady?: () => void;
 }
 
-export function PhaserGame({mapTemplate = "classic-office",othersRef,selfRef,moveRef,namesRef,looksRef,nearbyRef,reactionsRef,activitiesRef,playerClickRef,bridgeRef,selfId,onReady}:PhaserGameProps){
+export function PhaserGame({mapTemplate = "classic-office",othersRef,selfRef,moveRef,namesRef,looksRef,nearbyRef,reactionsRef,activitiesRef,playerClickRef,bridgeRef,selfId,customMap,onReady}:PhaserGameProps){
 
 
     const containerRef = useRef<HTMLDivElement | null>(null);
 
     // Kept in a ref so a new callback each render doesn't restart the game.
+    // Read at boot through a ref, so a new layout redraws the map instead of restarting the game.
+    const customMapRef = useRef(customMap);
+    customMapRef.current = customMap;
     const onReadyRef = useRef(onReady);
     onReadyRef.current = onReady;
 
@@ -77,6 +82,7 @@ export function PhaserGame({mapTemplate = "classic-office",othersRef,selfRef,mov
                     game.registry.set("activitiesRef" , activitiesRef);
                     game.registry.set("playerClickRef" , playerClickRef);
                     game.registry.set("bridgeRef" , bridgeRef);
+                    game.registry.set("customMap", customMapRef.current ?? null);
                 },
                 postBoot:(game) =>{
                     // The scene is still loading its images here; report ready when create() has run.
@@ -102,6 +108,11 @@ export function PhaserGame({mapTemplate = "classic-office",othersRef,selfRef,mov
             gameRef.current.registry.set("selfId", selfId);
         }
     }, [selfId]);
+
+    // The scene listens for this and redraws the map in place.
+    useEffect(() => {
+        if (gameRef.current && customMap) gameRef.current.registry.set("customMap", customMap);
+    }, [customMap]);
 
     return <div ref ={containerRef} className="h-full w-full"/>
 

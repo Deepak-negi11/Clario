@@ -5,10 +5,10 @@ import type Phaser from "phaser";
 const ART_PX = 2;
 const EMPTY = -1;
 
-const darken = (color: number, f: number) =>
+export const darken = (color: number, f: number) =>
     (Math.round(((color >> 16) & 255) * f) << 16) | (Math.round(((color >> 8) & 255) * f) << 8) | Math.round((color & 255) * f);
 
-class PixelSprite {
+export class PixelSprite {
     private readonly px: Int32Array;
 
     constructor(readonly w: number, readonly h: number) {
@@ -116,7 +116,7 @@ class PixelSprite {
     }
 }
 
-type Upholstery = { hi: number; base: number; shade: number; deep: number; line: number };
+export type Upholstery = { hi: number; base: number; shade: number; deep: number; line: number };
 
 const UPHOLSTERY = {
     tan: { hi: 0xdcaa7c, base: 0xc18b5e, shade: 0xa06c46, deep: 0x845537, line: 0x4f3222 },
@@ -328,7 +328,7 @@ function cubeShelf() {
 }
 
 // Leafy plant in a white ceramic pot. `scale` 1 is the big lounge plant.
-function leafyPlant(w: number, h: number, scale: number) {
+export function leafyPlant(w: number, h: number, scale: number) {
     const s = new PixelSprite(w, h);
     const cx = w / 2;
     const potW = Math.max(4, Math.round(8 * scale));

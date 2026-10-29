@@ -2,11 +2,17 @@ import Phaser from "phaser";
 import {
   HQ_FLOORS, HQ_ITEMS, HQ_PATH, HQ_RUGS, HQ_TALL_WALLS, HQ_THIN_WALLS, HQ_TREES, HQ_WALL_DECOR,
   ITEM_SPECS, hqWallCells,
-  type Dir, type Fabric, type FloorKind, type HqItem, type RugStyle, type WallStyle,
+  type Dir, type Fabric, type HqItem, type ItemKind, type RugStyle, type ThinWallStyle, type WallStyle,
 } from "../../../lib/maps/clario-hq";
+import { FLOOR_COLORS } from "../../../lib/maps/floor-colors";
+import { drawFloorPattern, PATTERNED_FLOORS } from "../../../lib/maps/floor-patterns";
+import { makeOfficeTextures } from "./office-art";
+import { drawPartitions } from "./open-desks-art";
+import { makeReferenceTextures } from "./reference-art";
 
 // Draws the Clario HQ map: tall walls with windows, patterned floors, rugs and
-// furniture, all painted in code. Layout comes from lib/maps/clario-hq.ts.
+// furniture, all painted in code. Layout comes from lib/maps/clario-hq.ts. Seats, tables,
+// shelves and plants are drawn in office-art.ts; the rest of the furniture is drawn here.
 
 const TILE = 32;
 const P = 2; // one art pixel = 2x2 world pixels, same as the avatars
@@ -18,11 +24,7 @@ export type HqSceneApi = {
   shadow: (cx: number, bottomY: number, width: number) => void;
 };
 
-export const HQ_FLOOR_COLORS: Record<FloorKind, number> = {
-  wood: 0xd8a86f, carpet: 0x8e9bb5, tile: 0xece9e2, herringbone: 0xb27d4f,
-  terrazzo: 0xe2dfd8, sage: 0xa7bb9c, arcade: 0x1f418a, sand: 0xe2d2b4, office: 0xc4cad5,
-  raised: 0x9aa3ae, concrete: 0xb9b7b2, teal: 0x5fa8a0,
-};
+export const HQ_FLOOR_COLORS = FLOOR_COLORS;
 
 const C = {
   ink: 0x2a2e38, white: 0xf8f6f1, off: 0xe7e2d8, grey: 0xd3d7de, greyMid: 0xa9afbb, greyDark: 0x6c7282, metal: 0x9aa3b2,
@@ -30,15 +32,6 @@ const C = {
   screen: 0x6fb5e0, screenHi: 0xbce4f6, screenDark: 0x3f7fae,
   leafDark: 0x2c6e47, leaf: 0x42a061, leafHi: 0x7fcb8f, pot: 0xf1eee8, potShade: 0xd3cec4, terra: 0xc8714b, terraDark: 0x9a5034,
   accent: 0x3a6ee8, red: 0xd9534f, yellow: 0xf2c14e, green: 0x4caf6d, purple: 0x7a5fd0, pink: 0xe58fb0, cyan: 0x3fc5d6,
-};
-
-const FABRICS: Record<Fabric, { dark: number; mid: number; light: number }> = {
-  navy: { dark: 0x27355f, mid: 0x3a4f8a, light: 0x5d74b3 },
-  coral: { dark: 0xa8473c, mid: 0xd4675a, light: 0xee9584 },
-  teal: { dark: 0x1d6862, mid: 0x2c8c84, light: 0x56b2a8 },
-  mustard: { dark: 0xa8761c, mid: 0xd29c33, light: 0xeec463 },
-  sage: { dark: 0x56724f, mid: 0x76946d, light: 0x9fba95 },
-  grey: { dark: 0x4d5260, mid: 0x6c7282, light: 0x9198a8 },
 };
 
 type Px = (color: number, x: number, y: number, w?: number, h?: number) => void;
@@ -55,6 +48,8 @@ export function makeHqTextures(scene: Phaser.Scene) {
   if (scene.textures.exists("hq-desk-l")) return;
   makeFloors(scene);
   makeFurniture(scene);
+  makeOfficeTextures(scene);
+  makeReferenceTextures(scene);
 }
 
 function makeFloors(scene: Phaser.Scene) {
@@ -193,6 +188,37 @@ function makeFloors(scene: Phaser.Scene) {
   fill(0xdcd7cc, 1, 1, 13, 1); fill(0xdcd7cc, 17, 1, 13, 1);
   g.generateTexture("hq-path", 32, 32);
 
+  // Cubicles: grey carpet with a zigzag weave.
+  g.clear();
+  fill(0xa9b0b6, 0, 0, 64, 64);
+  for (let band = 0; band < 64; band += 8) {
+    for (let x = 0; x < 64; x++) {
+      const dy = Math.abs((x % 8) - 4);
+      fill(0x99a0a7, x, (band + dy) % 64, 1, 2);
+      fill(0xb7bec3, x, (band + dy + 4) % 64, 1, 1);
+    }
+  }
+  g.generateTexture("hq-floor-zigzag", 64, 64);
+
+  // Coffee Corner: pale porcelain tiles with a bevel and grout lines.
+  g.clear();
+  for (let tx = 0; tx < 4; tx++) for (let ty = 0; ty < 4; ty++) {
+    const x0 = tx * 16, y0 = ty * 16;
+    fill((tx + ty) % 2 ? 0xdfe4ee : 0xe5e9f2, x0, y0, 16, 16);
+    fill(0xf3f5fa, x0 + 1, y0 + 1, 14, 1); fill(0xf3f5fa, x0 + 1, y0 + 1, 1, 14);
+    fill(0xcfd5e0, x0 + 1, y0 + 14, 14, 1); fill(0xcfd5e0, x0 + 14, y0 + 1, 1, 14);
+    fill(0xbcc4d1, x0, y0 + 15, 16, 1); fill(0xbcc4d1, x0 + 15, y0, 1, 16);
+  }
+  g.generateTexture("hq-floor-porcelain", 64, 64);
+
+  // The auditorium's parquet, the study's cross tiles and the conference room's carpet,
+  // shared with the 3D view.
+  for (const kind of PATTERNED_FLOORS) {
+    g.clear();
+    drawFloorPattern(kind, fill);
+    g.generateTexture(`hq-floor-${kind}`, 64, 64);
+  }
+
   g.destroy();
 }
 
@@ -220,13 +246,6 @@ function makeFurniture(scene: Phaser.Scene) {
       if (half > 0) px(color, Math.round(cx - half), Math.round(cy + dy), half * 2, 1);
     }
   };
-  const leaves = (px: Px, spots: [number, number, number][]) => {
-    for (const [x, y, r] of spots) blob(px, C.ink, x, y, r + 1);
-    for (const [x, y, r] of spots) blob(px, C.leafDark, x, y, r);
-    for (const [x, y, r] of spots) blob(px, C.leaf, x - 0.5, y - 0.5, r - 1);
-    for (const [x, y, r] of spots) if (r >= 3) blob(px, C.leafHi, x - 1, y - 1.5, Math.max(1, r - 3));
-  };
-
   // Desk with a monitor on the left half; the right one is mirrored.
   const desk = (px: Px) => {
     px(C.ink, 2, 23, 2, 7); px(C.ink, 28, 23, 2, 7); px(C.greyDark, 2, 23, 1, 7); px(C.greyDark, 28, 23, 1, 7);
@@ -245,104 +264,6 @@ function makeFurniture(scene: Phaser.Scene) {
   make("hq-desk-l", 32, 30, desk);
   make("hq-desk-r", 32, 30, desk, true);
 
-  for (const [name, fabric] of Object.entries(FABRICS)) {
-    const f = fabric;
-    // Meeting chair, front and back.
-    make(`hq-meet-chair-${name}-down`, 16, 20, (px) => {
-      round(px, C.ink, 3, 1, 10, 9); round(px, f.mid, 4, 2, 8, 7); px(f.light, 5, 2, 6, 1);
-      round(px, C.ink, 2, 9, 12, 6); px(f.light, 3, 10, 10, 3); px(f.mid, 3, 13, 10, 1);
-      px(C.ink, 3, 15, 1, 5); px(C.ink, 12, 15, 1, 5); px(C.greyDark, 5, 15, 1, 4); px(C.greyDark, 10, 15, 1, 4);
-    });
-    make(`hq-meet-chair-${name}-up`, 16, 20, (px) => {
-      round(px, C.ink, 2, 8, 12, 6); px(f.mid, 3, 9, 10, 4);
-      round(px, C.ink, 3, 1, 10, 13); round(px, f.dark, 4, 2, 8, 11); px(f.mid, 4, 2, 8, 1); px(f.mid, 7, 5, 2, 5);
-      px(C.ink, 3, 14, 1, 6); px(C.ink, 12, 14, 1, 6);
-    });
-
-    // Three-seat sofa: facing you, and seen from behind.
-    make(`hq-sofa-${name}-down`, 48, 26, (px) => {
-      round(px, C.ink, 3, 0, 42, 13); px(f.mid, 4, 1, 40, 11); px(f.light, 4, 1, 40, 2);
-      px(f.dark, 16, 3, 1, 9); px(f.dark, 32, 3, 1, 9);
-      px(C.ink, 4, 11, 40, 12); px(f.light, 5, 12, 38, 5); px(f.mid, 5, 17, 38, 4); px(f.dark, 5, 21, 38, 1);
-      px(f.mid, 16, 12, 1, 5); px(f.mid, 32, 12, 1, 5);
-      round(px, C.ink, 0, 7, 7, 17); px(f.mid, 1, 8, 5, 15); px(f.light, 1, 8, 5, 2); px(f.dark, 1, 22, 5, 1);
-      round(px, C.ink, 41, 7, 7, 17); px(f.mid, 42, 8, 5, 15); px(f.light, 42, 8, 5, 2); px(f.dark, 42, 22, 5, 1);
-      px(C.woodDeep, 2, 24, 2, 2); px(C.woodDeep, 44, 24, 2, 2);
-    });
-    make(`hq-sofa-${name}-up`, 48, 26, (px) => {
-      round(px, C.ink, 0, 3, 7, 17); px(f.mid, 1, 4, 5, 15); px(f.light, 1, 4, 5, 2);
-      round(px, C.ink, 41, 3, 7, 17); px(f.mid, 42, 4, 5, 15); px(f.light, 42, 4, 5, 2);
-      px(C.ink, 4, 3, 40, 9); px(f.light, 5, 4, 38, 7); px(f.mid, 16, 4, 1, 7); px(f.mid, 32, 4, 1, 7);
-      round(px, C.ink, 3, 9, 42, 14); px(f.dark, 4, 10, 40, 12); px(f.mid, 4, 10, 40, 2);
-      px(C.woodDeep, 3, 23, 2, 3); px(C.woodDeep, 43, 23, 2, 3);
-    });
-
-    // Armchair in four directions (right is the mirrored left).
-    make(`hq-armchair-${name}-down`, 18, 22, (px) => {
-      round(px, C.ink, 3, 0, 12, 11); px(f.mid, 4, 1, 10, 9); px(f.light, 4, 1, 10, 2);
-      px(C.ink, 3, 9, 12, 8); px(f.light, 4, 10, 10, 4); px(f.mid, 4, 14, 10, 2);
-      round(px, C.ink, 0, 6, 5, 13); px(f.mid, 1, 7, 3, 11); px(f.light, 1, 7, 3, 1);
-      round(px, C.ink, 13, 6, 5, 13); px(f.mid, 14, 7, 3, 11); px(f.light, 14, 7, 3, 1);
-      px(C.woodDeep, 2, 19, 2, 3); px(C.woodDeep, 14, 19, 2, 3);
-    });
-    make(`hq-armchair-${name}-up`, 18, 22, (px) => {
-      round(px, C.ink, 0, 3, 5, 13); px(f.mid, 1, 4, 3, 11);
-      round(px, C.ink, 13, 3, 5, 13); px(f.mid, 14, 4, 3, 11);
-      px(C.ink, 3, 3, 12, 7); px(f.light, 4, 4, 10, 5);
-      round(px, C.ink, 2, 8, 14, 12); px(f.dark, 3, 9, 12, 10); px(f.mid, 3, 9, 12, 1);
-      px(C.woodDeep, 2, 19, 2, 3); px(C.woodDeep, 14, 19, 2, 3);
-    });
-    const side = (px: Px) => {
-      round(px, C.ink, 12, 0, 6, 18); px(f.mid, 13, 1, 4, 16); px(f.light, 13, 1, 1, 16);
-      round(px, C.ink, 1, 9, 14, 9); px(f.light, 2, 10, 12, 3); px(f.mid, 2, 13, 12, 4);
-      round(px, C.ink, 2, 6, 13, 5); px(f.mid, 3, 7, 11, 3); px(f.light, 3, 7, 11, 1);
-      px(C.woodDeep, 2, 18, 2, 4); px(C.woodDeep, 14, 18, 2, 4);
-    };
-    make(`hq-armchair-${name}-left`, 18, 22, side);
-    make(`hq-armchair-${name}-right`, 18, 22, side, true);
-
-    make(`hq-beanbag-${name}`, 16, 14, (px) => {
-      blob(px, C.ink, 8, 8, 7.5, 5.5); blob(px, f.mid, 8, 8, 6.5, 4.5);
-      blob(px, f.light, 6.5, 6.5, 3.5, 2); px(f.dark, 5, 10, 6, 1);
-    });
-  }
-
-  // Long and short meeting tables: notebooks on the far side, laptops on the near side.
-  const meetingTable = (seats: number) => (px: Px) => {
-    const w = seats * 16;
-    px(C.ink, 3, 32, 3, 8); px(C.ink, w - 6, 32, 3, 8);
-    px(C.ink, 0, 4, w, 29);
-    px(C.woodTop, 1, 5, w - 2, 22); px(C.woodHi, 1, 5, w - 2, 1);
-    for (let i = 0; i < seats; i += 2) px(C.wood, 6 + i * 16, 15 + (i % 4), 18, 1);
-    px(C.wood, 1, 27, w - 2, 1); px(C.woodEdge, 1, 28, w - 2, 4); px(C.woodDark, 1, 31, w - 2, 1);
-    px(C.ink, w / 2 - 4, 13, 8, 4); px(C.greyDark, w / 2 - 3, 14, 6, 2); px(C.cyan, w / 2 - 1, 14, 2, 1);
-    for (let i = 0; i < seats; i++) {
-      const cx = 8 + i * 16;
-      px(C.white, cx - 3, 6, 6, 4); px(C.grey, cx - 2, 7, 4, 1); px(C.grey, cx - 2, 8, 3, 1); px(C.accent, cx + 3, 6, 1, 3);
-      px(C.ink, cx - 5, 17, 10, 6); px(C.screen, cx - 4, 18, 8, 4); px(C.screenHi, cx - 4, 18, 8, 1);
-      px(C.greyMid, cx - 5, 23, 10, 2); px(C.grey, cx - 5, 23, 10, 1);
-      if (i % 2 === 0) { px(C.ink, cx + 5, 11, 3, 4); px(C.screenHi, cx + 6, 12, 1, 2); }
-    }
-  };
-  make("hq-meeting-table", 96, 40, meetingTable(6));
-  make("hq-meeting-table-sm", 64, 40, meetingTable(4));
-
-  make("hq-coffee-table", 48, 18, (px) => {
-    px(C.woodDeep, 3, 13, 2, 5); px(C.woodDeep, 43, 13, 2, 5);
-    px(C.ink, 1, 3, 46, 11); px(C.woodTop, 2, 4, 44, 6); px(C.woodHi, 2, 4, 44, 1);
-    px(C.woodEdge, 2, 10, 44, 3); px(C.woodDark, 2, 12, 44, 1);
-    px(C.accent, 7, 5, 7, 4); px(C.white, 8, 6, 4, 1); px(C.yellow, 11, 7, 6, 3);
-    px(C.ink, 22, 5, 4, 4); px(C.white, 23, 6, 2, 2);
-    px(C.ink, 33, 6, 8, 4); px(C.pot, 34, 7, 6, 2);
-    blob(px, C.leafDark, 37, 4, 3.5, 2.5); blob(px, C.leaf, 36.5, 3.5, 2, 1.5);
-  });
-
-  make("hq-side-table", 14, 18, (px) => {
-    px(C.woodDeep, 6, 10, 2, 7); px(C.woodDeep, 4, 16, 6, 2);
-    blob(px, C.ink, 7, 9, 6.5, 3); blob(px, C.woodTop, 7, 8.5, 5.5, 2); px(C.woodEdge, 2, 10, 10, 1);
-    px(C.ink, 3, 0, 8, 6); px(0xf6e3b8, 4, 1, 6, 4); px(0xfff4dc, 4, 1, 6, 1); px(C.ink, 6, 6, 2, 3);
-  });
-
   make("hq-tv-console", 48, 36, (px) => {
     px(C.ink, 2, 25, 44, 9); px(C.woodTop, 3, 26, 42, 2); px(C.woodEdge, 3, 28, 42, 5);
     px(C.woodDark, 17, 28, 1, 5); px(C.woodDark, 31, 28, 1, 5); px(C.ink, 4, 34, 2, 2); px(C.ink, 42, 34, 2, 2);
@@ -351,47 +272,6 @@ function makeFurniture(scene: Phaser.Scene) {
     blob(px, C.yellow, 33, 7, 2.5); px(C.white, 12, 5, 6, 2); px(C.white, 14, 4, 3, 1);
     px(C.ink, 22, 23, 4, 2);
     px(C.ink, 40, 20, 5, 5); px(C.terra, 41, 21, 3, 3); blob(px, C.leafDark, 42.5, 18, 3, 2.5); blob(px, C.leaf, 42, 17.5, 1.5, 1.5);
-  });
-
-  make("hq-bookshelf", 32, 44, (px) => {
-    const rand = seeded(5);
-    px(C.ink, 0, 0, 32, 44); px(C.woodDark, 1, 1, 30, 42); px(C.woodDeep, 2, 2, 28, 38);
-    px(C.woodEdge, 1, 1, 30, 1);
-    const colors = [C.red, C.accent, C.yellow, C.green, 0xe9e2d0, C.purple, C.terra, C.cyan, 0x3e4553];
-    for (const [shelfTop, shelfBottom] of [[2, 12], [15, 25], [28, 38]] as const) {
-      let x = 2;
-      while (x < 29) {
-        if (rand() < 0.12 && x < 24) {
-          px(C.pot, x + 1, shelfBottom - 3, 4, 4); blob(px, C.leaf, x + 3, shelfBottom - 5, 2.5, 2);
-          x += 6;
-          continue;
-        }
-        const w = rand() < 0.4 ? 3 : 2;
-        const h = 6 + Math.floor(rand() * 4);
-        const color = colors[Math.floor(rand() * colors.length)]!;
-        px(color, x, shelfBottom - h + 1, Math.min(w, 30 - x), h);
-        px(0x1f2229, x, shelfBottom - h + 1, 1, h);
-        x += w;
-      }
-      px(C.woodEdge, 1, shelfBottom + 1, 30, 2);
-      px(C.woodEdge, 1, shelfTop - 1, 30, 1);
-    }
-    px(C.woodDeep, 1, 41, 30, 2);
-  });
-
-  make("hq-plant-big", 20, 32, (px) => {
-    round(px, C.ink, 4, 20, 12, 12); px(C.pot, 5, 21, 10, 10); px(C.potShade, 12, 21, 3, 10); px(C.white, 5, 21, 10, 1);
-    px(C.leafDark, 9, 15, 2, 6);
-    leaves(px, [[10, 11, 5], [5, 13, 3.5], [15, 13, 3.5], [7, 6, 3.5], [13, 6, 3.5], [10, 3, 2.5]]);
-  });
-  make("hq-plant-small", 14, 16, (px) => {
-    round(px, C.ink, 3, 9, 8, 7); px(C.terra, 4, 10, 6, 5); px(C.terraDark, 8, 10, 2, 5); px(0xdc8a63, 4, 10, 6, 1);
-    leaves(px, [[7, 6, 3.5], [4, 7, 2], [10, 7, 2]]);
-  });
-  make("hq-plant-tree", 20, 46, (px) => {
-    round(px, C.ink, 4, 36, 12, 10); px(C.terra, 5, 37, 10, 8); px(C.terraDark, 12, 37, 3, 8); px(0xdc8a63, 5, 37, 10, 1);
-    px(C.woodDeep, 9, 16, 2, 21);
-    leaves(px, [[10, 6, 4.5], [5, 12, 3.5], [15, 11, 3.5], [7, 19, 3.5], [14, 20, 3], [10, 26, 2.5], [11, 14, 3]]);
   });
 
   make("hq-floor-lamp", 12, 36, (px) => {
@@ -439,24 +319,6 @@ function makeFurniture(scene: Phaser.Scene) {
     px(C.ink, 7, 4, 3, 3); px(C.terra, 8, 5, 1, 1); px(C.ink, 22, 5, 3, 3); px(C.accent, 23, 5, 1, 1);
     blob(px, C.grey, 16, 6, 3, 1.5);
   });
-  // Facing you: the backrest stands behind the seat, so it shows above it.
-  make("hq-cafe-chair-down", 14, 18, (px) => {
-    px(C.ink, 2, 0, 10, 8); px(C.wood, 3, 1, 8, 6); px(C.woodHi, 3, 1, 8, 1);
-    px(C.woodDark, 5, 3, 1, 4); px(C.woodDark, 8, 3, 1, 4);
-    px(C.ink, 1, 7, 12, 5); px(C.woodTop, 2, 8, 10, 2); px(C.woodHi, 2, 8, 10, 1); px(C.woodEdge, 2, 10, 10, 1);
-    px(C.woodDeep, 4, 12, 1, 3); px(C.woodDeep, 9, 12, 1, 3);
-    px(C.ink, 2, 12, 1, 6); px(C.ink, 11, 12, 1, 6);
-  });
-  // Seen from behind: the backrest is nearest you and hides the seat. Only the seat's side
-  // edges show beside it, and the legs below it.
-  make("hq-cafe-chair-up", 14, 18, (px) => {
-    px(C.ink, 0, 8, 14, 4); px(C.woodEdge, 1, 9, 12, 2);
-    px(C.woodDeep, 4, 12, 1, 3); px(C.woodDeep, 9, 12, 1, 3);
-    px(C.ink, 2, 1, 10, 12); px(C.wood, 3, 2, 8, 10); px(C.woodHi, 3, 2, 8, 1);
-    px(C.woodDark, 5, 4, 1, 7); px(C.woodDark, 8, 4, 1, 7); px(C.woodEdge, 3, 11, 8, 1);
-    px(C.ink, 2, 13, 2, 5); px(C.ink, 10, 13, 2, 5);
-  });
-
   make("hq-reception-desk", 64, 44, (px) => {
     px(C.ink, 26, 1, 12, 9); px(C.greyMid, 27, 2, 10, 7); px(C.ink, 31, 10, 2, 2);
     px(C.ink, 0, 8, 64, 34);
@@ -470,17 +332,18 @@ function makeFurniture(scene: Phaser.Scene) {
     px(C.white, 8, 11, 6, 4); px(C.grey, 9, 12, 4, 1); px(C.accent, 16, 12, 1, 3);
   });
 
-  // Ping-pong table: blue top with white lines, a net across the middle with its posts,
-  // a thick apron and steel legs on castors. Two bats and a ball are left on it.
-  make("hq-pingpong", 48, 40, (px) => {
+  // Ping-pong table: a blue top (green in Open Desks' lounge, variant 1) with white lines, a net
+  // across the middle with its posts, a thick apron and steel legs on castors. Two bats and a
+  // ball are left on it.
+  const pingpong = (top: { mid: number; hi: number; lo: number; edge: number; apron: number; apronLo: number; apronHi: number }) => (px: Px) => {
     px(C.greyDark, 9, 27, 2, 7); px(C.greyDark, 37, 27, 2, 7); px(C.greyDark, 11, 31, 26, 1);
     px(C.ink, 0, 4, 48, 26);
-    px(0x1e3a6e, 1, 5, 46, 21); px(0x284b88, 1, 5, 46, 2); px(0x1a335f, 1, 20, 46, 6);
+    px(top.mid, 1, 5, 46, 21); px(top.hi, 1, 5, 46, 2); px(top.lo, 1, 20, 46, 6);
     px(C.white, 2, 6, 44, 1); px(C.white, 2, 24, 44, 1); px(C.white, 2, 6, 1, 19); px(C.white, 45, 6, 1, 19);
     px(0xcfe0f2, 3, 15, 42, 1);
-    px(0x142a50, 1, 26, 46, 3); px(0x0f2040, 1, 28, 46, 1); px(0x2a4f8c, 1, 26, 46, 1);
+    px(top.apron, 1, 26, 46, 3); px(top.apronLo, 1, 28, 46, 1); px(top.apronHi, 1, 26, 46, 1);
     // The net and its shadow.
-    px(0x152c55, 25, 6, 2, 19);
+    px(top.edge, 25, 6, 2, 19);
     px(C.ink, 22, 1, 4, 28); px(0xe9edf2, 23, 2, 2, 25);
     for (let y = 3; y < 26; y += 2) { px(0xaab3c2, 23, y, 1, 1); px(0xaab3c2, 24, y + 1, 1, 1); }
     px(C.white, 23, 2, 2, 1); px(C.greyMid, 22, 0, 4, 2); px(C.greyMid, 22, 27, 4, 2);
@@ -489,11 +352,13 @@ function makeFurniture(scene: Phaser.Scene) {
     px(C.ink, 14, 14, 4, 3); px(C.woodTop, 15, 15, 2, 1);
     blob(px, C.ink, 37, 19, 4, 3.5); blob(px, 0x343946, 37, 18.5, 3, 2.5); px(0x5a606e, 36, 17, 2, 1);
     px(C.ink, 30, 20, 4, 3); px(C.woodTop, 31, 21, 2, 1);
-    px(0x152c55, 31, 12, 2, 1); px(C.ink, 30, 8, 3, 3); px(C.white, 31, 9, 1, 1);
+    px(top.edge, 31, 12, 2, 1); px(C.ink, 30, 8, 3, 3); px(C.white, 31, 9, 1, 1);
     // Near legs on castors.
     px(C.ink, 4, 29, 3, 9); px(C.greyMid, 5, 29, 1, 8); px(C.ink, 41, 29, 3, 9); px(C.greyMid, 42, 29, 1, 8);
     px(C.ink, 3, 37, 5, 3); px(C.ink, 40, 37, 5, 3);
-  });
+  };
+  make("hq-pingpong", 48, 40, pingpong({ mid: 0x1e3a6e, hi: 0x284b88, lo: 0x1a335f, edge: 0x152c55, apron: 0x142a50, apronLo: 0x0f2040, apronHi: 0x2a4f8c }));
+  make("hq-pingpong-green", 48, 40, pingpong({ mid: 0x4f9a63, hi: 0x63b177, lo: 0x438655, edge: 0x2f6a40, apron: 0x2f6a40, apronLo: 0x234f30, apronHi: 0x4a8f5c }));
 
   // Arcade cabinets: a lit marquee, a glowing screen with its own game, a control deck that
   // sticks out toward you, and a coin door. The right side is in shade so they read as boxes.
@@ -613,6 +478,77 @@ function makeFurniture(scene: Phaser.Scene) {
     px(C.greyDark, 1, 6, 1, 3); px(C.greyDark, 14, 6, 1, 3);
     px(C.ink, 2, 14, 3, 5); px(0xe85d9b, 3, 15, 1, 2); px(C.ink, 11, 14, 3, 5); px(0x3fc5d6, 12, 15, 1, 2);
   });
+
+  // Sizes: one art pixel is P world pixels and a tile is 16 art pixels, so a w-tile-wide item is
+  // 16 * w art pixels wide. Tall things rise above their footprint, like the furniture does.
+
+  // Park bench (2 tiles): wooden slats on black iron legs, seen from the front.
+  make("hq-bench", 32, 18, (px) => {
+    px(C.ink, 2, 1, 28, 6); px(C.wood, 3, 2, 26, 1); px(C.woodTop, 3, 4, 26, 2);
+    px(C.ink, 1, 7, 30, 5); px(C.woodTop, 2, 8, 28, 2); px(C.woodDark, 2, 10, 28, 1);
+    for (const x of [3, 27]) { px(C.ink, x, 6, 2, 12); px(0x3a3f4b, x, 7, 1, 10); }
+  });
+
+  // Street lamp: a dark pole with a warm glass lantern.
+  make("hq-lamp-post", 16, 44, (px) => {
+    px(C.ink, 5, 41, 6, 3); px(0x3a3f4b, 6, 41, 4, 2);
+    px(C.ink, 7, 11, 2, 31); px(0x4a4f5e, 7, 11, 1, 31);
+    px(C.ink, 4, 3, 8, 9); px(0xfff1c4, 5, 4, 6, 7); px(0xffe08a, 5, 8, 6, 3); px(C.ink, 4, 1, 8, 2); px(C.ink, 7, 0, 2, 1);
+  });
+
+  // Fountain (3x3 tiles): a round stone basin with water and a centre spout.
+  make("hq-fountain", 48, 56, (px) => {
+    blob(px, 0x8f8a80, 24, 38, 23, 15); blob(px, 0xc9c4b8, 24, 36, 22, 13.5); blob(px, 0xb7b1a4, 24, 37, 18, 10.5);
+    blob(px, 0x5fb2e3, 24, 37, 17, 9.5); blob(px, 0x8fd0f0, 21, 35, 9, 3.5);
+    px(0xb7b1a4, 21, 16, 6, 20); px(0xd9d4c8, 21, 16, 2, 20); blob(px, 0xc9c4b8, 24, 16, 6, 3);
+    blob(px, 0x8fd0f0, 24, 12, 3, 4); for (const x of [17, 31]) px(0x8fd0f0, x, 20, 1, 14);
+  });
+
+  // Buildings, seen from the front: the roof on top, then the front wall with its door and
+  // windows along the bottom of the footprint.
+  const building = (
+    key: string, w: number, h: number,
+    look: { roof: number; roofDark: number; wall: number; wallDark: number; trim: number },
+    extra: (px: Px, wallTop: number) => void,
+  ) => make(key, w, h, (px) => {
+    const wallTop = Math.round(h * 0.45);
+    px(C.ink, 0, 0, w, wallTop + 1); px(look.roof, 1, 1, w - 2, wallTop - 1);
+    for (let y = 3; y < wallTop - 1; y += 3) px(look.roofDark, 1, y, w - 2, 1);
+    px(look.roofDark, 1, wallTop - 2, w - 2, 2);
+    px(C.ink, 1, wallTop + 1, w - 2, h - wallTop - 1); px(look.wall, 2, wallTop + 1, w - 4, h - wallTop - 2);
+    px(look.wallDark, 2, h - 3, w - 4, 2); px(look.trim, 2, wallTop + 1, w - 4, 1);
+    extra(px, wallTop);
+  });
+  const windowAt = (px: Px, x: number, y: number, w: number, hh: number) => {
+    px(C.ink, x, y, w, hh); px(0x9fd3ef, x + 1, y + 1, w - 2, hh - 2); px(0xd4effb, x + 1, y + 1, w - 2, 1);
+    px(C.white, x + Math.floor(w / 2), y + 1, 1, hh - 2);
+  };
+  const doorAt = (px: Px, x: number, h: number, color: number) => {
+    px(C.ink, x, h - 14, 9, 13); px(color, x + 1, h - 13, 7, 12); px(C.yellow, x + 6, h - 8, 1, 1);
+  };
+
+  // House, shop and cafe stand on 5 x 4 tiles (80 x 64 art pixels) and rise 2 tiles above it.
+  building("hq-house", 80, 96, { roof: 0xc0473f, roofDark: 0x92322c, wall: 0xf3e6cf, wallDark: 0xd8c7a6, trim: 0xffffff }, (px) => {
+    windowAt(px, 10, 60, 16, 12); windowAt(px, 54, 60, 16, 12); doorAt(px, 36, 96, 0x6b4a2f);
+    px(C.ink, 60, 4, 8, 12); px(0x9a5034, 61, 5, 6, 11);
+  });
+  building("hq-shop", 80, 96, { roof: 0x4f5566, roofDark: 0x3a3f4b, wall: 0xe8edf2, wallDark: 0xc7d0da, trim: 0x3686ff }, (px, top) => {
+    for (let x = 2; x < 78; x += 6) px((x / 6) % 2 < 1 ? 0x3686ff : C.white, x, top + 2, 6, 6);
+    px(C.ink, 2, top + 8, 76, 1);
+    windowAt(px, 6, 64, 24, 18); windowAt(px, 50, 64, 24, 18); doorAt(px, 36, 96, 0x3686ff);
+    px(C.ink, 24, top + 11, 32, 7); px(0x3686ff, 25, top + 12, 30, 5); px(C.white, 30, top + 14, 20, 1);
+  });
+  building("hq-cafe", 80, 96, { roof: 0x2c8c84, roofDark: 0x1d6862, wall: 0xf6efe2, wallDark: 0xdccfb5, trim: 0xd29c33 }, (px, top) => {
+    for (let x = 2; x < 78; x += 6) px((x / 6) % 2 < 1 ? 0xd4675a : C.white, x, top + 2, 6, 6);
+    windowAt(px, 8, 62, 18, 16); windowAt(px, 54, 62, 18, 16); doorAt(px, 36, 96, 0x2c8c84);
+    px(C.ink, 28, top + 11, 24, 7); px(C.woodEdge, 29, top + 12, 22, 5); px(C.white, 33, top + 14, 14, 1);
+  });
+  // Office block: 6 x 5 tiles (96 x 80 art pixels), three tiles taller.
+  building("hq-office-block", 96, 128, { roof: 0x5c6371, roofDark: 0x4a505e, wall: 0x9fb4c7, wallDark: 0x7d93a8, trim: 0x2a2e38 }, (px, top) => {
+    for (let y = top + 5; y < 108; y += 11) for (let x = 6; x < 88; x += 12) windowAt(px, x, y, 9, 8);
+    doorAt(px, 38, 128, 0x2a2e38); doorAt(px, 48, 128, 0x2a2e38);
+    px(C.ink, 30, top - 8, 36, 6); px(C.accent, 31, top - 7, 34, 4); px(C.white, 37, top - 6, 22, 1);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -630,8 +566,9 @@ export function buildClarioHq(scene: Phaser.Scene, api: HqSceneApi) {
   drawRugs(scene);
   drawTallWalls(scene);
   drawThinWalls(scene, isWall);
+  drawPartitions(scene, isWall);
   drawWallDecor(scene);
-  placeItems(scene, api);
+  placeItems(scene, api, HQ_ITEMS);
   placeOutdoors(scene, api);
 }
 
@@ -667,6 +604,7 @@ const RUGS: Record<RugStyle, { border: number; fill: number; line: number; accen
   library: { border: 0x7c3b33, fill: 0x9c4f43, line: 0xd8b26a, accent: 0xb5665a },
   game: { border: 0x1f5fd6, fill: 0x3686ff, line: 0x8cbcff, accent: 0xd4e6ff },
   stage: { border: 0x664628, fill: 0xb98451, line: 0xcf9f66, accent: 0x86603a },
+  grey: { border: 0x7c8486, fill: 0xa3abae, line: 0xb8bfc2, accent: 0x949c9f },
 };
 
 function drawRugs(scene: Phaser.Scene) {
@@ -684,6 +622,20 @@ function drawRugs(scene: Phaser.Scene) {
       g.fillStyle(c.line, 1);
       for (let by = y + 10; by < y + h - 12; by += 10) g.fillRect(x + 2, by, w - 4, 1);
       g.fillStyle(c.accent, 1); g.fillRect(x + 2, y + h - 10, w - 4, 8);
+      continue;
+    }
+    if (rug.style === "grey") {
+      // A plain woven rug: a dark edge, an inner line and a zigzag weave.
+      g.fillRoundedRect(x, y + 3, w, h, 4);
+      g.fillStyle(c.border, 1); g.fillRoundedRect(x, y, w, h, 4);
+      g.fillStyle(c.fill, 1); g.fillRect(x + 3, y + 3, w - 6, h - 6);
+      g.fillStyle(c.line, 1);
+      g.fillRect(x + 7, y + 7, w - 14, 2); g.fillRect(x + 7, y + h - 9, w - 14, 2);
+      g.fillRect(x + 7, y + 7, 2, h - 14); g.fillRect(x + w - 9, y + 7, 2, h - 14);
+      g.fillStyle(c.accent, 1);
+      for (let sy = y + 13; sy < y + h - 13; sy += 2) {
+        for (let sx = x + 16; sx < x + w - 14; sx += 12) g.fillRect(sx + ((sy >> 2) & 1) * 2, sy, 2, 2);
+      }
       continue;
     }
     if (rug.style === "round") {
@@ -720,17 +672,24 @@ const WALL_COLORS: Record<WallStyle, { face: number; shade: number; wainscot: nu
   corridor: { face: 0xe4e8ef, shade: 0xd6dbe4, wainscot: 0xc9d0db, trim: 0xadb6c6, base: 0x6f7686 },
   library: { face: 0xdfe7d6, shade: 0xd0dac5, wainscot: 0x9b7a55, trim: 0x7e5f3e, base: 0x5e4329 },
   game: { face: 0x2b4b91, shade: 0x244283, wainscot: 0x1f3a75, trim: 0x3fc5d6, base: 0x18306a },
+  cubicle: { face: 0x7d7eb6, shade: 0x8c8dc3, wainscot: 0x7273aa, trim: 0x9c9dd2, base: 0x5c5d94 },
 };
 const CAP = 8;
 const CAP_COLOR = 0x4a4f5e;
 const CAP_HI = 0x60667a;
 const CAP_LO = 0x2f333e;
+type Caps = { mid: number; hi: number; lo: number };
+const WALL_CAPS: Caps = { mid: CAP_COLOR, hi: CAP_HI, lo: CAP_LO };
+// Cubicle partitions are fabric panels with a light rail on top, not building walls.
+const PARTITION_CAPS: Caps = { mid: 0x9d9ed4, hi: 0xb9bae6, lo: 0x5c5d94 };
+const capsFor = (style?: WallStyle | ThinWallStyle) => (style === "cubicle" ? PARTITION_CAPS : WALL_CAPS);
 
 function drawTallWalls(scene: Phaser.Scene) {
   for (const wall of HQ_TALL_WALLS) {
     const g = scene.add.graphics().setDepth((wall.y + 2) * TILE);
     const shadow = scene.add.graphics().setDepth(-984);
     const c = WALL_COLORS[wall.style];
+    const caps = capsFor(wall.style);
     const top = wall.y * TILE;
     const bottom = (wall.y + 2) * TILE;
 
@@ -749,17 +708,23 @@ function drawTallWalls(scene: Phaser.Scene) {
       const w = right - left;
       g.fillStyle(c.face, 1); g.fillRect(left, top + CAP, w, 2 * TILE - CAP);
       g.fillStyle(c.shade, 1); g.fillRect(left, top + CAP, w, 4);
-      g.fillStyle(c.wainscot, 1); g.fillRect(left, bottom - 18, w, 14);
-      g.fillStyle(c.trim, 1); g.fillRect(left, bottom - 19, w, 2);
-      g.fillStyle(c.trim, 0.45);
-      for (let px = left + 16; px < right - 4; px += 32) g.fillRect(px, bottom - 17, 1, 13);
+      if (wall.style === "cubicle") {
+        // Woven fabric: faint vertical threads instead of wainscot panels.
+        g.fillStyle(c.wainscot, 0.55);
+        for (let px = left + 2; px < right; px += 4) g.fillRect(px, top + CAP + 6, 1, 2 * TILE - CAP - 12);
+      } else {
+        g.fillStyle(c.wainscot, 1); g.fillRect(left, bottom - 18, w, 14);
+        g.fillStyle(c.trim, 1); g.fillRect(left, bottom - 19, w, 2);
+        g.fillStyle(c.trim, 0.45);
+        for (let px = left + 16; px < right - 4; px += 32) g.fillRect(px, bottom - 17, 1, 13);
+      }
       if (wall.style === "game") {
         g.fillStyle(0x3686ff, 1); g.fillRect(left, top + CAP + 20, w, 2);
       }
       g.fillStyle(c.base, 1); g.fillRect(left, bottom - 4, w, 4);
-      g.fillStyle(CAP_COLOR, 1); g.fillRect(left, top, w, CAP);
-      g.fillStyle(CAP_HI, 1); g.fillRect(left, top, w, 2);
-      g.fillStyle(CAP_LO, 1); g.fillRect(left, top + CAP - 1, w, 1);
+      g.fillStyle(caps.mid, 1); g.fillRect(left, top, w, CAP);
+      g.fillStyle(caps.hi, 1); g.fillRect(left, top, w, 2);
+      g.fillStyle(caps.lo, 1); g.fillRect(left, top + CAP - 1, w, 1);
       shadow.fillStyle(0x1b2130, 0.13); shadow.fillRect(left, bottom, w, 7);
       shadow.fillStyle(0x1b2130, 0.07); shadow.fillRect(left, bottom + 7, w, 5);
     }
@@ -787,17 +752,21 @@ function drawThinWalls(scene: Phaser.Scene, isWall: (x: number, y: number) => bo
       tallTop.set(`${x},${wall.y + 1}`, wall.y);
     }
   }
+  let caps = WALL_CAPS;
   const strip = (x: number, y: number, w: number, h: number, depth: number, vertical: boolean) => {
     const g = scene.add.graphics().setDepth(depth);
-    g.fillStyle(CAP_LO, 1); g.fillRect(x, y, w, h);
-    g.fillStyle(CAP_COLOR, 1);
+    g.fillStyle(caps.lo, 1); g.fillRect(x, y, w, h);
+    g.fillStyle(caps.mid, 1);
     if (vertical) g.fillRect(x + 1, y, w - 2, h); else g.fillRect(x, y + 1, w, h - 2);
-    g.fillStyle(CAP_HI, 1);
+    g.fillStyle(caps.hi, 1);
     if (vertical) g.fillRect(x + 3, y, 2, h); else g.fillRect(x, y + 2, w, 2);
   };
 
   for (const wall of HQ_THIN_WALLS) {
+    // Open Desks' partitions are drawn by drawPartitions (open-desks-art.ts).
+    if (wall.style === "partition") continue;
     const vertical = wall.x1 === wall.x2;
+    caps = capsFor(wall.style);
     for (let x = wall.x1; x <= wall.x2; x++) {
       for (let y = wall.y1; y <= wall.y2; y++) {
         if (!isWall(x, y)) continue;
@@ -807,6 +776,13 @@ function drawThinWalls(scene: Phaser.Scene, isWall: (x: number, y: number) => bo
           // Free end at the bottom stops at the front wall's line.
           const bottom = isWall(x, y + 1) ? (y + 1) * TILE : cy + 5;
           strip(cx - 5, y * TILE, 10, bottom - y * TILE, (y + 1) * TILE, true);
+          if (wall.style === "cubicle" && bottom === cy + 5 && !isWall(x - 1, y) && !isWall(x + 1, y)) {
+            // A partition's free end shows its front face down to the floor.
+            const face = scene.add.graphics().setDepth((y + 1) * TILE);
+            face.fillStyle(caps.lo, 1); face.fillRect(cx - 5, cy + 5, 10, 13);
+            face.fillStyle(WALL_COLORS.cubicle.face, 1); face.fillRect(cx - 4, cy + 5, 8, 11);
+            face.fillStyle(0x1b2130, 0.12); face.fillRect(cx - 5, cy + 18, 12, 4);
+          }
           const above = tallTop.get(`${x},${y - 1}`);
           if (above !== undefined) strip(cx - 5, above * TILE, 10, 2 * TILE, (above + 2) * TILE + 1, true);
           const below = tallTop.get(`${x},${y + 1}`);
@@ -816,16 +792,18 @@ function drawThinWalls(scene: Phaser.Scene, isWall: (x: number, y: number) => bo
           const left = x === wall.x1 && isWall(x - 1, y) ? (x - 1) * TILE + TILE / 2 - 5 : x * TILE;
           const right = x === wall.x2 && isWall(x + 1, y) ? (x + 1) * TILE + TILE / 2 + 5 : (x + 1) * TILE;
           strip(left, cy - 5, right - left, 10, (y + 1) * TILE + 1, false);
-          // The front of the building: a short outer face below the wall line.
+          // The front of the building (or of a low partition): a short face below the wall line.
+          const partition = wall.style === "cubicle";
           const g = scene.add.graphics().setDepth((y + 1) * TILE + 1);
-          g.fillStyle(0xe2d8c6, 1); g.fillRect(left, cy + 5, right - left, 16);
-          g.fillStyle(0xcdbfa6, 1); g.fillRect(left, cy + 17, right - left, 4);
+          g.fillStyle(partition ? WALL_COLORS.cubicle.face : 0xe2d8c6, 1); g.fillRect(left, cy + 5, right - left, 16);
+          g.fillStyle(partition ? WALL_COLORS.cubicle.base : 0xcdbfa6, 1); g.fillRect(left, cy + 17, right - left, 4);
           g.fillStyle(0x1b2130, 0.12); g.fillRect(left, cy + 21, right - left, 5);
         }
       }
     }
-    // Door posts on either side of a gap in a front wall.
-    for (const [a, b] of wall.gaps ?? []) {
+    // Door posts on either side of a gap in a front wall. A gap in a side wall needs none: the
+    // wall's free ends above and below it already show.
+    for (const [a, b] of vertical ? [] : wall.gaps ?? []) {
       const g = scene.add.graphics().setDepth((wall.y1 + 1) * TILE + 2);
       const cy = wall.y1 * TILE + TILE / 2;
       for (const px of [a * TILE - 3, (b + 1) * TILE - 3]) {
@@ -957,9 +935,11 @@ function drawWallDecor(scene: Phaser.Scene) {
   }
 }
 
-function placeItems(scene: Phaser.Scene, api: HqSceneApi) {
+// Draws furniture, outdoor pieces and buildings (Clario HQ's, or a map someone built) and
+// reports the tiles they block or seat to the scene.
+export function placeItems(scene: Phaser.Scene, api: HqSceneApi, items: readonly HqItem[]) {
   let arcadeIndex = 0;
-  for (const item of HQ_ITEMS) {
+  for (const item of items) {
     const spec = ITEM_SPECS[item.kind];
     const fabric = item.fabric ?? "grey";
     const dir = item.dir ?? "down";
@@ -980,9 +960,24 @@ function placeItems(scene: Phaser.Scene, api: HqSceneApi) {
   }
 }
 
+const TREES = ["tree-green", "tree-lime", "tree-teal", "tree-teal2"];
+
 function textureFor(item: HqItem, arcadeIndex: number) {
   switch (item.kind) {
     case "arcade": return `hq-arcade-${arcadeIndex % 3}`;
+    case "tree": return TREES[(item.x * 7 + item.y * 3) % TREES.length]!;
+    case "bush": return "bush-ball";
+    // Pieces drawn in more than one look; `variant` on the item picks one.
+    case "side-table":
+    case "round-table": return `hq-${item.kind}-${(item.variant ?? 0) % 3}`;
+    case "bookshelf":
+    case "filing-cabinet":
+    case "desk-white":
+    case "meeting-table-md": return `hq-${item.kind}-${(item.variant ?? 0) % 2}`;
+    case "cube-shelf": return "cube-shelf";
+    case "pingpong": return item.variant === 1 ? "hq-pingpong-green" : "hq-pingpong";
+    // Clario HQ's rack is drawn empty: its bikes are drawn on their own so they can be ridden.
+    case "bike-rack": return item.variant === 1 ? "hq-bike-rack-empty" : "hq-bike-rack";
     default: return `hq-${item.kind}`;
   }
 }
@@ -992,20 +987,37 @@ function placeSeat(scene: Phaser.Scene, api: HqSceneApi, item: HqItem, fabric: F
   const cx = (item.x + spec.w / 2) * TILE;
   const bottom = (item.y + 1) * TILE + 6;
   const depth = dir === "up" ? (item.y + 1) * TILE + 8 : item.y * TILE - 2;
-  let key: string;
-  let lift: number | undefined;
-  switch (item.kind) {
-    case "task-chair": key = `ref-task-dark-${dir}`; lift = dir === "up" ? 10 : 8; break;
-    case "meet-chair": key = `hq-meet-chair-${fabric}-${dir === "up" ? "up" : "down"}`; break;
-    case "sofa": key = `hq-sofa-${fabric}-${dir === "up" ? "up" : "down"}`; lift = dir === "up" ? 12 : 10; break;
-    case "armchair": key = `hq-armchair-${fabric}-${dir}`; lift = 10; break;
-    case "beanbag": key = `hq-beanbag-${fabric}`; lift = 4; break;
-    case "cafe-chair": key = `hq-cafe-chair-${dir === "up" ? "up" : "down"}`; break;
-    default: key = `hq-${item.kind}`;
-  }
+  const { key, lift } = seatLook(item.kind, fabric, dir);
   api.shadow(cx, (item.y + 1) * TILE + 3, spec.w * TILE * (spec.w > 1 ? 0.9 : 0.7));
-  scene.add.image(cx, bottom, key).setOrigin(0.5, 1).setDepth(depth);
+  const image = scene.add.image(cx, bottom, key).setOrigin(0.5, 1).setDepth(depth);
+  // A couch seen from behind comes in two parts: the backrest in front of whoever sits on it,
+  // and the seat behind them.
+  if (scene.textures.exists(`${key}-seat`)) {
+    scene.add.image(cx, bottom - image.height, `${key}-seat`).setOrigin(0.5, 1).setDepth(item.y * TILE - 2);
+  }
   for (let dx = 0; dx < spec.w; dx++) api.seat(item.x + dx, item.y, dir, lift);
+}
+
+// A seat's sprite, and how far someone sitting on it is raised.
+function seatLook(kind: ItemKind, fabric: Fabric, dir: Dir): { key: string; lift?: number } {
+  const facing = dir === "up" ? "up" : "down";
+  switch (kind) {
+    case "task-chair": return { key: `ref-task-dark-${dir}`, lift: dir === "up" ? 10 : 8 };
+    case "meet-chair": return { key: `hq-meet-chair-${fabric}-${dir}` };
+    case "sofa": return { key: `hq-sofa-${fabric}-${facing}`, lift: dir === "up" ? 12 : 10 };
+    case "armchair": return { key: `hq-armchair-${fabric}-${dir}`, lift: 10 };
+    case "beanbag": return { key: `hq-beanbag-${fabric}`, lift: 4 };
+    case "cafe-chair": return { key: `hq-cafe-chair-${dir}` };
+    case "exec-chair": return { key: `hq-exec-chair-${fabric}-${dir}` };
+    case "theatre-seat": return { key: `hq-theatre-seat-${facing}` };
+    default: return { key: `hq-${kind}` };
+  }
+}
+
+// The sprite an item is drawn with, for previews in the map builder.
+export function itemTextureKey(item: Pick<HqItem, "kind" | "x" | "y" | "dir" | "fabric" | "variant">) {
+  if (ITEM_SPECS[item.kind].seat) return seatLook(item.kind, item.fabric ?? "grey", item.dir ?? "down").key;
+  return textureFor(item as HqItem, 0);
 }
 
 function placeOutdoors(scene: Phaser.Scene, api: HqSceneApi) {
@@ -1019,14 +1031,14 @@ function placeOutdoors(scene: Phaser.Scene, api: HqSceneApi) {
     scene.add.image((x + 0.5) * TILE, (y + 1) * TILE, key).setOrigin(0.5, 1).setDepth(block ? (y + 1) * TILE : y * TILE);
     if (block) api.block(x, y);
   };
-  for (const x of [5, 9, 13, 17, 30, 34, 38, 42, 47, 51, 55]) decor("bush-ball", x, 1, true);
+  for (const x of [5, 9, 13, 17, 30, 34, 38, 42, 47, 51, 55, 59, 63, 67, 71, 75, 79, 83]) decor("bush-ball", x, 1, true);
   // Planters either side of the front door.
   for (const x of [20, 27]) {
     scene.add.image((x + 0.5) * TILE, 34 * TILE, "hq-plant-big").setOrigin(0.5, 1).setDepth(34 * TILE);
     api.shadow((x + 0.5) * TILE, 34 * TILE - 3, 26);
     api.block(x, 33);
   }
-  for (const [x, y, key] of [[19, 35, "flower-red"], [28, 35, "flower-yellow"], [7, 35, "flower-blue"], [24, 0, "flower-red"], [40, 35, "flower-blue"]] as const) {
+  for (const [x, y, key] of [[19, 35, "flower-red"], [28, 35, "flower-yellow"], [7, 35, "flower-blue"], [24, 0, "flower-red"], [40, 35, "flower-blue"], [65, 35, "flower-yellow"], [77, 0, "flower-blue"]] as const) {
     decor(key, x, y, false);
   }
 }

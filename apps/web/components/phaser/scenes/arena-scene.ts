@@ -1,8 +1,11 @@
 import Phaser from "phaser";
-import { getChatRoomAtPosition, getMapTemplate, type MapTemplateId } from "@repo/shared";
-import { HQ_FLOORS } from "../../../lib/maps/clario-hq";
+import { customRoomAt, getChatRoomAtPosition, getMapTemplate, type ChatRoomZone, type CustomMap, type MapTemplateId } from "@repo/shared";
+import { HQ_FLOORS, HQ_MENTOR } from "../../../lib/maps/clario-hq";
+import { CAMPUS_ITEMS, CLASSIC_OFFICE_ITEMS } from "../../../lib/maps/classic-campus";
+import { findPath } from "../../../lib/maps/path-finder";
 import type { MinimapFloor, SceneBridge } from "../scene-bridge";
-import { buildClarioHq, HQ_FLOOR_COLORS, makeHqTextures } from "./clario-hq-builder";
+import { buildClarioHq, HQ_FLOOR_COLORS, itemTextureKey, makeHqTextures, placeItems, type HqSceneApi } from "./clario-hq-builder";
+import { buildCustomMap, customMinimapFloors } from "./custom-map-builder";
 import {
     GENERATED_PLANT_KEYS, beanbagKey, makeLoungeTextures, rugKey, sofaKey,
     type BeanbagColor, type RugColor, type SofaColor,
@@ -14,6 +17,12 @@ import { FRAME_COUNT, FRAME_HEIGHT, FRAME_WIDTH, lookKey, recolorSheet, sheetUrl
 const WALK_START = { right: 0, up: 6, left: 12, down: 18 } as const;
 type WalkDir = keyof typeof WALK_START;
 import { addMentorNpc, preloadMentorNpc, type MentorNpc } from "./mentor-npc";
+import { addCoworkerNpcs } from "./coworker-npcs";
+import { addClaudeNpcs, type ClaudeNpcs } from "./claude-npcs";
+import { addPlaySpots, type PlaySpots } from "./play-spots";
+import { addPropsOnMap, RIDE_STEP_MS, type Holder, type PropsOnMap } from "./props-on-map";
+import { isTypingIn } from "./talk-npc";
+import type { TalkNpc } from "./talk-npc";
 import { addErrandMarker } from "./errand-marker";
 
 // Chairs and tables drawn in code (see makeFurnitureTextures) instead of loaded from image files.
@@ -90,6 +99,11 @@ export class ArenaScene extends Phaser.Scene{
     private mapTemplateId: MapTemplateId = "classic-office";
     private bridge?: { current: SceneBridge };
     private minimapFloors: MinimapFloor[] = [];
+    // A map built in the map builder, and everything drawn for it (redrawn while it is edited).
+    private customMap: CustomMap | null = null;
+    private customObjects: Phaser.GameObjects.GameObject[] = [];
+    private builderGhost?: Phaser.GameObjects.Graphics;
+    private builderGhostImage?: Phaser.GameObjects.Image;
     private labelFont = "sans-serif";
     private roomSigns: Record<string, { bg: Phaser.GameObjects.Graphics; text: Phaser.GameObjects.Text; width: number }> = {};
     private roomHighlight!: Phaser.GameObjects.Graphics;
@@ -97,6 +111,12 @@ export class ArenaScene extends Phaser.Scene{
 
     private player!: Phaser.GameObjects.Sprite
     private mentor?: MentorNpc;
+    private coworkers: TalkNpc[] = [];
+    private claudes?: ClaudeNpcs;
+    private playSpots?: PlaySpots;
+    private props?: PropsOnMap;
+    // The way each other person last walked, so their bike faces it.
+    private otherFacing: Record<string, "down" | "up" | "left" | "right"> = {};
 
     constructor(){
         super("arena")
@@ -167,6 +187,11 @@ export class ArenaScene extends Phaser.Scene{
         const mapTemplate = template.id;
         this.cols = template.dimensions.width;
         this.rows = template.dimensions.height;
+        this.customMap = mapTemplate === "custom-office" ? (this.registry.get("customMap") as CustomMap | null) ?? null : null;
+        if (this.customMap) {
+            this.cols = this.customMap.cols;
+            this.rows = this.customMap.rows;
+        }
         const worldWidth = this.cols * TILE;
         const worldHeight = this.rows * TILE;
 
@@ -212,19 +237,11 @@ export class ArenaScene extends Phaser.Scene{
         this.add.tileSprite(0, 0, worldWidth, worldHeight, "grass").setOrigin(0, 0).setDepth(-1010);
         if (mapTemplate === "clario-hq") {
             makeHqTextures(this);
-            buildClarioHq(this, {
-                block: (x, y) => this.blocked.add(x + "," + y),
-                wall: (x, y) => {
-                    this.wallCells.add(x + "," + y);
-                    this.blocked.add(x + "," + y);
-                },
-                seat: (x, y, dir, lift) => {
-                    this.chairMap[x + "," + y] = dir;
-                    if (lift !== undefined) this.chairLiftMap[x + "," + y] = lift;
-                },
-                shadow: (cx, bottomY, width) => this.groundShadow(cx, bottomY, width),
-            });
+            buildClarioHq(this, this.mapApi());
             this.minimapFloors = HQ_FLOORS.map(({ x, y, w, h, kind }) => ({ x, y, w, h, color: HQ_FLOOR_COLORS[kind] }));
+        } else if (mapTemplate === "custom-office") {
+            makeHqTextures(this);
+            if (this.customMap) this.buildCustom(this.customMap);
         } else if (mapTemplate === "coworking-campus") {
             this.buildCoworkingCampus();
         } else {
@@ -414,15 +431,6 @@ export class ArenaScene extends Phaser.Scene{
 
 
 
-        const chair = (key: string, tx: number, ty: number, dir: "up" | "down" | "left" | "right") => {
-            this.groundShadow((tx + 0.5) * TILE, (ty + 1) * TILE + 3, 22);
-            this.add.image((tx + 0.5) * TILE, (ty + 1) * TILE + 6, key)
-                .setOrigin(0.5, 1)
-                .setDepth(dir === "up" ? (ty + 1) * TILE + 8 : ty * TILE - 2);
-            this.chairMap[tx + "," + ty] = dir;
-        };
-
-
         const pot = (key: string, tx: number, ty: number) =>
             placeItem(key, tx, ty, { blockedOffsets: [[0, 0]] });
 
@@ -432,92 +440,20 @@ export class ArenaScene extends Phaser.Scene{
 
 
 
-        const workstation = (dx: number, dy: number) => {
-            placeItem("desk-monitor", dx, dy);
-            chair("office-chair", dx, dy + 2, "up");
-        };
-
-
-
-        for (const oy of [3, 10, 17]) {
-            workstation(6, oy);
-            placeItem("cabinet", 4, oy);
-            pot("plant-fern", 9, oy + 5);
-        }
-
-        for (const oy of [3, 10, 17]) {
-            workstation(36, oy);
-            placeItem("cabinet", 38, oy);
-            pot("plant-fern", 34, oy + 5);
-        }
-
-        workstation(14, 3);
-        placeItem("bookshelf-big", 17, 3);
-        pot("plant-tall", 12, 7);
-        workstation(27, 3);
-        placeItem("bookshelf-big", 24, 3);
-        pot("plant-tall", 30, 7);
-
+        // Furniture: the same pieces as Clario HQ, listed in lib/maps/classic-campus.ts.
+        makeHqTextures(this);
+        placeItems(this, this.mapApi(), CLASSIC_OFFICE_ITEMS);
         wallMount("furn22", 15, 2, 0.6);
         wallMount("furn22", 27, 2, 0.6);
-
-
-
-        pot("coffee-round", 21, 6);
-        placeItem("water-cooler", 22, 7, { blockedOffsets: [[0, 0]] });
-
-
-        placeItem("conf-table", 14, 14);
-        chair("office-chair-red", 14, 13, "down");
-        chair("office-chair-red", 15, 13, "down");
-        chair("office-chair-red", 16, 13, "down");
-        chair("office-chair-red", 17, 13, "down");
-        chair("office-chair-red-up", 14, 16, "up");
-        chair("office-chair-red-up", 15, 16, "up");
-        chair("office-chair-red-up", 16, 16, "up");
-        chair("office-chair-red-up", 17, 16, "up");
         wallMount("tv-wall", 16, 11);
-        placeItem("cabinet", 13, 12);
-        placeItem("water-cooler", 19, 12, { blockedOffsets: [[0, 0]] });
-        pot("plant-fern", 19, 18);
-
 
         this.buildLounge(22, 11, { rug: "gray", sofa: "tan", beanbags: ["blue", "pink", "purple", "blue"] });
 
-
-        workstation(13, 21);
-        workstation(17, 21);
-        workstation(13, 24);
-        workstation(17, 24);
-        placeItem("water-cooler", 21, 21, { blockedOffsets: [[0, 0]] });
-        pot("plant-fern", 21, 26);
-        pot("plant-tall", 16, 21);
-
-
-        placeItem("ping-pong", 34, 24);
-        placeItem("arcade", 39, 24);
-        placeItem("foosball", 36, 27);
-        pot("plant-fern", 34, 28);
-
-
-        placeItem("table-big", 6, 26);
-        chair("chair-wood", 5, 26, "right");
-        chair("chair-wood", 5, 27, "right");
-        chair("chair-wood", 8, 26, "left");
-        chair("chair-wood", 8, 27, "left");
-
-
-        placeItem("lamp-warm", 18, 26, { blockedOffsets: [[0, 0]] });
-        placeItem("lamp-blue", 25, 26, { blockedOffsets: [[0, 0]] });
         pot("plant-tall", 19, 28);
         pot("plant-tall", 24, 28);
-
-
         pot("plant-fern", 22, 20);
         pot("plant-fern", 26, 20);
         pot("plant-fern", 30, 20);
-        pot("pot-2", 11, 24);
-        pot("pot-1", 32, 22);
         }
 
         this.mapTemplateId = mapTemplate;
@@ -587,13 +523,34 @@ export class ArenaScene extends Phaser.Scene{
 
 
 
+        const pointerTile = (pointer: Phaser.Input.Pointer) => ({
+            tx: Phaser.Math.Clamp(Math.floor(pointer.worldX / TILE), 0, this.maxTileX),
+            ty: Phaser.Math.Clamp(Math.floor(pointer.worldY / TILE), 0, this.maxTileY),
+        });
         this.input.on("pointerdown",(pointer:Phaser.Input.Pointer)=>{
             this.playerClickRef?.current?.(null);
-            const tx = Phaser.Math.Clamp(Math.floor(pointer.worldX / TILE), 0, this.maxTileX);
-            const ty = Phaser.Math.Clamp(Math.floor(pointer.worldY / TILE), 0, this.maxTileY);
+            const { tx, ty } = pointerTile(pointer);
+            // While the map builder is open, clicks build instead of walking.
+            const builder = this.bridge?.current.builder;
+            if (builder?.active) {
+                builder.onPointer(tx, ty, "down");
+                return;
+            }
             this.path = this.findPath(this.tileX, this.tileY, tx, ty);
             if (!this.isMoving) this.followPath();
         })
+        this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
+            const builder = this.bridge?.current.builder;
+            if (!builder?.active) return;
+            const { tx, ty } = pointerTile(pointer);
+            builder.onPointer(tx, ty, pointer.isDown ? "drag" : "hover");
+        });
+        this.input.on("pointerup", (pointer: Phaser.Input.Pointer) => {
+            const builder = this.bridge?.current.builder;
+            if (!builder?.active) return;
+            const { tx, ty } = pointerTile(pointer);
+            builder.onPointer(tx, ty, "up");
+        });
 
 
 
@@ -651,6 +608,18 @@ export class ArenaScene extends Phaser.Scene{
             };
             const errandMarker = addErrandMarker(this);
             bridge.setErrandTarget = (room) => errandMarker.show(room);
+            bridge.setBuilderGhost = (ghost) => this.showBuilderGhost(ghost);
+            bridge.previewItem = (item) => {
+                const key = itemTextureKey({ ...item, x: 0, y: 0 });
+                return this.textures.exists(key) ? this.textures.getBase64(key) : null;
+            };
+            // The owner's edits arrive as a new map in the registry; redraw it in place.
+            const onCustomMap = (_parent: unknown, map: CustomMap | null) => {
+                if (mapTemplate !== "custom-office" || !map) return;
+                this.buildCustom(map);
+                this.buildRoomSigns();
+            };
+            this.registry.events.on("changedata-customMap", onCustomMap);
             this.events.once(Phaser.Scenes.Events.DESTROY, () => {
                 bridge.map = null;
                 bridge.view = null;
@@ -658,22 +627,48 @@ export class ArenaScene extends Phaser.Scene{
                 bridge.zoomToFit = undefined;
                 bridge.walkTo = undefined;
                 bridge.setErrandTarget = undefined;
+                bridge.setBuilderGhost = undefined;
+                bridge.previewItem = undefined;
+                this.registry.events.off("changedata-customMap", onCustomMap);
             });
         }
 
-        // Maya, the Practice Session mentor, waits in Focus Room 2 of Clario HQ.
+        // Maya, the Practice Session mentor, waits in Focus Room 2 of Clario HQ, and the AI
+        // coworkers at their spots around the office.
         if (mapTemplate === "clario-hq") {
-            this.mentor = addMentorNpc(this, {
-                tileX: 24,
-                tileY: 7,
+            const block = (x: number, y: number) => this.blocked.add(x + "," + y);
+            this.mentor = addMentorNpc(this, { tileX: HQ_MENTOR.x, tileY: HQ_MENTOR.y, font: this.labelFont, bridge, block });
+            this.coworkers = addCoworkerNpcs(this, { font: this.labelFont, bridge, block, texture: (look) => this.lookTexture(look) });
+            // Claude at work in every Open Desks cubicle.
+            this.claudes = addClaudeNpcs(this, { font: this.labelFont, block });
+            // The Game Room machines and tables, and the TVs.
+            this.playSpots = addPlaySpots(this, {
                 font: this.labelFont,
                 bridge,
-                block: (x, y) => this.blocked.add(x + "," + y),
+                busy: () => !!this.props?.busy() || [this.mentor, ...this.coworkers].some((npc) => npc?.near()),
+            });
+            // The bikes in their rack and the vending machine's drinks.
+            this.props = addPropsOnMap(this, { font: this.labelFont, bridge, selfId: () => this.registry.get("selfId") as string | null });
+
+            // E uses the one thing in reach, in this order: get off your bike, talk to whoever is
+            // next to you, a game or TV, then the bike rack, the vending machine or a sip of your
+            // drink. Q throws a drink away. Neither works while you type in a panel.
+            this.input.keyboard?.on("keydown-E", (event: KeyboardEvent) => {
+                if (isTypingIn(event.target)) return;
+                const npc = [this.mentor, ...this.coworkers].find((each) => each?.near());
+                const used = !!this.props?.getOff() || (npc ? (npc.talk(), true) : false) || !!this.playSpots?.use() || !!this.props?.use();
+                // Otherwise the "e" would land in the panel or overlay that just opened.
+                if (used) event.preventDefault();
+            });
+            this.input.keyboard?.on("keydown-Q", (event: KeyboardEvent) => {
+                if (!isTypingIn(event.target) && this.props?.drop()) event.preventDefault();
             });
         }
     }
 
     private buildCoworkingCampus() {
+        // Clario HQ's furniture (office-art.ts), used for the courtyard chairs and every room.
+        makeHqTextures(this);
 
         this.add.tileSprite(24 * TILE, 0, 4 * TILE, 9 * TILE, "path").setOrigin(0, 0).setDepth(-1005);
         this.add.tileSprite(3 * TILE, 8 * TILE, 46 * TILE, 27 * TILE, "floor-wood").setOrigin(0, 0).setDepth(-1000);
@@ -760,35 +755,15 @@ export class ArenaScene extends Phaser.Scene{
             seatLift?: Partial<Record<SeatDirection, number>>;
         };
         const seatFamilies = {
-            blueWood: { key: "ref-blue-wood" },
-            natural: { key: "campus-wood-chair" },
-            wovenTeal: { key: "ref-woven-teal" },
-            taskDark: { key: "ref-task-dark", seatLift: { up: 10, down: 8 } },
+            natural: { key: "hq-cafe-chair" },
         } satisfies Record<string, SeatFamily>;
         const directionalChair = (family: SeatFamily, tx: number, ty: number, dir: SeatDirection) =>
             chair(`${family.key}-${dir}`, tx, ty, dir, family.seatLift?.[dir]);
 
 
-        const conferenceChair = (tx: number, ty: number, dir: SeatDirection) =>
-            chair(dir === "up" ? "campus-conf-red-up" : "campus-conf-red-down", tx, ty, dir);
-        const bench = (key: string, tx: number, ty: number, seats: number, dir: "up" | "down") => {
-            this.groundShadow((tx + seats / 2) * TILE, (ty + 1) * TILE + 3, seats * TILE * 0.9);
-            this.add.image((tx + seats / 2) * TILE, (ty + 1) * TILE + 6, key)
-                .setOrigin(0.5, 1)
-                .setDepth(dir === "up" ? (ty + 1) * TILE + 8 : ty * TILE - 2);
-            for (let i = 0; i < seats; i++) this.chairMap[(tx + i) + "," + ty] = dir;
-        };
         const pot = (key: string, tx: number, ty: number) => place(key, tx, ty, [[0, 0]]);
         const wallMount = (key: string, cx: number, y: number, scale = 1) =>
             this.add.image(cx * TILE, y * TILE + 20, key).setScale(scale).setDepth(y * TILE + 40);
-        const huddle = (family: SeatFamily, tableKey: string, cx: number, cy: number) => {
-            place(tableKey, cx - 1, cy - 1, [[0, 0], [1, 0], [0, 1], [1, 1]]);
-            directionalChair(family, cx, cy - 2, "down");
-            directionalChair(family, cx, cy + 2, "up");
-            directionalChair(family, cx - 2, cy, "right");
-            directionalChair(family, cx + 2, cy, "left");
-        };
-
 
         place("campus-pond", 23.5, 2, [[0, 0], [1, 0], [2, 0], [3, 0], [4, 0], [0, 1], [1, 1], [2, 1], [3, 1], [4, 1], [0, 2], [1, 2], [2, 2], [3, 2], [4, 2], [0, 3], [1, 3], [2, 3], [3, 3], [4, 3]]);
         directionalChair(seatFamilies.natural, 22, 3, "right");
@@ -808,74 +783,19 @@ export class ArenaScene extends Phaser.Scene{
         }
 
 
-        place("conf-table", 6, 11);
-        for (const x of [6, 7, 8, 9]) {
-            conferenceChair(x, 10, "down");
-            conferenceChair(x, 14, "up");
-        }
+        // Furniture: the same pieces as Clario HQ, listed in lib/maps/classic-campus.ts.
+        placeItems(this, this.mapApi(), CAMPUS_ITEMS);
         wallMount("tv-wall", 9, 8, 0.85);
-        this.add.image(13.5 * TILE, 16 * TILE, "flower-blue").setOrigin(0.5, 1).setScale(1.4).setDepth(16 * TILE);
-
-        place("conf-table", 39, 11);
-        for (const x of [39, 40, 41, 42]) {
-            directionalChair(seatFamilies.taskDark, x, 10, "down");
-            directionalChair(seatFamilies.taskDark, x, 14, "up");
-        }
-        wallMount("whiteboard", 42, 8);
-        this.add.image(46.5 * TILE, 16 * TILE, "flower-red").setOrigin(0.5, 1).setScale(1.4).setDepth(16 * TILE);
-
-
-
-        place("ref-coffee-station", 16, 9);
-        wallMount("ref-wall-books", 20, 8, 0.72);
-        huddle(seatFamilies.blueWood, "ref-table-books", 21, 14);
-        place("ref-aquarium-console", 29, 9);
-        place("water-cooler", 34, 14, [[0, 0]]);
-        huddle(seatFamilies.wovenTeal, "ref-table-coffee", 31, 14);
         wallMount("flower-blue", 25, 8);
-
-
-        for (const x of [5, 12]) {
-            place("team-desk", x, 20);
-            directionalChair(seatFamilies.taskDark, x + 1, 19, "down");
-            directionalChair(seatFamilies.taskDark, x + 3, 19, "down");
-            directionalChair(seatFamilies.taskDark, x + 1, 23, "up");
-            directionalChair(seatFamilies.taskDark, x + 3, 23, "up");
-        }
-        for (const x of [33, 40]) {
-            place("team-desk", x, 20);
-            directionalChair(seatFamilies.taskDark, x + 1, 19, "down");
-            directionalChair(seatFamilies.taskDark, x + 3, 19, "down");
-            directionalChair(seatFamilies.taskDark, x + 1, 23, "up");
-            directionalChair(seatFamilies.taskDark, x + 3, 23, "up");
-        }
         pot("plant-fern", 4, 18);
-        this.add.image(19.5 * TILE, 27 * TILE, "flower-blue").setOrigin(0.5, 1).setScale(1.4).setDepth(27 * TILE);
-        this.add.image(32.5 * TILE, 27 * TILE, "flower-red").setOrigin(0.5, 1).setScale(1.4).setDepth(27 * TILE);
         pot("plant-fern", 47, 18);
-
-
+        for (const [key, x, y] of [
+            ["flower-blue", 19.5, 27], ["flower-red", 32.5, 27], ["flower-blue", 21.5, 27], ["flower-red", 30.5, 27],
+        ] as [string, number, number][]) {
+            this.add.image(x * TILE, y * TILE, key).setOrigin(0.5, 1).setScale(1.4).setDepth(y * TILE);
+        }
 
         this.buildLounge(21, 19, { rug: "blue", sofa: "sage", beanbags: ["purple", "blue", "pink", "purple"] });
-        this.add.image(21.5 * TILE, 27 * TILE, "flower-blue").setOrigin(0.5, 1).setScale(1.4).setDepth(27 * TILE);
-        this.add.image(30.5 * TILE, 27 * TILE, "flower-red").setOrigin(0.5, 1).setScale(1.4).setDepth(27 * TILE);
-
-
-        place("cafe-counter", 5, 29);
-        place("water-cooler", 15, 32, [[0, 0]]);
-        directionalChair(seatFamilies.natural, 11, 31, "down");
-        directionalChair(seatFamilies.natural, 14, 31, "down");
-        place("campus-side-table", 12, 31, [[0, 0]]);
-        place("reception-desk", 23, 29);
-        directionalChair(seatFamilies.taskDark, 25, 31, "up");
-        place("campus-reception-bench", 28, 31, [[0, 0], [1, 0], [2, 0]]);
-        this.add.image(19.5 * TILE, 33 * TILE, "flower-blue").setOrigin(0.5, 1).setScale(1.4).setDepth(33 * TILE);
-        this.add.image(32.5 * TILE, 33 * TILE, "flower-red").setOrigin(0.5, 1).setScale(1.4).setDepth(33 * TILE);
-        place("ping-pong", 36, 29);
-        place("bookshelf-big", 42, 29);
-        place("arcade", 46, 29);
-        bench("lounge-chair", 43, 32, 1, "down");
-        directionalChair(seatFamilies.wovenTeal, 45, 32, "up");
 
 
         const treeKeys = ["tree-green", "tree-lime", "tree-teal", "tree-teal2"];
@@ -991,6 +911,9 @@ export class ArenaScene extends Phaser.Scene{
     update() {
         this.updateCurrentRoom();
         this.mentor?.update(this.tileX, this.tileY);
+        for (const coworker of this.coworkers) coworker.update(this.tileX, this.tileY);
+        this.claudes?.update(this.tileX, this.tileY);
+        this.playSpots?.update(this.tileX, this.tileY);
         const bridge = this.bridge?.current;
         if (bridge) {
             const { x, y, width, height } = this.cameras.main.worldView;
@@ -1018,7 +941,8 @@ export class ArenaScene extends Phaser.Scene{
         this.syncAvatar(this.player, this.registry.get("selfId") as string | null);
         const currentTileKey = this.tileX + "," + this.tileY;
         const chairDir = this.chairMap[currentTileKey];
-        const isSelfSitting = !!chairDir && !this.isMoving;
+        // Riding a bike over a chair doesn't sit you down on it.
+        const isSelfSitting = !!chairDir && !this.isMoving && !this.props?.riding(this.registry.get("selfId") as string | null);
 
         if (isSelfSitting && chairDir) {
             const seat = this.seatedPoint(this.tileX, this.tileY, chairDir, this.chairLiftMap[currentTileKey]);
@@ -1098,13 +1022,14 @@ export class ArenaScene extends Phaser.Scene{
 
 
                     const movingSprite = sprite;
+                    this.otherFacing[id] = dir;
                     movingSprite.anims.play(this.walkAnim(movingSprite, dir), true);
                     this.tweens.killTweensOf(movingSprite);
                     this.tweens.add({
                         targets: movingSprite,
                         x: px,
                         y: py,
-                        duration: 200,
+                        duration: this.props?.riding(id) ? RIDE_STEP_MS : 200,
                         ease: "Linear",
                         onComplete: () => {
                             movingSprite.anims.stop();
@@ -1122,7 +1047,7 @@ export class ArenaScene extends Phaser.Scene{
             const otherTileKey = p.x + "," + p.y;
             const otherChairDir = this.chairMap[otherTileKey];
             const isOtherMoving = this.tweens.isTweening(sprite);
-            const isOtherSitting = !!otherChairDir && !isOtherMoving;
+            const isOtherSitting = !!otherChairDir && !isOtherMoving && !this.props?.riding(id);
 
             if (isOtherSitting && otherChairDir) {
                 const seat = this.seatedPoint(p.x, p.y, otherChairDir, this.chairLiftMap[otherTileKey]);
@@ -1180,7 +1105,16 @@ export class ArenaScene extends Phaser.Scene{
                 delete this.otherTagNames[id];
                 delete this.otherShadows[id];
                 delete this.otherTiles[id];
+                delete this.otherFacing[id];
             }
+        }
+
+        // Everyone's bike or drink, drawn over their sprites now that those are in place.
+        if (this.props) {
+            const selfId = this.registry.get("selfId") as string | null;
+            const people: Holder[] = Object.entries(this.otherSprites).map(([id, sprite]) => ({ id, sprite, facing: this.otherFacing[id] ?? "down" }));
+            if (selfId) people.push({ id: selfId, sprite: this.player, facing: this.facing });
+            this.props.update({ x: this.tileX, y: this.tileY }, people);
         }
     }
 
@@ -1228,7 +1162,7 @@ export class ArenaScene extends Phaser.Scene{
         targets: this.player,
         x: this.tileX * TILE + TILE / 2,
         y: this.tileY * TILE + TILE / 2,
-        duration: 200,
+        duration: this.props?.riding(this.registry.get("selfId") as string | null) ? RIDE_STEP_MS : 200,
         ease: "Linear",
         onComplete: () => {
             this.isMoving = false;
@@ -1257,48 +1191,13 @@ export class ArenaScene extends Phaser.Scene{
 
 
 
+    // A* over the blocked tiles (lib/maps/path-finder.ts), for clicks on the map and the 3D view.
     private findPath(sx: number, sy: number, gx: number, gy: number): { x: number; y: number }[] {
-        const key = (x: number, y: number) => x + "," + y;
-        const start = key(sx, sy);
-        const goal = key(gx, gy);
-        const visited = new Set<string>([start]);
-        const prev = new Map<string, string>();
-        const queue: [number, number][] = [[sx, sy]];
-        let best: [number, number] = [sx, sy];
-        let bestDist = Math.abs(sx - gx) + Math.abs(sy - gy);
-        const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]] as const;
-
-        for (let head = 0; head < queue.length; head++) {
-            const [cx, cy] = queue[head]!;
-            if (cx === gx && cy === gy) break;
-
-            const d = Math.abs(cx - gx) + Math.abs(cy - gy);
-            if (d < bestDist) { bestDist = d; best = [cx, cy]; }
-            for (const [dx, dy] of dirs) {
-                const nx = cx + dx;
-                const ny = cy + dy;
-                if (nx < 0 || ny < 0 || nx > this.maxTileX || ny > this.maxTileY) continue;
-                const nk = key(nx, ny);
-                if (visited.has(nk) || this.blocked.has(nk)) continue;
-                visited.add(nk);
-                prev.set(nk, key(cx, cy));
-                queue.push([nx, ny]);
-            }
-        }
-
-        const end = visited.has(goal) ? goal : key(best[0], best[1]);
-        if (end === start) return [];
-
-
-        const path: { x: number; y: number }[] = [];
-        let cur: string | undefined = end;
-        while (cur && cur !== start) {
-            const [x, y] = cur.split(",").map(Number);
-            path.push({ x: x!, y: y! });
-            cur = prev.get(cur);
-        }
-        path.reverse();
-        return path;
+        return findPath({ x: sx, y: sy }, { x: gx, y: gy }, {
+            cols: this.maxTileX + 1,
+            rows: this.maxTileY + 1,
+            isBlocked: (x, y) => this.blocked.has(x + "," + y),
+        });
     }
 
 
@@ -1713,13 +1612,64 @@ export class ArenaScene extends Phaser.Scene{
 
     // A small sign inside every named room, placed on the first stretch of
     // floor that has no furniture (top row first, then bottom row).
+    // Tells the map builders (HQ's and custom maps') which tiles block, are walls or are seats.
+    private mapApi(): HqSceneApi {
+        return {
+            block: (x, y) => this.blocked.add(x + "," + y),
+            wall: (x, y) => {
+                this.wallCells.add(x + "," + y);
+                this.blocked.add(x + "," + y);
+            },
+            seat: (x, y, dir, lift) => {
+                this.chairMap[x + "," + y] = dir;
+                if (lift !== undefined) this.chairLiftMap[x + "," + y] = lift;
+            },
+            shadow: (cx, bottomY, width) => this.groundShadow(cx, bottomY, width),
+        };
+    }
+
+    // Draws a map built in the map builder, replacing whatever was drawn for it before.
+    private buildCustom(map: CustomMap) {
+        for (const object of this.customObjects) object.destroy();
+        this.blocked.clear();
+        this.wallCells.clear();
+        this.chairMap = {};
+        this.chairLiftMap = {};
+        const before = new Set(this.children.list);
+        buildCustomMap(this, map, this.mapApi());
+        this.customObjects = this.children.list.filter((object) => !before.has(object));
+        this.customMap = map;
+        this.minimapFloors = customMinimapFloors(map);
+        const bridge = this.bridge?.current;
+        if (bridge?.map) bridge.map = { ...bridge.map, walls: [...this.wallCells], blocked: [...this.blocked], floors: this.minimapFloors };
+    }
+
+    // The map builder's preview: the tiles an edit covers (green if it fits, red if not) and,
+    // for furniture, the piece itself, faded.
+    private showBuilderGhost(ghost: Parameters<NonNullable<SceneBridge["setBuilderGhost"]>>[0]) {
+        this.builderGhost ??= this.add.graphics().setDepth(9300);
+        this.builderGhost.clear();
+        this.builderGhostImage?.setVisible(false);
+        if (!ghost) return;
+        const color = ghost.ok ? 0x22a861 : 0xe5484d;
+        const x = ghost.x * TILE, y = ghost.y * TILE, w = ghost.w * TILE, h = ghost.h * TILE;
+        this.builderGhost.fillStyle(color, 0.16).fillRect(x, y, w, h);
+        this.builderGhost.lineStyle(2, color, 0.9).strokeRect(x + 1, y + 1, w - 2, h - 2);
+        if (!ghost.item) return;
+        const key = itemTextureKey({ ...ghost.item, x: ghost.x, y: ghost.y });
+        if (!this.textures.exists(key)) return;
+        this.builderGhostImage ??= this.add.image(0, 0, key).setOrigin(0.5, 1).setDepth(9299);
+        this.builderGhostImage.setTexture(key).setPosition(x + w / 2, y + h).setAlpha(ghost.ok ? 0.7 : 0.4).setVisible(true);
+    }
+
     private buildRoomSigns() {
         for (const sign of Object.values(this.roomSigns)) {
             sign.bg.destroy();
             sign.text.destroy();
         }
         this.roomSigns = {};
-        for (const room of getMapTemplate(this.mapTemplateId).chatRooms) {
+        const rooms: ChatRoomZone[] = this.customMap?.rooms ?? getMapTemplate(this.mapTemplateId).chatRooms;
+        for (const room of rooms) {
             const padX = 8;
             const text = this.smoothText(this.add.text(0, 0, room.name, {
                 fontFamily: this.labelFont,
@@ -1779,7 +1729,8 @@ export class ArenaScene extends Phaser.Scene{
 
     // Outlines the room you are standing in and lights up its sign.
     private updateCurrentRoom() {
-        const room = getChatRoomAtPosition(this.mapTemplateId, { x: this.tileX, y: this.tileY });
+        const here = { x: this.tileX, y: this.tileY };
+        const room = this.customMap ? customRoomAt(this.customMap, here) : getChatRoomAtPosition(this.mapTemplateId, here);
         const id = room?.id ?? null;
         if (id === this.currentRoomId) return;
         if (this.currentRoomId) this.styleRoomSign(this.currentRoomId, false);
@@ -1845,7 +1796,10 @@ export class ArenaScene extends Phaser.Scene{
     // they picked. Each distinct look is made once, with its own walk animations.
     private avatarTexture(userId: string | null | undefined) {
         const look = userId ? this.looksRef?.current?.[userId] : undefined;
-        if (!look) return "adam";
+        return look ? this.lookTexture(look) : "adam";
+    }
+
+    private lookTexture(look: AvatarLook) {
         const key = lookKey(look);
         if (this.textures.exists(key)) return key;
         const sourceKey = look.base === "adam" ? "adam" : `avatar-base-${look.base}`;
