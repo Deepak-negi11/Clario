@@ -5,6 +5,8 @@ import { ArrowUp, ChevronDown, Lock, MessageSquare } from "lucide-react";
 import type { ChatRoomZone } from "@repo/shared";
 import type { ChatScope } from "../../lib/space-api";
 import type { ChatEntry, ChatRequest, DirectChat, OutgoingRequest } from "../../hooks/use-space-socket";
+import { useDraggablePanel } from "../../hooks/use-draggable-panel";
+import { PanelDragHandle, draggableHeader } from "./panel-drag-handle";
 
 /** "general", "room", or a private chat with one person: "dm:<userId>". */
 export type ChatChannel = "general" | "room" | `dm:${string}`;
@@ -64,6 +66,8 @@ export function ChatPanel({
   const previousDirectCounts = useRef<Record<string, number>>({});
   // Chats counted as one unread for opening, before any message arrived.
   const openedUnseen = useRef<Set<string>>(new Set());
+  // Only the open panel moves; the closed chat button stays in its corner.
+  const drag = useDraggablePanel("chat");
 
   const directId = directUserId(channel);
   const directChat = directId ? directChats[directId] : undefined;
@@ -150,7 +154,7 @@ export function ChatPanel({
     if (directId) {
       return {
         title: `Private chat with ${directName}`,
-        body: "Only the two of you see these messages. They aren't saved, so they're gone once you leave the space.",
+        body: "Only the two of you can read these messages, not even the server. They aren't saved, so they're gone once you leave the space.",
       };
     }
     if (channel === "general") {
@@ -208,10 +212,12 @@ export function ChatPanel({
 
   return (
     <section
+      ref={drag.ref}
       aria-label="Chat"
       className="pointer-events-auto absolute bottom-20 left-3 z-[65] md:bottom-3 flex h-[min(380px,calc(100dvh-20rem))] min-h-[13rem] w-[min(20rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-2xl border border-black/5 bg-white/95 shadow-[0_18px_44px_-18px_rgba(18,21,28,0.45)] backdrop-blur-md"
     >
-      <header className="flex items-center justify-between border-b border-[#eceef1] px-4 py-3">
+      <header {...drag.headerProps} className={`${draggableHeader} flex items-center justify-between border-b border-[#eceef1] px-4 py-3`}>
+        <PanelDragHandle label="Move chat panel" {...drag.handleProps} />
         <span className="flex items-center gap-2 text-sm font-semibold text-[#12151c]">
           <MessageSquare size={16} aria-hidden="true" />
           Chat
@@ -287,39 +293,41 @@ export function ChatPanel({
       )}
 
       <div ref={listRef} className="flex flex-1 flex-col gap-2.5 overflow-y-auto px-4 py-3" aria-live="polite">
+        {directId && directChat?.open && (
+          <EncryptionNote key={directId} name={directName} safetyCode={directChat.safetyCode} />
+        )}
         {messages.length === 0 || (channel === "room" && !currentRoom) ? (
           <div className="flex flex-1 flex-col items-center justify-center px-4 text-center">
             <p className="text-xs font-semibold text-[#5c6371]">{emptyCopy.title}</p>
             <p className="mt-1 text-[11px] leading-4 text-[#8a909b]">{emptyCopy.body}</p>
           </div>
         ) : (
-          <>
-            {directId && (
-              <p className="flex items-center justify-center gap-1 text-[11px] text-[#8a909b]">
-                <Lock size={11} aria-hidden="true" />
-                Only you and {directName} see this chat
-              </p>
-            )}
-            {messages.map((message) => {
-              const isSelf = message.userId === selfId;
-              return (
-                <div key={message.id} className={`flex w-full flex-col ${isSelf ? "items-end" : "items-start"}`}>
-                  {!isSelf && !directId && (
-                    <span className="mb-0.5 px-1 text-[11px] font-medium text-[#8a909b]">
-                      {nameFor(message.userId)}
-                    </span>
-                  )}
-                  <div className={`max-w-[85%] break-words px-3 py-2 text-[13px] leading-snug ${
-                    isSelf
+          messages.map((message) => {
+            const isSelf = message.userId === selfId;
+            const failed = "failed" in message && !!message.failed;
+            const unreadable = failed && !isSelf;
+            return (
+              <div key={message.id} className={`flex w-full flex-col ${isSelf ? "items-end" : "items-start"}`}>
+                {!isSelf && !directId && (
+                  <span className="mb-0.5 px-1 text-[11px] font-medium text-[#8a909b]">
+                    {nameFor(message.userId)}
+                  </span>
+                )}
+                <div className={`max-w-[85%] break-words px-3 py-2 text-[13px] leading-snug ${
+                  unreadable
+                    ? "rounded-2xl rounded-bl-md bg-[#f7f8fa] italic text-[#8a909b] ring-1 ring-[#e6e7ea]"
+                    : isSelf
                       ? "rounded-2xl rounded-br-md bg-[#12151c] text-white"
                       : "rounded-2xl rounded-bl-md bg-[#f1f3f6] text-[#12151c]"
-                  }`}>
-                    {message.text}
-                  </div>
+                }`}>
+                  {unreadable ? "This message couldn't be decrypted." : message.text}
                 </div>
-              );
-            })}
-          </>
+                {failed && isSelf && (
+                  <span className="mt-0.5 px-1 text-[11px] font-medium text-[#c53030]">Not sent: this chat closed</span>
+                )}
+              </div>
+            );
+          })
         )}
       </div>
 
@@ -327,12 +335,27 @@ export function ChatPanel({
         <div className="flex items-center justify-between gap-2 border-t border-[#eceef1] bg-[#f7f8fa] px-3.5 py-3 text-xs text-[#5c6371]">
           {outgoingRequests[directId] === "pending" ? (
             <span>Request sent. Waiting for {directName}.</span>
+          ) : chatRequests.some((request) => request.fromUserId === directId) ? (
+            <>
+              <span>{directName} asked to chat again.</span>
+              <button
+                type="button"
+                onClick={() => accept(directId)}
+                className="shrink-0 cursor-pointer rounded-lg bg-[#12151c] px-2.5 py-1.5 font-semibold text-white transition hover:bg-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#12151c] active:scale-[0.98]"
+              >
+                Accept
+              </button>
+            </>
           ) : onlineIds.has(directId) ? (
             <>
               <span>
                 {outgoingRequests[directId] === "declined"
                   ? `${directName} said no for now. You can ask again in a minute.`
-                  : `This chat closed when ${directName} left.`}
+                  : directChat.closedBy === "reconnect"
+                    ? "Your connection dropped, so this chat closed."
+                    : directChat.closedBy === "left"
+                      ? `This chat closed when ${directName} left.`
+                      : "This chat closed."}
               </span>
               <button
                 type="button"
@@ -397,6 +420,41 @@ function ChannelTab({
       {label}
       {unread > 0 && <span className="ml-1 rounded bg-[#12151c] px-1 text-[10px] text-white">{unread}</span>}
     </button>
+  );
+}
+
+// Private chats are end-to-end encrypted. The safety code lets the two people check that nobody
+// (the server included) swapped their keys: both see the same code only when it's really each other.
+function EncryptionNote({ name, safetyCode }: { name: string; safetyCode?: string }) {
+  const [showCode, setShowCode] = useState(false);
+  return (
+    <div className="flex flex-col items-center gap-1.5 text-[11px] text-[#8a909b]">
+      <p className="flex items-center gap-1">
+        <Lock size={11} aria-hidden="true" />
+        {safetyCode ? "End-to-end encrypted" : "Setting up encryption…"}
+        {safetyCode && (
+          <>
+            <span aria-hidden="true">·</span>
+            <button
+              type="button"
+              onClick={() => setShowCode((shown) => !shown)}
+              aria-expanded={showCode}
+              className="cursor-pointer rounded font-semibold text-[#5c6371] underline-offset-2 transition hover:text-[#12151c] hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#12151c]"
+            >
+              {showCode ? "Hide safety code" : "Safety code"}
+            </button>
+          </>
+        )}
+      </p>
+      {showCode && safetyCode && (
+        <div className="w-full rounded-xl bg-[#f7f8fa] px-3 py-2.5 text-center ring-1 ring-[#eceef1]">
+          <p className="font-mono text-[13px] font-semibold tabular-nums tracking-[0.08em] text-[#12151c]">{safetyCode}</p>
+          <p className="mt-1 leading-4">
+            Compare it with {name} in person or on a call. If yours match, nobody else can read this chat.
+          </p>
+        </div>
+      )}
+    </div>
   );
 }
 

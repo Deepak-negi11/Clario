@@ -14,6 +14,8 @@ import {
   type TaskStatus,
 } from "../../lib/space-api";
 import { getAuthToken } from "../../lib/auth-token";
+import { useDraggablePanel } from "../../hooks/use-draggable-panel";
+import { PanelDragHandle, draggableHeader } from "./panel-drag-handle";
 
 // Same limits as the server (apps/server/src/task/task.ts).
 const MAX_SUBJECT_LENGTH = 150;
@@ -83,9 +85,11 @@ export function TasksPanel({
   onClose: () => void;
 }) {
   const titleId = useId();
+  const drag = useDraggablePanel("tasks");
 
   return (
     <section
+      ref={drag.ref}
       aria-labelledby={titleId}
       onKeyDown={(event) => {
         // Keep typing out of the Phaser scene, which listens for arrow keys on window.
@@ -94,7 +98,8 @@ export function TasksPanel({
       }}
       className="pointer-events-auto absolute left-[76px] top-3 z-[65] flex max-h-[calc(100dvh-1.5rem)] w-[min(23rem,calc(100vw-6rem))] flex-col overflow-hidden rounded-2xl border border-black/5 bg-white/95 text-[#12151c] shadow-[0_18px_44px_-18px_rgba(18,21,28,0.45)] backdrop-blur-md"
     >
-      <header className="flex items-center justify-between border-b border-[#eceef1] px-4 py-3">
+      <header {...drag.headerProps} className={`${draggableHeader} flex items-center justify-between border-b border-[#eceef1] px-4 py-3`}>
+        <PanelDragHandle label="Move tasks panel" {...drag.handleProps} />
         <h2 id={titleId} className="text-sm font-semibold">
           Tasks
         </h2>

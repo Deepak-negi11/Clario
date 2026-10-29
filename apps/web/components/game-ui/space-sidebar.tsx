@@ -1,10 +1,10 @@
 "use client";
 
-import { Box, ClipboardList, LogOut, Mail, Trophy, Users } from "lucide-react";
+import { Box, ClipboardList, Gamepad2, Hammer, LogOut, Mail, Trophy, Users } from "lucide-react";
 
 // Chat is opened from its own button in the bottom-left corner, not from this rail,
 // but it still shares this state so only one panel is open at a time.
-export type SidePanel = "people" | "chat" | "email" | "tasks" | "errands";
+export type SidePanel = "people" | "chat" | "email" | "tasks" | "errands" | "builder";
 
 type SpaceSidebarProps = {
   panel: SidePanel | null;
@@ -14,6 +14,8 @@ type SpaceSidebarProps = {
   newTaskCount: number;
   /** Errands not done yet; leave out on maps without errands. */
   errandsLeft?: number;
+  /** The space's owner on a map built in the map builder: shows the Build button. */
+  canBuild?: boolean;
   can3d: boolean;
   view3d: boolean;
   onToggle3d: () => void;
@@ -28,6 +30,7 @@ export function SpaceSidebar({
   peopleCount,
   newTaskCount,
   errandsLeft,
+  canBuild,
   can3d,
   view3d,
   onToggle3d,
@@ -67,11 +70,20 @@ export function SpaceSidebar({
           <Trophy size={20} aria-hidden="true" />
         </RailButton>
       )}
+      {canBuild && (
+        <RailButton label="Build" title="Build your map" active={panel === "builder"} onClick={() => toggle("builder")}>
+          <Hammer size={20} aria-hidden="true" />
+        </RailButton>
+      )}
       {can3d && (
         <RailButton label={view3d ? "2D" : "3D"} title={view3d ? "Back to the 2D map" : "See the office in 3D"} active={view3d} onClick={onToggle3d}>
           <Box size={20} aria-hidden="true" />
         </RailButton>
       )}
+      {/* A new tab, so you stay in the space. */}
+      <RailButton label="Games" title="Game Room: arcade games and the TV (opens in a new tab)" href="/arcade">
+        <Gamepad2 size={20} aria-hidden="true" />
+      </RailButton>
 
       <div className="my-1 h-px w-8 shrink-0 bg-white/60 shadow-[0_1px_1px_rgba(0,0,0,0.35)]" aria-hidden="true" />
 
@@ -90,6 +102,7 @@ function RailButton({
   badgeTone = "alert",
   tone,
   onClick,
+  href,
   children,
 }: {
   label: string;
@@ -98,9 +111,26 @@ function RailButton({
   badge?: number;
   badgeTone?: "alert" | "muted";
   tone?: "danger";
-  onClick: () => void;
+  onClick?: () => void;
+  // A link that opens in a new tab, drawn like the buttons.
+  href?: string;
   children: React.ReactNode;
 }) {
+  const className = `relative flex h-12 w-12 shrink-0 cursor-pointer flex-col items-center justify-center gap-0.5 rounded-xl text-[10px] font-semibold text-white transition [filter:drop-shadow(0_1px_1.5px_rgba(0,0,0,0.6))] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white active:scale-95 motion-reduce:transition-none ${
+    tone === "danger"
+      ? "hover:bg-[#e5484d]"
+      : active
+        ? "bg-black/30"
+        : "hover:bg-black/20"
+  }`;
+  if (href) {
+    return (
+      <a href={href} target="_blank" rel="noopener noreferrer" aria-label={title ?? label} title={title ?? label} className={className}>
+        {children}
+        <span aria-hidden="true">{label}</span>
+      </a>
+    );
+  }
   return (
     <button
       type="button"
@@ -108,13 +138,7 @@ function RailButton({
       aria-pressed={tone === "danger" ? undefined : !!active}
       aria-label={title ?? label}
       title={title ?? label}
-      className={`relative flex h-12 w-12 shrink-0 cursor-pointer flex-col items-center justify-center gap-0.5 rounded-xl text-[10px] font-semibold text-white transition [filter:drop-shadow(0_1px_1.5px_rgba(0,0,0,0.6))] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white active:scale-95 motion-reduce:transition-none ${
-        tone === "danger"
-          ? "hover:bg-[#e5484d]"
-          : active
-            ? "bg-black/30"
-            : "hover:bg-black/20"
-      }`}
+      className={className}
     >
       {children}
       <span aria-hidden="true">{label}</span>

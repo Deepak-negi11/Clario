@@ -7,7 +7,7 @@ type ApiErrorBody = {
 };
 
 type ApiRequestOptions<TBody> = {
-  method?: "GET" | "POST" | "DELETE";
+  method?: "GET" | "POST" | "PUT" | "DELETE";
   token?: string;
   body?: TBody;
 };

@@ -2,6 +2,8 @@
 
 import { Footprints, X } from "lucide-react";
 import { WORK_LEVEL_INFO, getChatRoomAtPosition, type MapTemplateId, type WorkLevel } from "@repo/shared";
+import { useDraggablePanel } from "../../hooks/use-draggable-panel";
+import { PanelDragHandle, draggableHeader } from "./panel-drag-handle";
 
 export type PanelPerson = {
   id: string;
@@ -32,12 +34,16 @@ export function PeoplePanel({
   onWalkTo: (position: { x: number; y: number }) => void;
   onClose: () => void;
 }) {
+  const drag = useDraggablePanel("people");
+
   return (
     <section
+      ref={drag.ref}
       aria-label="People"
       className="pointer-events-auto absolute left-[76px] top-3 z-[65] flex max-h-[calc(100dvh-1.5rem)] w-[min(18rem,calc(100vw-6rem))] flex-col overflow-hidden rounded-2xl border border-black/5 bg-white/95 text-[#12151c] shadow-[0_18px_44px_-18px_rgba(18,21,28,0.45)] backdrop-blur-md"
     >
-      <header className="flex items-center justify-between border-b border-[#eceef1] px-4 py-3">
+      <header {...drag.headerProps} className={`${draggableHeader} flex items-center justify-between border-b border-[#eceef1] px-4 py-3`}>
+        <PanelDragHandle label="Move people panel" {...drag.handleProps} />
         <h2 className="text-sm font-semibold">
           People <span className="font-medium text-[#8a909b] tabular-nums">· {people.length}</span>
         </h2>

@@ -30,8 +30,8 @@ Show controls
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
-import { MessageSquare } from "lucide-react";
-import { ERRANDS, WORK_LEVEL_INFO, getChatRoom, getChatRoomAtPosition, type AvatarLook, type MapTemplateId, type WorkLevel } from "@repo/shared";
+import { LoaderCircle, MessageSquare } from "lucide-react";
+import { ERRANDS, WORK_LEVEL_INFO, getChatRoom, getChatRoomAtPosition, type AvatarLook, type MapTemplateId, type WorkLevel, createStarterMap, type CustomMap } from "@repo/shared";
 import { useSpaceSocket } from "../../../hooks/use-space-socket";
 import { useProximityVideo } from "../../../hooks/use-proximity-video";
 import { useLocalMedia, type LocalMediaController } from "../../../hooks/use-local-media";
@@ -46,12 +46,15 @@ import { TasksPanel, countNewTasks, useSpaceTasks } from "../../../components/ga
 import { MapControls } from "../../../components/game-ui/map-controls";
 import { ErrandCelebrationCard, ErrandChoice, ErrandHud, ErrandsPanel } from "../../../components/game-ui/errands";
 import { MentorOnMap } from "../../../components/practice-session/mentor-on-map";
+import { CoworkerOnMap } from "../../../components/coworkers/coworker-on-map";
+import { ArcadeOnMap } from "../../../components/games/arcade-on-map";
 import { createSceneBridge } from "../../../components/phaser/scene-bridge";
 import { PixelPet } from "../../../components/game-ui/pixel-pet";
 import { AgentWorkspace } from "../../../components/game-ui/agent-workspace";
 import { MediaDock } from "../../../components/game-ui/video-tile";
 import { PrejoinScreen } from "../../../components/game-ui/prejoin-screen";
-import { getSpace, getUsersMetadata } from "../../../lib/space-api";
+import { getSpace, getSpaceLayout, getUsersMetadata, saveSpaceLayout } from "../../../lib/space-api";
+import { MapBuilder } from "../../../components/game-ui/map-builder";
 import { getMyProfile, updateProfile } from "../../../lib/auth-api";
 import { getAuthToken } from "../../../lib/auth-token";
 import { saveLook } from "../../../lib/avatar/saved-look";
@@ -171,6 +174,9 @@ function LiveSpace({
   initialDisplayName: string;
   onLeave: () => void;
 }) {
+  // A map built in the map builder: its saved layout (rooms come from it, so it's needed first).
+  const isCustomMap = mapTemplate === "custom-office";
+  const [customMap, setCustomMap] = useState<CustomMap | null>(null);
   const {
     status,
     error,
@@ -196,7 +202,12 @@ function LiveSpace({
     answerChatRequest,
     sendDirect,
     tasksChangedAt,
-  } = useSpaceSocket(spaceId, mapTemplate);
+    layoutUpdate,
+    sendPlay,
+    subscribePlay,
+    props,
+    sendProp,
+  } = useSpaceSocket(spaceId, mapTemplate, customMap);
   const spaceTasks = useSpaceTasks(spaceId, tasksChangedAt);
 
   const othersRef = useRef(others);
@@ -222,6 +233,10 @@ function LiveSpace({
   const fetchedIds = useRef<Set<string>>(new Set());
 
   const bridgeRef = useRef(createSceneBridge());
+  // Bikes and drinks: the 2D map and the 3D view read everyone's props from the bridge every frame,
+  // and the 2D map changes yours through it.
+  bridgeRef.current.props = props;
+  bridgeRef.current.setProp = sendProp;
   const [panel, setPanelState] = useState<SidePanel | null>(readSavedPanel);
   const setPanel = useCallback((next: SidePanel | null) => {
     setPanelState(next);
@@ -236,13 +251,75 @@ function LiveSpace({
   useSwipeRight(() => setPanel("email"), status === "joined");
   const [chatChannel, setChatChannel] = useState<ChatChannel>("general");
   const onlineIds = useMemo(() => new Set(Object.keys(others)), [others]);
+  // Who you can play the arcade games with, and the shared Lounge TV. Keyed on the ids, not on
+  // `others` (which changes every step), so it isn't rebuilt while people walk.
+  const otherIds = Object.keys(others).sort().join(",");
+  const playPeople = useMemo(
+    () => (otherIds ? otherIds.split(",") : []).map((id) => {
+      const name = names[id] ?? id.slice(0, 5);
+      return { id, name: name.length > 20 ? `${name.slice(0, 20)}...` : name };
+    }),
+    [otherIds, names],
+  );
+  const playLink = useMemo(
+    () => ({ selfId, people: playPeople, send: sendPlay, subscribe: subscribePlay }),
+    [selfId, playPeople, sendPlay, subscribePlay],
+  );
   const [view3d, setView3d] = useState(false);
-  const can3d = mapTemplate === "clario-hq";
+  // Clario HQ and built maps have a 3D view; errands are written for Clario HQ's rooms.
+  const isHq = mapTemplate === "clario-hq";
+  const can3d = isHq || (isCustomMap && !!customMap);
   // False until the map has loaded its art; the blue loading screen stays up until then.
   const [mapReady, setMapReady] = useState(false);
 
+  // A map built in the map builder: the saved layout, whether you may edit it (the space's
+  // owner), and the draft drawn on the map while you edit.
+  const [canBuild, setCanBuild] = useState(false);
+  const [draftMap, setDraftMap] = useState<CustomMap | null>(null);
+  const [layoutError, setLayoutError] = useState<string | null>(null);
+  const [savingMap, setSavingMap] = useState(false);
+  const [saveMapError, setSaveMapError] = useState<string | null>(null);
+  useEffect(() => {
+    const token = getAuthToken();
+    if (!isCustomMap || !token) return;
+    getSpaceLayout(token, spaceId)
+      .then(({ layout, canEdit }) => {
+        setCustomMap(layout ?? createStarterMap());
+        setCanBuild(canEdit);
+      })
+      .catch((cause: unknown) => setLayoutError(cause instanceof Error ? cause.message : "Could not load this map"));
+  }, [isCustomMap, spaceId]);
+  // The owner saved a new layout (maybe someone else, maybe you): show it.
+  useEffect(() => {
+    if (layoutUpdate) setCustomMap(layoutUpdate);
+  }, [layoutUpdate]);
+  const saveMap = useCallback(async (draft: CustomMap) => {
+    const token = getAuthToken();
+    if (!token) return;
+    setSavingMap(true);
+    setSaveMapError(null);
+    try {
+      await saveSpaceLayout(token, spaceId, draft);
+      setCustomMap(draft);
+    } catch (cause) {
+      setSaveMapError(cause instanceof Error ? cause.message : "Could not save the map");
+    } finally {
+      setSavingMap(false);
+    }
+  }, [spaceId]);
+  // Leaving the builder any way (its close button, the rail, another panel) drops the unsaved
+  // draft. Opening it goes back to the 2D map, since it edits by clicking there.
+  useEffect(() => {
+    if (panel === "builder") {
+      setView3d(false);
+    } else {
+      setDraftMap(null);
+      setSaveMapError(null);
+    }
+  }, [panel]);
+
   // Errands (Clario HQ only): timed runs to rooms that end with choosing the best message.
-  const errands = useErrands(selfId, currentRoom?.id ?? null, can3d);
+  const errands = useErrands(selfId, currentRoom?.id ?? null, isHq);
   const errandRunning = !!errands.run && errands.run.arrivedAt === null;
   const errandRoomId = errandRunning && errands.errand && errands.run ? errands.errand.steps[errands.run.step]?.room ?? null : null;
   const errandTarget = useMemo(() => (errandRoomId ? getChatRoom(mapTemplate, errandRoomId)?.bounds ?? null : null), [errandRoomId, mapTemplate]);
@@ -359,7 +436,10 @@ function LiveSpace({
     return list;
   }, [selfId, self, others, names, levels, nearbyIds, initialDisplayName]);
 
-  if (status !== "joined") return <SpaceLoading error={error} />;
+  // While reconnecting the map stays up (see the notice below); only the first connection and a
+  // final failure take over the screen.
+  if (status === "connecting") return <SpaceLoading error={null} />;
+  if (status === "error") return <SpaceLoading error={error ?? "Connection lost"} onRetry={() => window.location.reload()} />;
 
   return (
     <div className="relative h-dvh w-screen overflow-hidden bg-[#1b1d2a] text-neutral-100">
@@ -368,15 +448,26 @@ function LiveSpace({
         onPanelChange={setPanel}
         peopleCount={people.length}
         newTaskCount={countNewTasks(spaceTasks.tasks)}
-        errandsLeft={can3d ? ERRANDS.filter((errand) => !errands.progress.done[errand.id]).length : undefined}
+        errandsLeft={isHq ? ERRANDS.filter((errand) => !errands.progress.done[errand.id]).length : undefined}
+        canBuild={isCustomMap && canBuild && !!customMap}
         can3d={can3d}
         view3d={view3d}
         onToggle3d={() => setView3d((open) => !open)}
         onLeave={onLeave}
       />
+      {status === "reconnecting" && (
+        <p
+          role="status"
+          className="pointer-events-none absolute left-1/2 top-14 z-[90] flex -translate-x-1/2 items-center gap-2 rounded-full bg-[#12151c]/85 px-3.5 py-1.5 text-xs font-semibold text-white shadow-lg backdrop-blur-sm"
+        >
+          <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
+          Reconnecting…
+        </p>
+      )}
       <main className="absolute inset-0 overflow-hidden">
-      <PhaserGame
+      {(!isCustomMap || customMap) && <PhaserGame
         mapTemplate={mapTemplate}
+        customMap={draftMap ?? customMap}
         othersRef={othersRef}
         selfRef={selfRef}
         moveRef={moveRef}
@@ -389,7 +480,7 @@ function LiveSpace({
         bridgeRef={bridgeRef}
         selfId={selfId}
         onReady={() => setMapReady(true)}
-      />
+      />}
       {currentRoom && !selectedPlayerId && (
         <div
           className={`pointer-events-none absolute left-1/2 top-4 z-30 -translate-x-1/2 items-center gap-2 rounded-lg bg-[#12151c]/85 px-3 py-1.5 text-white shadow-lg backdrop-blur-sm ${errandRunning ? "hidden sm:flex" : "flex"}`}
@@ -459,6 +550,12 @@ function LiveSpace({
           onClose={() => setView3d(false)}
           onWalkTo={(x, y) => bridgeRef.current.walkTo?.(x, y)}
           errandTarget={errandTarget}
+          customMap={isCustomMap ? draftMap ?? customMap : null}
+          looksRef={looksRef}
+          onUpdateLook={handleUpdateLook}
+          onTalk={(id) => (id === "maya" ? bridgeRef.current.openMentor?.() : bridgeRef.current.openCoworker?.(id))}
+          onPlay={(action) => (action.kind === "tv" ? bridgeRef.current.openTv?.() : bridgeRef.current.openGame?.(action.game))}
+          bridgeRef={bridgeRef}
         />
       )}
       {errands.run && errands.errand && (errandRunning ? (
@@ -481,6 +578,8 @@ function LiveSpace({
       ))}
       {errands.celebration && <ErrandCelebrationCard celebration={errands.celebration} onClose={errands.dismissCelebration} />}
       <MentorOnMap bridgeRef={bridgeRef} />
+      <CoworkerOnMap bridgeRef={bridgeRef} />
+      <ArcadeOnMap bridgeRef={bridgeRef} link={playLink} />
       </main>
       {panel === "people" && (
         <PeoplePanel
@@ -490,7 +589,18 @@ function LiveSpace({
           onClose={() => setPanel(null)}
         />
       )}
-      {panel === "errands" && can3d && (
+      {panel === "builder" && isCustomMap && canBuild && customMap && (
+        <MapBuilder
+          map={customMap}
+          bridgeRef={bridgeRef}
+          saving={savingMap}
+          saveError={saveMapError}
+          onPreview={setDraftMap}
+          onSave={(draft) => void saveMap(draft)}
+          onClose={() => setPanel(null)}
+        />
+      )}
+      {panel === "errands" && isHq && (
         <ErrandsPanel
           progress={errands.progress}
           run={errands.run}
@@ -541,19 +651,28 @@ function LiveSpace({
       {/* Covers the black canvas and the controls while the map is still loading. */}
       {!mapReady && (
         <div className="absolute inset-0 z-[100]">
-          <SpaceLoading error={null} />
+          <SpaceLoading error={layoutError} />
         </div>
       )}
     </div>
   );
 }
 
-function SpaceLoading({ error }: { error: string | null }) {
+function SpaceLoading({ error, onRetry }: { error: string | null; onRetry?: () => void }) {
   return (
     <div className="grid h-screen place-items-center bg-[#dbe8f8] p-6 text-[#111827]">
       <div className="border-2 border-[#111827] bg-[#f8fbff] p-6 text-center shadow-[5px_5px_0_#183a8f]">
         <p className="font-mono text-xs font-bold tracking-[0.12em] text-[#183a8f]">JOINING SPACE</p>
         <p className="mt-2 text-lg font-bold tracking-[-0.03em]">{error ?? "Loading your space…"}</p>
+        {onRetry && (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="mt-4 cursor-pointer border-2 border-[#111827] bg-[#183a8f] px-4 py-1.5 text-sm font-bold text-white transition hover:bg-[#12306f] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#183a8f]"
+          >
+            Try again
+          </button>
+        )}
       </div>
     </div>
   );

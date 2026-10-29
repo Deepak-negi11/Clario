@@ -1,17 +1,50 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getChatRoomAtPosition, ServerMessage, type AvatarLook, type MapTemplateId } from "@repo/shared";
+import {
+  customRoomAt, DM_TEXT_MAX_CHARS, getChatRoomAtPosition, ServerMessage,
+  type AvatarLook, type CustomMap, type MapTemplateId, type PlayClientMessage, type PlayerProp, type PlayServerMessage,
+} from "@repo/shared";
 import { getAuthToken } from "../lib/auth-token";
 import { getSpaceMessages, type ChatScope } from "../lib/space-api";
 import { captureEvent } from "../lib/analytics";
+import { createPrivateChatKeys } from "../lib/private-chat-keys";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 const WS_URL = API_BASE.replace(/^http/, "ws") + "/ws";
 
 export type Position = { x: number; y: number };
 export type Others = Record<string, Position>;
-type Status = "connecting" | "joined" | "error";
+// "reconnecting": the connection dropped after joining (a server restart, a network blip) and
+// is being retried; the map stays on screen meanwhile.
+type Status = "connecting" | "joined" | "reconnecting" | "error";
+
+// Waits 0.5 s, 1 s, 2 s, 4 s, then 8 s between tries: about a minute before giving up.
+const MAX_RECONNECTS = 10;
+const reconnectDelay = (attempt: number) => Math.min(8000, 500 * 2 ** attempt);
+
+// Sets (or, with null, clears) one person's prop, keeping the same object when nothing changes.
+function withProp(props: Record<string, PlayerProp>, userId: string, prop: PlayerProp | null) {
+  if (!prop) {
+    if (!(userId in props)) return props;
+    const next = { ...props };
+    delete next[userId];
+    return next;
+  }
+  return { ...props, [userId]: prop };
+}
+
+// Closes private chats (all, or one person's), keeping the messages. Same object when none was open.
+function closeDirectChats(chats: Record<string, DirectChat>, closedBy: DirectChat["closedBy"], userId?: string) {
+  let next = chats;
+  for (const [id, chat] of Object.entries(chats)) {
+    if (!chat.open || (userId && id !== userId)) continue;
+    if (next === chats) next = { ...chats };
+    next[id] = { messages: chat.messages, open: false, closedBy };
+  }
+  return next;
+}
+
 export type ChatEntry = {
   id: string;
   userId: string;
@@ -32,16 +65,30 @@ export type AgentActivityEntry = {
   commit?: string;
 };
 export type AgentActivities = Record<string, AgentActivityEntry>;
-export type DirectEntry = { id: string; userId: string; text: string; at: number };
-/** A private chat with one person. Closed when they leave; asking again reopens it. */
-export type DirectChat = { messages: DirectEntry[]; open: boolean };
+/** `failed`: a message from them that couldn't be decrypted, or one of yours that wasn't sent. */
+export type DirectEntry = { id: string; userId: string; text: string; at: number; failed?: boolean };
+/**
+ * A private chat with one person, end-to-end encrypted (lib/private-chat-keys.ts). Closed when they
+ * leave or your connection drops; asking again reopens it with new keys. `safetyCode` is there once
+ * the key is ready, for the two of you to compare.
+ */
+export type DirectChat = {
+  messages: DirectEntry[];
+  open: boolean;
+  safetyCode?: string;
+  closedBy?: "left" | "reconnect";
+};
 export type ChatRequest = { fromUserId: string; at: number };
 export type OutgoingRequest = "pending" | "declined";
 
-export function useSpaceSocket(spaceId: string, mapTemplate: MapTemplateId) {
+// `customMap`: the layout of a map built in the map builder, whose rooms decide room chat.
+export function useSpaceSocket(spaceId: string, mapTemplate: MapTemplateId, customMap: CustomMap | null = null) {
   const socketRef = useRef<WebSocket | null>(null);
   const [status, setStatus] = useState<Status>("connecting");
   const [error, setError] = useState<string | null>(null);
+  // Bumped to open a fresh connection after one drops.
+  const [connection, setConnection] = useState(0);
+  const retryRef = useRef<{ attempts: number; timer?: number }>({ attempts: 0 });
   const [selfId, setSelfId] = useState<string | null>(null);
   const [self, setSelf] = useState<Position>({ x: 0, y: 0 });
   const [others, setOthers] = useState<Others>({});
@@ -54,14 +101,23 @@ export function useSpaceSocket(spaceId: string, mapTemplate: MapTemplateId) {
   const [chatRequests, setChatRequests] = useState<ChatRequest[]>([]);
   const [outgoingRequests, setOutgoingRequests] = useState<Record<string, OutgoingRequest>>({});
   const [directChats, setDirectChats] = useState<Record<string, DirectChat>>({});
+  // The private chats' keys, for this page only.
+  const [privateKeys] = useState(createPrivateChatKeys);
   // When the server last said this user's tasks changed; the page reloads them when it moves.
   const [tasksChangedAt, setTasksChangedAt] = useState(0);
+  // A built map the owner just saved; the page swaps it in so everyone sees the new office.
+  const [layoutUpdate, setLayoutUpdate] = useState<CustomMap | null>(null);
+  // The bike each person is riding or the drink in their hand, yours included (prop.schema.ts).
+  const [props, setProps] = useState<Record<string, PlayerProp>>({});
+  const selfIdRef = useRef<string | null>(null);
   const signalHandlerRef = useRef<((fromUserId: string, signal: unknown) => void) | null>(null);
+  // Game Room play and the Lounge TV (components/games/arcade-on-map.tsx) listen here.
+  const playListenersRef = useRef(new Set<(message: PlayServerMessage) => void>());
   const loadedRoomsRef = useRef<Set<string>>(new Set());
 
   const currentRoom = useMemo(
-    () => getChatRoomAtPosition(mapTemplate, self),
-    [mapTemplate, self],
+    () => (customMap ? customRoomAt(customMap, self) : getChatRoomAtPosition(mapTemplate, self)),
+    [customMap, mapTemplate, self],
   );
 
   const mergeHistory = useCallback((history: ChatEntry[], current: ChatEntry[]) => {
@@ -70,10 +126,11 @@ export function useSpaceSocket(spaceId: string, mapTemplate: MapTemplateId) {
   }, []);
 
   // Both people agreed: open (or reopen) the conversation and drop any requests between them.
-  const openDirectChat = useCallback((userId: string) => {
+  // The safety code comes once the key is ready.
+  const openDirectChat = useCallback((userId: string, safetyCode?: string) => {
     setDirectChats((current) => ({
       ...current,
-      [userId]: { messages: current[userId]?.messages ?? [], open: true },
+      [userId]: { messages: current[userId]?.messages ?? [], open: true, safetyCode },
     }));
     setChatRequests((current) => current.filter((request) => request.fromUserId !== userId));
     setOutgoingRequests((current) => {
@@ -94,6 +151,9 @@ export function useSpaceSocket(spaceId: string, mapTemplate: MapTemplateId) {
 
     const ws = new WebSocket(WS_URL);
     socketRef.current = ws;
+    const retry = retryRef.current;
+    let joined = false;
+    let rejected = false; // the server refused the join itself (bad token, no such space): don't retry
 
     ws.onopen = () => {
       ws.send(JSON.stringify({ type: "join", payload: { spaceId, token } }));
@@ -116,11 +176,22 @@ export function useSpaceSocket(spaceId: string, mapTemplate: MapTemplateId) {
       switch (message.type) {
         case "space-joined": {
           setSelfId(message.payload.userId);
+          selfIdRef.current = message.payload.userId;
           setSelf(message.payload.spawn);
           setOthers(Object.fromEntries(
             message.payload.users.map((user) => [user.id, { x: user.x, y: user.y }]),
           ));
+          // A new connection starts you empty-handed (a bike you rode goes back to the rack).
+          setProps(Object.fromEntries(message.payload.users.flatMap((user) => (user.prop ? [[user.id, user.prop]] : []))));
           setAgentActivities(message.payload.agentActivities ?? {});
+          // A new connection starts private chats over: the server forgot them, and so do we, keys too.
+          privateKeys.forgetAll();
+          setChatRequests([]);
+          setOutgoingRequests({});
+          setDirectChats((current) => closeDirectChats(current, "reconnect"));
+          joined = true;
+          retry.attempts = 0;
+          setError(null);
           setStatus("joined");
           captureEvent("space_entered");
 
@@ -153,7 +224,9 @@ export function useSpaceSocket(spaceId: string, mapTemplate: MapTemplateId) {
             delete next[leftId];
             return next;
           });
+          setProps((current) => withProp(current, leftId, null));
           // The server forgets their private chats too; keep the messages but close the chat.
+          privateKeys.forget(leftId);
           setChatRequests((current) => current.filter((request) => request.fromUserId !== leftId));
           setOutgoingRequests((current) => {
             if (!(leftId in current)) return current;
@@ -161,15 +234,18 @@ export function useSpaceSocket(spaceId: string, mapTemplate: MapTemplateId) {
             delete next[leftId];
             return next;
           });
-          setDirectChats((current) => {
-            const chat = current[leftId];
-            if (!chat?.open) return current;
-            return { ...current, [leftId]: { ...chat, open: false } };
-          });
+          setDirectChats((current) => closeDirectChats(current, "left", leftId));
           break;
         }
+        case "prop":
+          setProps((current) => withProp(current, message.payload.userId, message.payload.prop));
+          break;
         case "error":
           setError(message.message);
+          if (!joined) {
+            rejected = true;
+            setStatus("error");
+          }
           break;
         case "chat": {
           const entry: ChatEntry = {
@@ -216,52 +292,106 @@ export function useSpaceSocket(spaceId: string, mapTemplate: MapTemplateId) {
           signalHandlerRef.current?.(message.payload.fromUserId, message.payload.signal);
           break;
         case "dm-request": {
-          const { fromUserId, at } = message.payload;
+          // Asking during an open chat starts it over (they lost their keys), so that chat closes.
+          const { fromUserId, at, publicKey } = message.payload;
+          privateKeys.offered(fromUserId, publicKey);
           setChatRequests((current) => (
             current.some((request) => request.fromUserId === fromUserId)
               ? current
               : [...current, { fromUserId, at }]
           ));
+          setDirectChats((current) => closeDirectChats(current, undefined, fromUserId));
           break;
         }
         case "dm-response": {
-          const { fromUserId, accept } = message.payload;
-          if (accept) openDirectChat(fromUserId);
-          else setOutgoingRequests((current) => ({ ...current, [fromUserId]: "declined" }));
+          const answer = message.payload;
+          const me = selfIdRef.current;
+          if (!answer.accept || !me) {
+            privateKeys.forget(answer.fromUserId);
+            setOutgoingRequests((current) => ({ ...current, [answer.fromUserId]: "declined" }));
+            break;
+          }
+          void privateKeys.accepted(answer.fromUserId, me, answer.publicKey).then((safetyCode) => {
+            if (socketRef.current !== ws) return;
+            if (safetyCode) {
+              openDirectChat(answer.fromUserId, safetyCode);
+              return;
+            }
+            // No key pair left to finish with (or theirs was broken): let them be asked again.
+            setOutgoingRequests((current) => {
+              const next = { ...current };
+              delete next[answer.fromUserId];
+              return next;
+            });
+          });
           break;
         }
         case "dm": {
-          const { fromUserId, text, at } = message.payload;
-          const entry: DirectEntry = { id: `${fromUserId}-${at}`, userId: fromUserId, text, at };
-          setDirectChats((current) => ({
-            ...current,
-            [fromUserId]: { messages: [...(current[fromUserId]?.messages ?? []), entry], open: true },
-          }));
+          // Only ciphertext comes through the server; it's opened here with this chat's key.
+          const { fromUserId, at, ...sealed } = message.payload;
+          const me = selfIdRef.current;
+          if (!me) break;
+          void privateKeys.decrypt(fromUserId, me, sealed).then((text) => {
+            if (socketRef.current !== ws) return;
+            const entry: DirectEntry = text === null
+              ? { id: `${fromUserId}-${at}-${sealed.seq}`, userId: fromUserId, text: "", at, failed: true }
+              : { id: `${fromUserId}-${at}-${sealed.seq}`, userId: fromUserId, text, at };
+            setDirectChats((current) => {
+              const chat = current[fromUserId];
+              // Something unreadable from someone you have no chat with is dropped.
+              if (text === null && !chat) return current;
+              return {
+                ...current,
+                [fromUserId]: { ...chat, messages: [...(chat?.messages ?? []), entry], open: chat?.open ?? true },
+              };
+            });
+          });
           break;
         }
         case "tasks-changed":
           setTasksChangedAt(message.payload.at);
           break;
+        case "layout-updated":
+          setLayoutUpdate(message.payload.layout);
+          break;
+        case "play-invite":
+        case "play-answer":
+        case "play-leave":
+        case "play-data":
+        case "tv":
+          for (const listener of playListenersRef.current) listener(message);
+          break;
       }
     };
 
-    ws.onerror = () => {
-      setStatus("error");
-      setError("Connection error");
-    };
+    // An error is always followed by a close, which decides whether to try again.
+    ws.onerror = () => {};
     ws.onclose = () => {
-      if (socketRef.current === ws) {
+      if (socketRef.current !== ws) return; // closed on purpose (leaving, or a newer connection)
+      socketRef.current = null;
+      if (rejected) return;
+      if (retry.attempts >= MAX_RECONNECTS) {
         setStatus("error");
-        setError((current) => current ?? "Connection closed");
+        setError("Can't reach the server. Check your connection and try again.");
+        return;
       }
+      // Before the first join this stays "connecting" (loading screen); after it, the map stays up.
+      setStatus((current) => (current === "connecting" ? "connecting" : "reconnecting"));
+      retry.timer = window.setTimeout(() => setConnection((count) => count + 1), reconnectDelay(retry.attempts));
+      retry.attempts += 1;
     };
 
     return () => {
-      signalHandlerRef.current = null;
+      window.clearTimeout(retry.timer);
       if (socketRef.current === ws) socketRef.current = null;
       ws.close();
     };
-  }, [spaceId, mergeHistory, openDirectChat]);
+  }, [spaceId, mergeHistory, openDirectChat, connection, privateKeys]);
+
+  // Only when leaving the space: a reconnect must keep the video hook's signal handler.
+  useEffect(() => () => {
+    signalHandlerRef.current = null;
+  }, []);
 
   useEffect(() => {
     if (status !== "joined" || !currentRoom || loadedRoomsRef.current.has(currentRoom.id)) return;
@@ -342,34 +472,80 @@ export function useSpaceSocket(spaceId: string, mapTemplate: MapTemplateId) {
     ws.send(JSON.stringify({ type: "webrtc-signal", payload: { targetUserId, signal } }));
   }, []);
 
+  // The request carries your public key for this chat; only the person asked receives it.
   const requestChat = useCallback((userId: string) => {
     const ws = socketRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify({ type: "dm-request", payload: { targetUserId: userId } }));
     setOutgoingRequests((current) => ({ ...current, [userId]: "pending" }));
-  }, []);
+    privateKeys.requestKey(userId).then(
+      (publicKey) => {
+        if (socketRef.current !== ws || ws.readyState !== WebSocket.OPEN) return;
+        ws.send(JSON.stringify({ type: "dm-request", payload: { targetUserId: userId, publicKey } }));
+      },
+      () => {
+        console.warn("Private chat needs WebCrypto, which only works on https pages and localhost.");
+        setOutgoingRequests((current) => {
+          const next = { ...current };
+          delete next[userId];
+          return next;
+        });
+      },
+    );
+  }, [privateKeys]);
 
+  // A yes opens the chat at once and sends your public key as soon as the key is ready.
   const answerChatRequest = useCallback((userId: string, accept: boolean) => {
     const ws = socketRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify({ type: "dm-response", payload: { targetUserId: userId, accept } }));
-    if (accept) openDirectChat(userId);
-    else setChatRequests((current) => current.filter((request) => request.fromUserId !== userId));
-  }, [openDirectChat]);
+    const me = selfIdRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN || !me) return;
+    if (!accept) {
+      privateKeys.declined(userId);
+      ws.send(JSON.stringify({ type: "dm-response", payload: { targetUserId: userId, accept: false } }));
+      setChatRequests((current) => current.filter((request) => request.fromUserId !== userId));
+      return;
+    }
+    openDirectChat(userId);
+    void privateKeys.accept(userId, me, (publicKey) => {
+      if (socketRef.current !== ws || ws.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify({ type: "dm-response", payload: { targetUserId: userId, accept: true, publicKey } }));
+    }).then((safetyCode) => {
+      if (socketRef.current !== ws) return;
+      setDirectChats((current) => {
+        const chat = current[userId];
+        if (!chat?.open) return current;
+        // No key could be made from their request: the chat can't be private, so it stays closed.
+        return { ...current, [userId]: safetyCode ? { ...chat, safetyCode } : { messages: chat.messages, open: false } };
+      });
+    });
+  }, [openDirectChat, privateKeys]);
 
+  // Shown at once; the ciphertext goes out when it's ready, in the order you typed.
   const sendDirect = useCallback((userId: string, text: string) => {
-    const trimmed = text.trim();
+    const trimmed = text.trim().slice(0, DM_TEXT_MAX_CHARS);
     const ws = socketRef.current;
-    if (!trimmed || !ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify({ type: "dm", payload: { targetUserId: userId, text: trimmed } }));
+    const me = selfIdRef.current;
+    if (!trimmed || !ws || ws.readyState !== WebSocket.OPEN || !me) return;
     const at = Date.now();
-    const entry: DirectEntry = { id: `me-${at}`, userId: selfId ?? "me", text: trimmed, at };
+    const id = `me-${at}-${Math.random().toString(36).slice(2, 7)}`;
+    void privateKeys.encrypt(userId, me, trimmed).then((sealed) => {
+      if (sealed && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "dm", payload: { targetUserId: userId, ...sealed } }));
+        return;
+      }
+      setDirectChats((current) => {
+        const chat = current[userId];
+        if (!chat) return current;
+        const messages = chat.messages.map((message) => (message.id === id ? { ...message, failed: true } : message));
+        return { ...current, [userId]: { ...chat, messages } };
+      });
+    });
+    const entry: DirectEntry = { id, userId: me, text: trimmed, at };
     setDirectChats((current) => {
       const chat = current[userId];
       if (!chat) return current;
       return { ...current, [userId]: { ...chat, messages: [...chat.messages, entry] } };
     });
-  }, [selfId]);
+  }, [privateKeys]);
 
   const registerSignalHandler = useCallback(
     (handler: (fromUserId: string, signal: unknown) => void) => {
@@ -377,6 +553,31 @@ export function useSpaceSocket(spaceId: string, mapTemplate: MapTemplateId) {
     },
     [],
   );
+
+  // Game Room play and the Lounge TV: send, and listen for what the server relays back.
+  const sendPlay = useCallback((message: PlayClientMessage) => {
+    const ws = socketRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify(message));
+  }, []);
+
+  // Your bike or drink changed: shown at once, and the server tells everyone else. If someone
+  // else already rides that bike, the server sends back what you really have.
+  const sendProp = useCallback((prop: PlayerProp | null) => {
+    const ws = socketRef.current;
+    const me = selfIdRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN || !me) return;
+    setProps((current) => withProp(current, me, prop));
+    ws.send(JSON.stringify({ type: "prop", payload: { prop } }));
+  }, []);
+
+  const subscribePlay = useCallback((listener: (message: PlayServerMessage) => void) => {
+    const listeners = playListenersRef.current;
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  }, []);
 
   return {
     status,
@@ -396,6 +597,10 @@ export function useSpaceSocket(spaceId: string, mapTemplate: MapTemplateId) {
     agentActivities,
     sendSignal,
     registerSignalHandler,
+    sendPlay,
+    subscribePlay,
+    props,
+    sendProp,
     chatRequests,
     outgoingRequests,
     directChats,
@@ -403,5 +608,6 @@ export function useSpaceSocket(spaceId: string, mapTemplate: MapTemplateId) {
     answerChatRequest,
     sendDirect,
     tasksChangedAt,
+    layoutUpdate,
   };
 }

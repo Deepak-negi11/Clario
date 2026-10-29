@@ -1,4 +1,4 @@
-import type { AvatarLook, MapTemplateId } from "@repo/shared";
+import type { AvatarLook, CustomMap, MapTemplateId, WorkLevel } from "@repo/shared";
 import { apiRequest } from "./api-client";
 
 export type SpaceSummary = {
@@ -34,6 +34,8 @@ type CreateSpaceInput = {
   name: string;
   dimensions: string;
   mapTemplate: MapTemplateId;
+  // With "custom-office": the server lays the office out for this many people.
+  teamSize?: number;
 };
 
 export function listSpaces(token: string) {
@@ -59,6 +61,19 @@ export function getSpace(token: string, spaceId: string) {
   return apiRequest<SpaceDetails>(`/api/v1/space/${spaceId}`, { token });
 }
 
+// The layout of a map built in the map builder; only the space's owner may change it.
+export function getSpaceLayout(token: string, spaceId: string) {
+  return apiRequest<{ layout: CustomMap | null; canEdit: boolean }>(`/api/v1/space/${spaceId}/layout`, { token });
+}
+
+export function saveSpaceLayout(token: string, spaceId: string, layout: CustomMap) {
+  return apiRequest<{ ok: true }, { layout: CustomMap }>(`/api/v1/space/${spaceId}/layout`, {
+    method: "PUT",
+    token,
+    body: { layout },
+  });
+}
+
 
 export type UserMeta = {
   userId: string;
@@ -66,6 +81,8 @@ export type UserMeta = {
   username: string;
   /** Custom avatar colours; null or missing means the default character. */
   look?: AvatarLook | null;
+  /** Null until they pick one on the join screen. */
+  level?: WorkLevel | null;
 };
 
 
@@ -152,8 +169,8 @@ export type SpaceTask = {
   updatedAt: number;
 };
 
-/** isOwner: this user created the space, so they can assign tasks. given is empty otherwise. */
-export type SpaceTasks = { isOwner: boolean; received: SpaceTask[]; given: SpaceTask[] };
+/** level is this user's own; canAssign is true when someone could be below them (above Fresher). */
+export type SpaceTasks = { level: WorkLevel | null; canAssign: boolean; received: SpaceTask[]; given: SpaceTask[] };
 
 export type NewTaskInput = { assigneeId: string; subject: string; description: string };
 

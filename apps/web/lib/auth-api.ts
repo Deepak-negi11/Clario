@@ -1,4 +1,4 @@
-import type { AvatarLook } from "@repo/shared";
+import type { AvatarLook, WorkLevel } from "@repo/shared";
 import { apiRequest } from "./api-client";
 export { AUTH_TOKEN_KEY } from "./auth-token";
 
@@ -31,7 +31,20 @@ export type UpdateProfileInput = {
   username?: string;
   email?: string;
   avatarLook?: AvatarLook | null;
+  level?: WorkLevel;
 };
+
+export type MyProfile = {
+  userId: string;
+  username: string;
+  email: string;
+  avatarLook: AvatarLook | null;
+  level: WorkLevel | null;
+};
+
+export function getMyProfile(token: string) {
+  return apiRequest<MyProfile>("/api/v1/user/profile", { method: "GET", token });
+}
 
 export function updateProfile(token: string, input: UpdateProfileInput) {
   return apiRequest<{ message: string; username?: string; email?: string }, UpdateProfileInput>("/api/v1/user/profile", {

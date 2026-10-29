@@ -1,9 +1,13 @@
 "use client";
 
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, LoaderCircle, Mail, PenLine, Send, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, LoaderCircle, Mail, PenLine, Send, Sparkles, TriangleAlert, X } from "lucide-react";
+import { applyToneFlag, findInformalWords, mergeToneFlags, type ToneFlag } from "@repo/shared";
 import { sendSpaceEmail } from "../../lib/space-api";
 import { getAuthToken } from "../../lib/auth-token";
+import { useEmailAssist } from "../../hooks/use-email-assist";
+import { useDraggablePanel } from "../../hooks/use-draggable-panel";
+import { PanelDragHandle, draggableHeader } from "./panel-drag-handle";
 
 // Mirrors the server limits in apps/server/src/email/email.ts.
 const MAX_SUBJECT_LENGTH = 150;
@@ -48,10 +52,17 @@ const enterTransition =
   "transition-[opacity,translate] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none";
 // Same timing as enterTransition, for the step that slides out.
 const SLIDE_TIMING: KeyframeAnimationOptions = { duration: 300, easing: "cubic-bezier(0.16, 1, 0.3, 1)" };
+const smallButton =
+  "h-7 shrink-0 cursor-pointer rounded-lg px-2.5 text-[12px] font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#12151c] motion-reduce:transition-none";
+
+function flagKey(flag: ToneFlag) {
+  return `${flag.field}:${flag.quote.toLowerCase()}`;
+}
 
 export function EmailComposer({ open, spaceId, people, onClose }: EmailComposerProps) {
   const ids = useId();
-  const panelRef = useRef<HTMLElement | null>(null);
+  const drag = useDraggablePanel("email");
+  const panelRef = drag.panel;
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const subjectRef = useRef<HTMLInputElement | null>(null);
@@ -71,6 +82,9 @@ export function EmailComposer({ open, spaceId, people, onClose }: EmailComposerP
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [sendState, setSendState] = useState<SendState>({ kind: "idle" });
+  // Casual words the writer chose to keep, and the suggested message they closed.
+  const [keptWords, setKeptWords] = useState<string[]>([]);
+  const [dismissedSuggestion, setDismissedSuggestion] = useState<string | null>(null);
   const [sendShortcut] = useState(() =>
     typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.userAgent) ? "⌘ Enter" : "Ctrl+Enter",
   );
@@ -98,6 +112,24 @@ export function EmailComposer({ open, spaceId, people, onClose }: EmailComposerP
     body: body.trim().length > 0,
   };
 
+  const assist = useEmailAssist({
+    active: open && sendState.kind !== "sent" && step !== "to",
+    checkMessage: step === "body",
+    recipientName: recipient?.name ?? "",
+    subject,
+    body,
+  });
+  // The word list flags the common casual words at once; the AI's flags join when it answers.
+  const subjectFlags = mergeToneFlags(subject, findInformalWords(subject, "subject", recipient?.name), assist.subjectFlags).filter(
+    (flag) => !keptWords.includes(flagKey(flag)),
+  );
+  const bodyFlags = mergeToneFlags(body, findInformalWords(body, "body", recipient?.name), assist.bodyFlags).filter(
+    (flag) => !keptWords.includes(flagKey(flag)),
+  );
+  // The suggestion sits inside the empty message box, so it never moves the panel; typing hides it.
+  const suggestion = body === "" && assist.suggestion !== dismissedSuggestion ? assist.suggestion : null;
+  const suggesting = body === "" && !assist.suggestion && assist.suggesting;
+
   // Remember what had focus when the panel opened, and hand it back on close.
   useEffect(() => {
     if (open) {
@@ -105,7 +137,7 @@ export function EmailComposer({ open, spaceId, people, onClose }: EmailComposerP
       return;
     }
     if (panelRef.current?.contains(document.activeElement)) restoreFocusRef.current?.focus();
-  }, [open]);
+  }, [open, panelRef]);
 
   useEffect(() => {
     if (!open) return;
@@ -207,7 +239,35 @@ export function EmailComposer({ open, spaceId, people, onClose }: EmailComposerP
     setQuery("");
     setActiveIndex(0);
     setSendState({ kind: "idle" });
+    setKeptWords([]);
+    setDismissedSuggestion(null);
     setStep("to");
+  }
+
+  function applyFlag(flag: ToneFlag) {
+    if (flag.field === "subject") {
+      setSubject((text) => applyToneFlag(text, flag).slice(0, MAX_SUBJECT_LENGTH));
+      subjectRef.current?.focus();
+    } else {
+      setBody((text) => applyToneFlag(text, flag).slice(0, MAX_BODY_LENGTH));
+      bodyRef.current?.focus();
+    }
+  }
+
+  function keepWords(flag: ToneFlag) {
+    setKeptWords((keys) => [...keys, flagKey(flag)]);
+    (flag.field === "subject" ? subjectRef : bodyRef).current?.focus();
+  }
+
+  function acceptSuggestion() {
+    if (!suggestion) return;
+    setBody(suggestion.slice(0, MAX_BODY_LENGTH));
+    bodyRef.current?.focus();
+  }
+
+  function dismissSuggestion() {
+    setDismissedSuggestion(suggestion);
+    bodyRef.current?.focus();
   }
 
   function close() {
@@ -265,7 +325,8 @@ export function EmailComposer({ open, spaceId, people, onClose }: EmailComposerP
   }
 
   function handleSubjectKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
-    const advances = event.key === "Enter" || (event.key === "Tab" && !event.shiftKey);
+    // While a casual word is flagged, Tab reaches its buttons instead; Enter still moves on.
+    const advances = event.key === "Enter" || (event.key === "Tab" && !event.shiftKey && subjectFlags.length === 0);
     if (event.key === "Enter") event.preventDefault();
     if (advances && isComplete.subject) {
       event.preventDefault();
@@ -291,7 +352,7 @@ export function EmailComposer({ open, spaceId, people, onClose }: EmailComposerP
   // Same slot as the people panel; it slides out from under the sidebar rail and is only as tall as its content.
   return (
     <section
-      ref={panelRef}
+      ref={drag.ref}
       role="dialog"
       aria-labelledby={`${ids}-title`}
       inert={!open}
@@ -300,7 +361,8 @@ export function EmailComposer({ open, spaceId, people, onClose }: EmailComposerP
         open ? "translate-x-0 opacity-100" : "pointer-events-none -translate-x-[calc(100%+76px)] opacity-0"
       }`}
     >
-      <header className="flex items-center justify-between border-b border-[#eceef1] px-4 py-3">
+      <header {...drag.headerProps} className={`${draggableHeader} flex items-center justify-between border-b border-[#eceef1] px-4 py-3`}>
+        <PanelDragHandle label="Move email panel" {...drag.handleProps} />
         <div className="flex items-center gap-2">
           {previousStep ? (
             <button
@@ -471,7 +533,19 @@ export function EmailComposer({ open, spaceId, people, onClose }: EmailComposerP
                       className={fieldInput}
                     />
                     <div className="mt-1 flex items-center justify-between gap-3">
-                      <p className="text-[11px] text-[#5c6371]">Enter or Tab to continue</p>
+                      {subjectFlags[0] ? (
+                        <ToneFlagRow
+                          flag={subjectFlags[0]}
+                          more={subjectFlags.length - 1}
+                          onApply={applyFlag}
+                          onKeep={keepWords}
+                        />
+                      ) : (
+                        <p className="text-[11px] text-[#5c6371]">Enter or Tab to continue</p>
+                      )}
+                      <span className="sr-only" aria-live="polite">
+                        {subjectFlags[0] && `Too casual for a work email: “${subjectFlags[0].quote}”. ${subjectFlags[0].reason}`}
+                      </span>
                       <button type="button" onClick={() => advanceFrom("subject")} disabled={!isComplete.subject} className={primaryButton}>
                         Next
                         <ArrowRight size={15} aria-hidden="true" />
@@ -488,23 +562,74 @@ export function EmailComposer({ open, spaceId, people, onClose }: EmailComposerP
                       </label>
                       {recipientNote}
                     </div>
-                    <textarea
-                      ref={bodyRef}
-                      id={`${ids}-body`}
-                      name="message"
-                      value={body}
-                      onChange={(event) => setBody(event.target.value)}
-                      onKeyDown={handleBodyKeyDown}
-                      maxLength={MAX_BODY_LENGTH}
-                      disabled={isSending}
-                      rows={7}
-                      placeholder={recipient ? `Write to ${recipient.name}…` : "Write your message…"}
-                      aria-describedby={`${ids}-body-hint`}
-                      className={`${fieldInput} h-44 resize-none leading-relaxed`}
-                    />
-                    <div id={`${ids}-body-hint`} className="flex items-center justify-between text-[11px] text-[#5c6371]">
-                      <span className="pointer-coarse:invisible">{sendShortcut} to send</span>
-                      <span className="tabular-nums">
+                    <div className="relative">
+                      <textarea
+                        ref={bodyRef}
+                        id={`${ids}-body`}
+                        name="message"
+                        value={body}
+                        onChange={(event) => setBody(event.target.value)}
+                        onKeyDown={handleBodyKeyDown}
+                        maxLength={MAX_BODY_LENGTH}
+                        disabled={isSending}
+                        rows={7}
+                        placeholder={suggestion || suggesting ? "" : recipient ? `Write to ${recipient.name}…` : "Write your message…"}
+                        aria-describedby={`${ids}-body-hint ${ids}-body-count`}
+                        className={`${fieldInput} h-44 resize-none leading-relaxed`}
+                      />
+                      {(suggestion || suggesting) && (
+                        <div className="pointer-events-none absolute inset-px flex flex-col gap-1.5 px-3 pb-2.5 pt-2.5">
+                          <p className={`${fieldLabel} flex items-center gap-1.5`}>
+                            {suggestion ? (
+                              <Sparkles size={11} aria-hidden="true" />
+                            ) : (
+                              <LoaderCircle size={11} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                            )}
+                            {suggestion ? "Suggested from your subject" : "Drafting a suggestion…"}
+                          </p>
+                          {suggestion && (
+                            <>
+                              {/* Scrolls when long (by keyboard too), so the whole suggestion can be read before using it. */}
+                              <div
+                                role="region"
+                                aria-label="Suggested message"
+                                tabIndex={0}
+                                onClick={() => bodyRef.current?.focus()}
+                                className="pointer-events-auto -mx-1 min-h-0 flex-1 cursor-text overflow-y-auto overscroll-contain whitespace-pre-line rounded-md px-1 text-[13px] leading-relaxed text-[#5c6371] outline-none focus-visible:ring-2 focus-visible:ring-[#12151c]/30"
+                              >
+                                {suggestion}
+                              </div>
+                              <div className="pointer-events-auto flex items-center gap-1.5">
+                                <button type="button" onClick={acceptSuggestion} className={`${smallButton} bg-[#12151c] text-white hover:bg-black`}>
+                                  Use suggestion
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={dismissSuggestion}
+                                  className={`${smallButton} text-[#5c6371] hover:bg-[#eceef1] hover:text-[#12151c]`}
+                                >
+                                  Dismiss
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <span className="sr-only" aria-live="polite">
+                      {suggestion
+                        ? "A suggested message is ready. Press Tab to read it, then Tab to use or dismiss it, or just start typing."
+                        : bodyFlags[0] && `Too casual for a work email: “${bodyFlags[0].quote}”. ${bodyFlags[0].reason}`}
+                    </span>
+                    <div className="flex h-6 items-center justify-between gap-3 text-[11px] text-[#5c6371]">
+                      {bodyFlags[0] ? (
+                        <ToneFlagRow flag={bodyFlags[0]} more={bodyFlags.length - 1} onApply={applyFlag} onKeep={keepWords} />
+                      ) : (
+                        <span id={`${ids}-body-hint`} className="pointer-coarse:invisible">
+                          {sendShortcut} to send
+                        </span>
+                      )}
+                      <span id={`${ids}-body-count`} className="shrink-0 tabular-nums">
                         {body.length.toLocaleString()} / {MAX_BODY_LENGTH.toLocaleString()}
                       </span>
                     </div>
@@ -544,5 +669,60 @@ export function EmailComposer({ open, spaceId, people, onClose }: EmailComposerP
         </>
       )}
     </section>
+  );
+}
+
+// One flagged word at a time, in the hint row under the field, so the panel never changes height.
+// The fix is a suggestion: "Keep" leaves the words as they are.
+function ToneFlagRow({
+  flag,
+  more,
+  onApply,
+  onKeep,
+}: {
+  flag: ToneFlag;
+  more: number;
+  onApply: (flag: ToneFlag) => void;
+  onKeep: (flag: ToneFlag) => void;
+}) {
+  return (
+    // A container, so a narrow panel (phones) drops the "Casual:" label before it hides the word itself.
+    <div className="@container min-w-0 flex-1">
+      <div className="flex items-center gap-1 text-[11px] @min-[13rem]:gap-1.5" title={flag.reason}>
+        <TriangleAlert size={13} className="shrink-0 text-[#b54708]" aria-hidden="true" />
+        <span className="min-w-[2.5rem] truncate text-[#12151c]">
+          <span className="text-[#5c6371] @max-[13rem]:hidden">Casual: </span>“{flag.quote}”
+        </span>
+        <button
+          type="button"
+          onClick={() => onApply(flag)}
+          aria-label={flag.suggestion ? `Replace “${flag.quote}” with “${flag.suggestion}”` : `Remove “${flag.quote}”`}
+          className="h-6 min-w-0 max-w-[55%] cursor-pointer truncate rounded-md bg-[#fff4e5] px-1.5 font-semibold text-[#93370d] transition hover:bg-[#ffe7c7] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#12151c] motion-reduce:transition-none"
+        >
+          {flag.suggestion ? (
+            <>
+              <span className="@max-[13rem]:hidden">Use </span>“{flag.suggestion}”
+            </>
+          ) : (
+            "Remove"
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={() => onKeep(flag)}
+          aria-label={`Keep “${flag.quote}”`}
+          title="Keep it"
+          className="grid h-6 w-6 shrink-0 cursor-pointer place-items-center rounded-md text-[#5c6371] transition hover:bg-[#f4f5f7] hover:text-[#12151c] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#12151c] motion-reduce:transition-none"
+        >
+          <X size={12} aria-hidden="true" />
+        </button>
+        {more > 0 && (
+          <span className="shrink-0 tabular-nums text-[#5c6371]">
+            +{more}
+            <span className="sr-only"> more</span>
+          </span>
+        )}
+      </div>
+    </div>
   );
 }
