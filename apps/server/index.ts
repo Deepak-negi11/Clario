@@ -21,10 +21,12 @@ import {
   handleListElements,
   handleGetMessages,
 } from "./src/space/space";
+import { handleGetLayout, handleSaveLayout } from "./src/space/layout";
 import { makeSocketData, onMessage, onClose } from "./src/ws/ws-handler";
 import type { SocketData } from "./src/ws/room-manager";
 import { stopAllRoomEventSubscriptions } from "./src/ws/pubsub";
 import { handleAgentActivity } from "./src/agent/agent-activity";
+import { handleCreateAgentKey } from "./src/agent/agent-key";
 import { handleSendEmail } from "./src/email/email";
 import {
   handleListTasks,
@@ -54,7 +56,7 @@ function getCorsHeaders(origin: string | null) {
 
   return {
     "Access-Control-Allow-Origin": activeOrigin,
-    "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
+    "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type,Authorization",
     "Vary": "Origin",
   };
@@ -137,6 +139,11 @@ export function startServer(port: number) {
         DELETE: withCors(handleDeleteSpace),
         OPTIONS: handleCorsPreflight,
       },
+      "/api/v1/space/:spaceId/layout": {
+        GET: withCors(handleGetLayout),
+        PUT: withCors(handleSaveLayout),
+        OPTIONS: handleCorsPreflight,
+      },
       "/api/v1/space/:spaceId/messages": {
         GET: withCors(handleGetMessages),
         OPTIONS: handleCorsPreflight,
@@ -164,6 +171,7 @@ export function startServer(port: number) {
         POST: withCors(handleAgentActivity),
         OPTIONS: handleCorsPreflight,
       },
+      "/api/v1/agent-key": { POST: withCors(handleCreateAgentKey), OPTIONS: handleCorsPreflight },
     },
     fetch(req, server) {
 

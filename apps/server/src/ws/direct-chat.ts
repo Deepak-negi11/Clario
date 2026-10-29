@@ -25,15 +25,17 @@ function chatsFor(spaceId: string) {
   return chats;
 }
 
-export type RequestResult = "sent" | "already-pending" | "already-open" | "declined-recently";
+export type RequestResult = "sent" | "declined-recently";
 
+// Each request carries the asker's newest public key (the chat is end-to-end encrypted), so asking
+// again is always passed on. It also ends a chat that was still open: the asker has lost its keys
+// (a reload or a dropped connection), so the old chat can't be read on their side anymore.
 export function requestDirectChat(spaceId: string, fromUserId: string, toUserId: string, now = Date.now()): RequestResult {
   const chats = chatsFor(spaceId);
   const key = requestKey(fromUserId, toUserId);
-  if (chats.open.has(pairKey(fromUserId, toUserId))) return "already-open";
-  if (chats.pending.has(key)) return "already-pending";
   const declinedAt = chats.declinedAt.get(key);
   if (declinedAt !== undefined && now - declinedAt < ASK_AGAIN_AFTER_MS) return "declined-recently";
+  chats.open.delete(pairKey(fromUserId, toUserId));
   chats.pending.add(key);
   return "sent";
 }

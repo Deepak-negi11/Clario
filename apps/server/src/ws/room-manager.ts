@@ -1,4 +1,5 @@
 import type { ServerWebSocket } from "bun";
+import type { PlayerProp } from "@repo/shared";
 
 
 
@@ -18,6 +19,8 @@ type Member = {
   userId: string;
   x: number;
   y: number;
+  // A bike they're riding or a drink in their hand (prop.schema.ts in @repo/shared).
+  prop?: PlayerProp | null;
 };
 
 
@@ -36,6 +39,8 @@ export type SocketData = {
   spaceId?: string;
   x: number;
   y: number;
+  // The player's last step still being handled; the next one waits for it (ws-handler.ts).
+  moves?: Promise<unknown>;
 };
 
 
@@ -120,6 +125,15 @@ export function updatePosition(spaceId: string, userId: string, x: number, y: nu
   }
 }
 
+
+export function propOf(spaceId: string, userId: string): PlayerProp | null {
+  return rooms.get(spaceId)?.get(userId)?.prop ?? null;
+}
+
+export function setProp(spaceId: string, userId: string, prop: PlayerProp | null) {
+  const member = rooms.get(spaceId)?.get(userId);
+  if (member) member.prop = prop;
+}
 
 export function isInRoom(spaceId: string, userId: string) {
   return rooms.get(spaceId)?.has(userId) ?? false;

@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import axios from "axios";
+import { createDmKeyPair, decryptDm, deriveDmKey, encryptDm } from "@repo/shared";
 import { startServer } from "../../index";
 
 const PORT = 4010;
@@ -219,6 +220,37 @@ describe("WebSocket", () => {
       wsB.close();
     });
 
+    test("accepts steps sent back to back, each from the one before", async () => {
+      const { token: tokenA, spaceId } = await setupUserAndSpace();
+      const { token: tokenB } = await setupUserAndSpace();
+
+      const wsA = new TestSocket(WS_URL);
+      await wsA.waitForOpen();
+      wsA.send({ type: "join", payload: { spaceId, token: tokenA } });
+      const spawn = (await wsA.nextMessage()).payload?.spawn as { x: number; y: number };
+
+      const wsB = new TestSocket(WS_URL);
+      await wsB.waitForOpen();
+      wsB.send({ type: "join", payload: { spaceId, token: tokenB } });
+      await wsB.nextMessage();
+      await wsA.nextMessage();
+
+      // A walk along a path sends its steps faster than the server answers them.
+      for (let step = 1; step <= 4; step++) wsB.send({ type: "move", payload: { x: spawn.x + step, y: spawn.y } });
+
+      const seen: number[] = [];
+      for (let step = 1; step <= 4; step++) {
+        const movement = await wsA.nextMessage();
+        expect(movement.type).toBe("movement");
+        seen.push(movement.payload?.x as number);
+      }
+      expect(seen).toEqual([1, 2, 3, 4].map((step) => spawn.x + step));
+      await expect(wsB.nextMessage(300)).rejects.toThrow("timed out");
+
+      wsA.close();
+      wsB.close();
+    });
+
     test("rejects a teleport-sized move and returns the current position", async () => {
       const { token, spaceId } = await setupUserAndSpace();
 
@@ -236,6 +268,48 @@ describe("WebSocket", () => {
       expect(message.payload?.y).toBe(spawn.y);
 
       ws.close();
+    });
+  });
+
+  describe("props", () => {
+    test("shares a bike ride, keeps each bike to one rider and tells late joiners", async () => {
+      const { token: tokenA, spaceId } = await setupUserAndSpace();
+      const { token: tokenB } = await setupUserAndSpace();
+      const { token: tokenC } = await setupUserAndSpace();
+
+      const wsA = new TestSocket(WS_URL);
+      await wsA.waitForOpen();
+      wsA.send({ type: "join", payload: { spaceId, token: tokenA } });
+      const userA = (await wsA.nextMessage()).payload?.userId;
+
+      const wsB = new TestSocket(WS_URL);
+      await wsB.waitForOpen();
+      wsB.send({ type: "join", payload: { spaceId, token: tokenB } });
+      const userB = (await wsB.nextMessage()).payload?.userId;
+      await wsA.nextMessage();
+
+      wsA.send({ type: "prop", payload: { prop: { kind: "bike", bike: "orange" } } });
+      const ride = await wsB.nextMessage();
+      expect(ride).toEqual({ type: "prop", payload: { userId: userA, prop: { kind: "bike", bike: "orange" } } });
+
+      // The orange bike is taken: B gets their own prop (none) back, and A hears nothing.
+      wsB.send({ type: "prop", payload: { prop: { kind: "bike", bike: "orange" } } });
+      expect(await wsB.nextMessage()).toEqual({ type: "prop", payload: { userId: userB, prop: null } });
+      await expect(wsA.nextMessage(300)).rejects.toThrow("timed out");
+
+      wsB.send({ type: "prop", payload: { prop: { kind: "can", drink: "lime", sips: 1 } } });
+      expect((await wsA.nextMessage()).payload?.prop).toEqual({ kind: "can", drink: "lime", sips: 1 });
+
+      const wsC = new TestSocket(WS_URL);
+      await wsC.waitForOpen();
+      wsC.send({ type: "join", payload: { spaceId, token: tokenC } });
+      const users = (await wsC.nextMessage()).payload?.users as { id: string; prop?: unknown }[];
+      expect(users.find((user) => user.id === userA)?.prop).toEqual({ kind: "bike", bike: "orange" });
+      expect(users.find((user) => user.id === userB)?.prop).toEqual({ kind: "can", drink: "lime", sips: 1 });
+
+      wsA.close();
+      wsB.close();
+      wsC.close();
     });
   });
 
@@ -408,30 +482,75 @@ describe("WebSocket", () => {
       return { wsA, wsB, wsC, userIdA, userIdB };
     }
 
-    test("a private message needs an accepted request and reaches only that person", async () => {
+    test("a private message needs an accepted request, reaches only that person, and is only ciphertext", async () => {
       const { wsA, wsB, wsC, userIdA, userIdB } = await joinThree();
+      const keysA = await createDmKeyPair();
+      const keysB = await createDmKeyPair();
 
-      wsA.send({ type: "dm", payload: { targetUserId: userIdB, text: "too early" } });
+      const tooEarly = await encryptDm(await deriveDmKey(keysA, userIdA, keysB.publicKey, userIdB), "too early", {
+        fromUserId: userIdA, toUserId: userIdB, seq: 0,
+      });
+      wsA.send({ type: "dm", payload: { targetUserId: userIdB, seq: 0, ...tooEarly } });
       const early = await wsA.nextMessage();
       expect(early.type).toBe("error");
 
-      wsA.send({ type: "dm-request", payload: { targetUserId: userIdB } });
+      wsA.send({ type: "dm-request", payload: { targetUserId: userIdB, publicKey: keysA.publicKey } });
       const request = await wsB.nextMessage();
       expect(request.type).toBe("dm-request");
       expect(request.payload?.fromUserId).toBe(userIdA);
+      expect(request.payload?.publicKey).toBe(keysA.publicKey);
 
-      wsB.send({ type: "dm-response", payload: { targetUserId: userIdA, accept: true } });
+      wsB.send({ type: "dm-response", payload: { targetUserId: userIdA, accept: true, publicKey: keysB.publicKey } });
       const response = await wsA.nextMessage();
       expect(response.type).toBe("dm-response");
       expect(response.payload?.fromUserId).toBe(userIdB);
       expect(response.payload?.accept).toBe(true);
+      expect(response.payload?.publicKey).toBe(keysB.publicKey);
 
-      wsA.send({ type: "dm", payload: { targetUserId: userIdB, text: "hi there" } });
+      const keyA = await deriveDmKey(keysA, userIdA, keysB.publicKey, userIdB);
+      const keyB = await deriveDmKey(keysB, userIdB, keysA.publicKey, userIdA);
+      const context = { fromUserId: userIdA, toUserId: userIdB, seq: 1 };
+      const sealed = await encryptDm(keyA, "hi there", context);
+      // A plain `text` sent along is dropped by the schema, never relayed.
+      wsA.send({ type: "dm", payload: { targetUserId: userIdB, seq: 1, ...sealed, text: "hi there" } });
       const dm = await wsB.nextMessage();
       expect(dm.type).toBe("dm");
       expect(dm.payload?.fromUserId).toBe(userIdA);
-      expect(dm.payload?.text).toBe("hi there");
+      expect(Object.keys(dm.payload ?? {}).sort()).toEqual(["at", "ciphertext", "fromUserId", "iv", "seq"]);
+      expect(JSON.stringify(dm)).not.toContain("hi there");
+      expect(await decryptDm(keyB, { iv: dm.payload?.iv as string, ciphertext: dm.payload?.ciphertext as string }, context))
+        .toBe("hi there");
 
+      // The third person in the space got none of the request, the answer or the message.
+      await expect(wsC.nextMessage(300)).rejects.toThrow();
+
+      wsA.close();
+      wsB.close();
+      wsC.close();
+    });
+
+    test("asking again during an open chat passes the new key on and pauses messages until accepted", async () => {
+      const { wsA, wsB, wsC, userIdA, userIdB } = await joinThree();
+      const first = await createDmKeyPair();
+      const second = await createDmKeyPair();
+      const keysB = await createDmKeyPair();
+
+      wsA.send({ type: "dm-request", payload: { targetUserId: userIdB, publicKey: first.publicKey } });
+      await wsB.nextMessage();
+      wsB.send({ type: "dm-response", payload: { targetUserId: userIdA, accept: true, publicKey: keysB.publicKey } });
+      await wsA.nextMessage();
+
+      // A reloaded and lost its keys, so it asks again with new ones.
+      wsA.send({ type: "dm-request", payload: { targetUserId: userIdB, publicKey: second.publicKey } });
+      const again = await wsB.nextMessage();
+      expect(again.type).toBe("dm-request");
+      expect(again.payload?.publicKey).toBe(second.publicKey);
+
+      const sealed = await encryptDm(await deriveDmKey(keysB, userIdB, first.publicKey, userIdA), "old key", {
+        fromUserId: userIdB, toUserId: userIdA, seq: 5,
+      });
+      wsB.send({ type: "dm", payload: { targetUserId: userIdA, seq: 5, ...sealed } });
+      expect((await wsB.nextMessage()).type).toBe("error");
       await expect(wsC.nextMessage(300)).rejects.toThrow();
 
       wsA.close();
@@ -441,15 +560,18 @@ describe("WebSocket", () => {
 
     test("a declined request tells the asker and blocks messages", async () => {
       const { wsA, wsB, wsC, userIdA, userIdB } = await joinThree();
+      const keysA = await createDmKeyPair();
 
-      wsA.send({ type: "dm-request", payload: { targetUserId: userIdB } });
+      wsA.send({ type: "dm-request", payload: { targetUserId: userIdB, publicKey: keysA.publicKey } });
       await wsB.nextMessage();
       wsB.send({ type: "dm-response", payload: { targetUserId: userIdA, accept: false } });
       const response = await wsA.nextMessage();
       expect(response.type).toBe("dm-response");
       expect(response.payload?.accept).toBe(false);
+      expect(response.payload?.publicKey).toBeUndefined();
 
-      wsA.send({ type: "dm", payload: { targetUserId: userIdB, text: "please" } });
+      const sealed = { iv: "AAAAAAAAAAAAAAAA", ciphertext: "A".repeat(24) };
+      wsA.send({ type: "dm", payload: { targetUserId: userIdB, seq: 0, ...sealed } });
       expect((await wsA.nextMessage()).type).toBe("error");
       await expect(wsB.nextMessage(300)).rejects.toThrow();
 

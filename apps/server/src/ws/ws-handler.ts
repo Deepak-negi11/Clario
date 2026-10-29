@@ -10,7 +10,7 @@
 
 
 import prisma from "@repo/db";
-import { ClientMessage, getChatRoomAtPosition, getMapTemplate } from "@repo/shared";
+import { ClientMessage } from "@repo/shared";
 import { getUserIdFromToken } from "../middleware/auth";
 import type { Socket, SocketData } from "./room-manager";
 import {
@@ -38,13 +38,17 @@ import {
   unsubscribeFromSpaceEvents,
 } from "./pubsub";
 
-import { isInRoom, sendToUser } from "./room-manager";
+import { isInRoom, propOf, sendToUser } from "./room-manager";
+import { forgetSpaceLayout, isInsideMap, loadSpaceMap, mapRoomAt, mapSpawn } from "./space-layout";
 import {
   answerDirectChat,
   canDirectMessage,
   forgetDirectChats,
   requestDirectChat,
 } from "./direct-chat";
+import { forgetSpacePlay } from "./play";
+import { forgetPlayer, handlePlay } from "./play-handler";
+import { handleProp } from "./prop-handler";
 
 type JoinPayload = Extract<ClientMessage, { type: "join" }>["payload"];
 type MovePayload = Extract<ClientMessage, { type: "move" }>["payload"];
@@ -88,8 +92,15 @@ export async function onMessage(ws: Socket, raw: string | Buffer) {
   switch (parsed.data.type) {
     case "join":
       return handleJoin(ws, parsed.data.payload);
-    case "move":
-      return handleMove(ws, parsed.data.payload);
+    case "move": {
+      // Each step is checked against the last accepted one, so a player's steps are handled one
+      // at a time, in the order they arrive. Otherwise a step that arrives while the one before
+      // it is still being checked is measured from the old tile and rejected.
+      const payload = parsed.data.payload;
+      const step = (ws.data.moves ?? Promise.resolve()).then(() => handleMove(ws, payload));
+      ws.data.moves = step.catch(() => undefined);
+      return step;
+    }
     case "chat":
       return handleChat(ws, parsed.data.payload);
     case "reaction":
@@ -104,6 +115,14 @@ export async function onMessage(ws: Socket, raw: string | Buffer) {
       return handleDirectResponse(ws, parsed.data.payload);
     case "dm":
       return handleDirectMessage(ws, parsed.data.payload);
+    case "play-invite":
+    case "play-answer":
+    case "play-leave":
+    case "play-data":
+    case "tv":
+      return handlePlay(ws, parsed.data);
+    case "prop":
+      return handleProp(ws, parsed.data.payload);
   }
 }
 
@@ -120,20 +139,17 @@ async function handleJoin(ws: Socket, payload: JoinPayload) {
 
   const space = await prisma.space.findUnique({
     where: { id: payload.spaceId },
+    select: { mapTemplate: true },
   });
 
   if (!space) {
     return send(ws, { type: "error", message: "Space not found" });
   }
 
-  const template = getMapTemplate(space.mapTemplate);
+  const map = await loadSpaceMap(payload.spaceId, space.mapTemplate);
   const lastPos = await getUserPosition(payload.spaceId, userId);
-  const isRememberedPositionValid = lastPos
-    && lastPos.x >= 0
-    && lastPos.y >= 0
-    && lastPos.x < template.dimensions.width
-    && lastPos.y < template.dimensions.height;
-  const spawn = isRememberedPositionValid ? lastPos : template.spawn;
+  const isRememberedPositionValid = lastPos && isInsideMap(map, lastPos);
+  const spawn = isRememberedPositionValid ? lastPos : mapSpawn(map);
 
   ws.data.userId = userId;
   ws.data.spaceId = payload.spaceId;
@@ -153,11 +169,11 @@ async function handleJoin(ws: Socket, payload: JoinPayload) {
 
 
     .filter((user) => user.userId !== userId)
-    .map((user) => ({
-      id: user.userId,
-      x: user.x,
-      y: user.y,
-    }));
+    .map((user) => {
+      // Their bike or drink, for people on this server (prop-handler.ts).
+      const prop = propOf(payload.spaceId, user.userId);
+      return { id: user.userId, x: user.x, y: user.y, ...(prop ? { prop } : {}) };
+    });
 
   addToRoom(payload.spaceId, {
     socket: ws,
@@ -196,12 +212,9 @@ async function handleMove(ws: Socket, payload: MovePayload) {
   }
 
   const currentPosition = { x: currentX, y: currentY };
-  const space = await prisma.space.findUnique({ where: { id: spaceId } });
-  const template = getMapTemplate(space?.mapTemplate);
-  const isInBounds = payload.x >= 0
-    && payload.y >= 0
-    && payload.x < template.dimensions.width
-    && payload.y < template.dimensions.height;
+  const space = await prisma.space.findUnique({ where: { id: spaceId }, select: { mapTemplate: true } });
+  const map = await loadSpaceMap(spaceId, space?.mapTemplate);
+  const isInBounds = isInsideMap(map, payload);
   if (!isInBounds || !isOneTileMove(currentPosition, payload)) {
     return send(ws, {
       type: "movement-rejected",
@@ -243,7 +256,9 @@ async function handleSignal(ws:Socket , payload:SignalPayload){
 }
 
 
-// Like webrtc signals, these go to sockets on this server only.
+// Like webrtc signals, these go to sockets on this server only, and only to the one person they
+// are for. Private chat is end-to-end encrypted (dm.schema.ts in @repo/shared): the server passes
+// on public keys and ciphertext, and can't read the messages.
 function handleDirectRequest(ws: Socket, payload: DirectRequestPayload) {
   const { spaceId, userId } = ws.data;
   if (!spaceId || !userId) {
@@ -255,19 +270,17 @@ function handleDirectRequest(ws: Socket, payload: DirectRequestPayload) {
     return send(ws, { type: "error", message: "That person is no longer in this space" });
   }
 
-  const result = requestDirectChat(spaceId, userId, targetId);
-  if (result === "sent") {
-    sendToUser(spaceId, targetId, {
-      type: "dm-request",
-      payload: { fromUserId: userId, at: Date.now() },
-    });
-  } else if (result === "already-open" || result === "declined-recently") {
+  if (requestDirectChat(spaceId, userId, targetId) === "declined-recently") {
     // Nothing to ask: tell the asker where things stand, as if the other person answered again.
-    send(ws, {
+    return send(ws, {
       type: "dm-response",
-      payload: { fromUserId: targetId, accept: result === "already-open", at: Date.now() },
+      payload: { fromUserId: targetId, accept: false, at: Date.now() },
     });
   }
+  sendToUser(spaceId, targetId, {
+    type: "dm-request",
+    payload: { fromUserId: userId, publicKey: payload.publicKey, at: Date.now() },
+  });
 }
 
 
@@ -282,7 +295,9 @@ function handleDirectResponse(ws: Socket, payload: DirectResponsePayload) {
   }
   sendToUser(spaceId, requesterId, {
     type: "dm-response",
-    payload: { fromUserId: userId, accept: payload.accept, at: Date.now() },
+    payload: payload.accept
+      ? { fromUserId: userId, accept: true, publicKey: payload.publicKey, at: Date.now() }
+      : { fromUserId: userId, accept: false, at: Date.now() },
   });
 }
 
@@ -292,14 +307,13 @@ function handleDirectMessage(ws: Socket, payload: DirectMessagePayload) {
   if (!spaceId || !userId) {
     return send(ws, { type: "error", message: "Join a space first" });
   }
-  const text = payload.text.trim().slice(0, 500);
-  if (!text) return;
   if (!canDirectMessage(spaceId, userId, payload.targetUserId)) {
     return send(ws, { type: "error", message: "Ask to chat first" });
   }
+  const { seq, iv, ciphertext } = payload;
   sendToUser(spaceId, payload.targetUserId, {
     type: "dm",
-    payload: { fromUserId: userId, text, at: Date.now() },
+    payload: { fromUserId: userId, seq, iv, ciphertext, at: Date.now() },
   });
 }
 
@@ -319,8 +333,9 @@ async function handleChat(ws: Socket, payload: ChatPayload) {
   });
   if (!space) return send(ws, { type: "error", message: "Space not found" });
 
+  const map = await loadSpaceMap(spaceId, space.mapTemplate);
   const room = payload.scope === "room"
-    ? getChatRoomAtPosition(space.mapTemplate, { x, y })
+    ? mapRoomAt(map, { x, y })
     : null;
   if (payload.scope === "room" && !room) {
     return send(ws, { type: "error", message: "Enter a room to use room chat" });
@@ -350,7 +365,7 @@ async function handleChat(ws: Socket, payload: ChatPayload) {
 
   if (room) {
     broadcastWhere(spaceId, userId, message, (member) => (
-      getChatRoomAtPosition(space.mapTemplate, member)?.id === room.id
+      mapRoomAt(map, member)?.id === room.id
     ));
     await publishRoomEvent(spaceId, userId, message, {
       mapTemplate: space.mapTemplate,
@@ -404,6 +419,7 @@ export async function onClose(ws: Socket) {
   if (!removed) return;
 
   forgetDirectChats(spaceId, userId);
+  forgetPlayer(spaceId, userId);
   await removeUser(spaceId, userId);
   await clearCurrentSpace(userId);
   await clearAgentActivity(spaceId, userId);
@@ -417,6 +433,8 @@ export async function onClose(ws: Socket) {
   await publishRoomEvent(spaceId, userId, message);
 
   if (roomSize(spaceId) === 0) {
+    forgetSpaceLayout(spaceId);
+    forgetSpacePlay(spaceId);
     await unsubscribeFromSpaceEvents(spaceId);
   }
 }

@@ -1,6 +1,7 @@
-import { getChatRoomAtPosition, ServerMessage } from "@repo/shared";
+import { ServerMessage } from "@repo/shared";
 import { redis } from "./redis";
 import { broadcast, broadcastWhere } from "./room-manager";
+import { cachedSpaceMap, layoutSaved, mapRoomAt } from "./space-layout";
 
 
 
@@ -148,12 +149,17 @@ export async function subscribeToSpaceEvents(spaceId: string) {
 
         if (!event || event.serverId === SERVER_ID) return;
 
-        if (event.roomFilter) {
+        if (event.message.type === "layout-updated") {
+          layoutSaved(event.spaceId, event.message.payload.layout);
+        }
 
+        if (event.roomFilter) {
+          const { mapTemplate, roomId } = event.roomFilter;
+          const map = cachedSpaceMap(event.spaceId, mapTemplate);
 
           broadcastWhere(event.spaceId, event.exceptUserId, event.message, (member) => (
 
-            getChatRoomAtPosition(event.roomFilter!.mapTemplate, member)?.id === event.roomFilter!.roomId
+            mapRoomAt(map, member)?.id === roomId
           ));
         } else {
           broadcast(event.spaceId, event.exceptUserId, event.message);

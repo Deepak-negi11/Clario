@@ -1,10 +1,15 @@
 import prisma from "@repo/db";
-import { getChatRoom, getChatRoomAtPosition } from "@repo/shared";
 import { getUserPosition } from "../ws/presence";
+import { loadSpaceMap, mapRoomAt } from "../ws/space-layout";
 import {
+  CUSTOM_MAP_TEMPLATE,
+  createStarterMap,
   DEFAULT_MAP_TEMPLATE,
+  generateTeamOffice,
   getMapTemplate,
   isMapTemplateId,
+  TEAM_OFFICE_THUMBNAIL,
+  TEAM_SIZE_RANGE,
   type MapTemplateId,
 } from "@repo/shared";
 import { requireAuth } from "../middleware/auth";
@@ -18,6 +23,8 @@ type CreateSpaceBody = {
   dimensions?: string;
   mapId?: string;
   mapTemplate?: MapTemplateId;
+  // With "custom-office": lay the office out for this many people instead of the empty plot.
+  teamSize?: unknown;
 };
 
 type AddElementBody = {
@@ -33,7 +40,7 @@ export async function handleCreateSpace(req: Request): Promise<Response> {
   if (auth instanceof Response) return auth;
 
   const body = (await req.json().catch(() => null)) as CreateSpaceBody | null;
-  const { name, dimensions, mapId, mapTemplate } = body ?? {};
+  const { name, dimensions, mapId, mapTemplate, teamSize } = body ?? {};
   const normalizedName = name?.trim();
 
   if (!normalizedName || !dimensions) {
@@ -44,6 +51,11 @@ export async function handleCreateSpace(req: Request): Promise<Response> {
     return jsonMessage("Invalid map template");
   }
 
+  if (teamSize !== undefined && (typeof teamSize !== "number" || !Number.isInteger(teamSize)
+    || teamSize < TEAM_SIZE_RANGE.min || teamSize > TEAM_SIZE_RANGE.max)) {
+    return jsonMessage(`teamSize must be a whole number from ${TEAM_SIZE_RANGE.min} to ${TEAM_SIZE_RANGE.max}`);
+  }
+
   const templateId = mapTemplate ?? DEFAULT_MAP_TEMPLATE;
   const template = getMapTemplate(templateId);
   const requestedSize = parseDimensions(dimensions);
@@ -51,15 +63,21 @@ export async function handleCreateSpace(req: Request): Promise<Response> {
     return jsonMessage("Invalid dimension");
   }
 
+  // A "custom-office" space starts from the starter plot, or from an office laid out for the
+  // team when a team size is given. Its size follows its layout.
+  const teamOffice = templateId === CUSTOM_MAP_TEMPLATE && typeof teamSize === "number";
+  const layout = templateId !== CUSTOM_MAP_TEMPLATE ? null : teamOffice ? generateTeamOffice(teamSize) : createStarterMap();
+
   if (!mapId) {
     const space = await prisma.space.create({
       data: {
         name: normalizedName,
-        width: mapTemplate ? template.dimensions.width : requestedSize.width,
-        height: mapTemplate ? template.dimensions.height : requestedSize.height,
+        width: layout ? layout.cols : mapTemplate ? template.dimensions.width : requestedSize.width,
+        height: layout ? layout.rows : mapTemplate ? template.dimensions.height : requestedSize.height,
         creatorId: auth.userId,
         mapTemplate: templateId,
-        thumbnail: mapTemplate ? template.thumbnail : null,
+        thumbnail: teamOffice ? TEAM_OFFICE_THUMBNAIL : mapTemplate ? template.thumbnail : null,
+        ...(layout ? { layout } : {}),
       },
     });
 
@@ -93,11 +111,12 @@ export async function handleCreateSpace(req: Request): Promise<Response> {
   const space = await prisma.space.create({
     data: {
       name: normalizedName,
-      width: map.width,
-      height: map.height,
+      width: layout ? layout.cols : map.width,
+      height: layout ? layout.rows : map.height,
       creatorId: auth.userId,
       mapId: map.id,
       mapTemplate: templateId,
+      ...(layout ? { layout } : {}),
       elements: {
         create: defaultElements,
       },
@@ -268,14 +287,13 @@ export async function handleGetMessages(req: Request): Promise<Response> {
   if (scope === "room") {
     const position = await getUserPosition(spaceId, auth.userId);
     const currentRoom = position
-      ? getChatRoomAtPosition(space.mapTemplate, position)
+      ? mapRoomAt(await loadSpaceMap(spaceId, space.mapTemplate, { remember: false }), position)
       : null;
     if (!currentRoom || currentRoom.id !== requestedRoomId) {
       return jsonMessage("Enter this room to view its chat", 403);
     }
-    const room = getChatRoom(space.mapTemplate, currentRoom.id);
     roomId = currentRoom.id;
-    roomName = room?.name;
+    roomName = currentRoom.name;
   }
 
   const rows = await prisma.chatMessage.findMany({

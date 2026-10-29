@@ -1,4 +1,4 @@
-import { requireAuth } from "../middleware/auth";
+import { requireAgentAuth } from "../middleware/auth";
 import { broadcast } from "../ws/room-manager";
 import { publishRoomEvent } from "../ws/pubsub";
 import {
@@ -25,7 +25,8 @@ const lastActivityAt = new Map<string, number>();
 
 
 export async function handleAgentActivity(req: Request): Promise<Response> {
-  const auth = requireAuth(req);
+  // The hook sends a long-lived agent key (setup.mjs) or, from older setups, a login token.
+  const auth = requireAgentAuth(req);
   if (auth instanceof Response) return auth;
 
   const userId = auth.userId;

@@ -18,13 +18,24 @@ describe("direct chat", () => {
     expect(answerDirectChat(s, "b", "a", true)).toBe(true);
     expect(canDirectMessage(s, "a", "b")).toBe(true);
     expect(canDirectMessage(s, "b", "a")).toBe(true);
-    expect(requestDirectChat(s, "b", "a")).toBe("already-open");
   });
 
-  test("asking twice before an answer is a no-op", () => {
+  test("asking again before an answer passes the request on again", () => {
     const s = space();
     expect(requestDirectChat(s, "a", "b")).toBe("sent");
-    expect(requestDirectChat(s, "a", "b")).toBe("already-pending");
+    expect(requestDirectChat(s, "a", "b")).toBe("sent");
+    expect(answerDirectChat(s, "b", "a", true)).toBe(true);
+    expect(answerDirectChat(s, "b", "a", true)).toBe(false);
+  });
+
+  test("asking during an open chat starts it over: no messages until the new request is accepted", () => {
+    const s = space();
+    requestDirectChat(s, "a", "b");
+    answerDirectChat(s, "b", "a", true);
+    expect(requestDirectChat(s, "a", "b")).toBe("sent");
+    expect(canDirectMessage(s, "a", "b")).toBe(false);
+    expect(answerDirectChat(s, "b", "a", true)).toBe(true);
+    expect(canDirectMessage(s, "a", "b")).toBe(true);
   });
 
   test("only the person who was asked can answer, and only once", () => {
