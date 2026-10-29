@@ -2,7 +2,9 @@
 
 import { splitSentences } from "@repo/shared";
 
-export type VoiceSettings = { lang: string; pitch: number; rate: number };
+// `voices`: names to try first, in order (e.g. "Veena", "Google UK English Female"), so different
+// characters don't all get the same voice. Matched as whole words, so "Male" doesn't match "Female".
+export type VoiceSettings = { lang: string; pitch: number; rate: number; voices?: string[] };
 
 export function isSpeechSynthesisSupported(): boolean {
   return typeof window !== "undefined" && "speechSynthesis" in window;
@@ -13,12 +15,21 @@ export function warmUpVoices(): void {
   if (isSpeechSynthesisSupported()) window.speechSynthesis.getVoices();
 }
 
-// Matching voice, then Indian English, then any English voice, then the browser default.
-function pickVoice(lang: string): SpeechSynthesisVoice | null {
+const escapeRegex = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// A preferred English voice by name, then the matching language, then Indian English, then any
+// English voice, then the browser default.
+function pickVoice(lang: string, names: string[] = []): SpeechSynthesisVoice | null {
   const voices = window.speechSynthesis.getVoices();
   const same = (voice: SpeechSynthesisVoice, code: string) =>
     voice.lang.replace("_", "-").toLowerCase() === code.toLowerCase();
+  const english = voices.filter((voice) => voice.lang.toLowerCase().startsWith("en"));
+  const named = names
+    .map((name) => new RegExp(`\\b${escapeRegex(name)}\\b`, "i"))
+    .map((pattern) => english.find((voice) => pattern.test(voice.name)))
+    .find(Boolean);
   return (
+    named ??
     voices.find((voice) => same(voice, lang)) ??
     voices.find((voice) => same(voice, "en-IN")) ??
     voices.find((voice) => voice.lang.toLowerCase().startsWith("en")) ??
@@ -42,7 +53,7 @@ export function speak(text: string, settings: VoiceSettings, onEnd: () => void):
   // Some browsers occasionally never fire "end"; don't leave Maya talking forever.
   const watchdog = window.setTimeout(finish, 4000 + text.length * 90);
 
-  const voice = pickVoice(settings.lang);
+  const voice = pickVoice(settings.lang, settings.voices);
   const sentences = splitSentences(text);
   sentences.forEach((sentence, index) => {
     const utterance = new SpeechSynthesisUtterance(sentence);

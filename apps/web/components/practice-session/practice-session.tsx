@@ -14,6 +14,8 @@ import {
 } from "@repo/shared";
 import { isSpeechRecognitionSupported, listen, type ListenSession } from "../../lib/speech/recognition";
 import { isSpeechSynthesisSupported, speak, warmUpVoices } from "../../lib/speech/synthesis";
+import { answerCompanion } from "../../lib/companions/store";
+import { CompanionBar } from "../companions/companion-bar";
 import { MayaAvatar } from "./maya-avatar";
 import { MissionsTab } from "./missions-tab";
 
@@ -200,6 +202,16 @@ export function PracticeSession({ onClose, onStateChange }: PracticeSessionProps
     setDraft("");
     setHeard("");
     setVoiceError(null);
+
+    // Asking her to walk or play with you in the 3D view, or to stop, is done here, not by the AI.
+    const agreed = answerCompanion("maya", question);
+    if (agreed) {
+      const agreedId = newId();
+      setNotice(null);
+      setMessages((previous) => [...previous, { id: newId(), role: "user", text: question }, { id: agreedId, role: "mentor", text: agreed }]);
+      say(agreedId, agreed, mode === "voice");
+      return;
+    }
 
     const history = messagesRef.current.slice(-MENTOR_HISTORY_LIMIT).map(({ role, text }) => ({ role, text }));
     const questionId = newId();
@@ -408,6 +420,8 @@ export function PracticeSession({ onClose, onStateChange }: PracticeSessionProps
             </p>
           </div>
         </div>
+
+        <CompanionBar id="maya" first="Maya" disabled={tabsLocked} onSay={(text) => void ask(text, "text")} />
 
         <div ref={listRef} className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto px-4 py-3" aria-live="polite">
           <Bubble role="mentor" text={GREETING} />
