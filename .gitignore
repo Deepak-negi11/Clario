@@ -48,3 +48,5 @@ opencode.json
 
 k8s/README.md 
 PRODUCT.md
+.playwright-cli/
+.playwright-cli/

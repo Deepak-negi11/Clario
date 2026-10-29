@@ -4,7 +4,7 @@
     "build": {
       "dependsOn": ["^build"],
       "inputs": ["$TURBO_DEFAULT$", ".env*"],
-      "env": ["AI_PROVIDER", "AI_TIMEOUT_MS", "GEMINI_API_KEY", "GEMINI_MODEL", "OLLAMA_MODEL", "OLLAMA_URL"],
+      "env": ["AI_PROVIDER", "AI_TIMEOUT_MS", "GEMINI_API_KEY", "GEMINI_MODEL", "NVIDIA_API_KEY", "NVIDIA_MODEL", "NVIDIA_TIMEOUT_MS", "OLLAMA_MODEL", "OLLAMA_URL", "YOUTUBE_API_KEY"],
       "outputs": [".next/**", "!.next/cache/**", "!.next/dev/**"]
     },
     "lint": {

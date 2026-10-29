@@ -59,7 +59,7 @@ export function grove(spots: readonly TreeSpot[]) {
   group.add(
     merge(bark, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 })),
     merge(leaves, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8 })),
-    // Cut out by the texture's alpha, and so are their shadows.
+    // Sprigs are cut out by the texture's alpha, and so are their shadows.
     merge(sprigs, new THREE.MeshStandardMaterial({ vertexColors: true, map: foliageTexture(), alphaTest: 0.5, roughness: 0.8 })),
   );
   return group;
@@ -137,7 +137,7 @@ function broadleaf(rand: Rand): Tree {
     clumps.push(clump(rand, center.clone().add(vec(Math.sin(angle) * out * crown.x, rise * crown.y * 0.7, Math.cos(angle) * out * crown.z)), between(rand, 0.4, 0.52)));
   }
   clumps.push(clump(rand, center.clone().add(vec(0, crown.y * 0.45, 0)), between(rand, 0.5, 0.62)));
-  return { bark, leaves: mergeGeometries(clumps), sprigs: sprigs(rand, onClumps(rand, clumps, 6), 0.42, "leaves") };
+  return { bark, leaves: mergeGeometries(clumps), sprigs: makeSprigs(rand, onClumps(rand, clumps, 6), 0.42, "leaves") };
 }
 
 // A conifer like a spruce or a fir: a straight trunk under tiers of drooping boughs, narrowing to a
@@ -161,7 +161,7 @@ function conifer(rand: Rand): Tree {
     const radius = spread * Math.pow(1 - i / tiers, 0.85) * between(rand, 0.9, 1.05) + 0.1;
     boughs.push(tier(rand, bottom, radius, top - bottom, 14, ridges));
   }
-  return { bark, leaves: mergeGeometries(boughs), sprigs: sprigs(rand, ridges, 0.5, "needles") };
+  return { bark, leaves: mergeGeometries(boughs), sprigs: makeSprigs(rand, ridges, 0.5, "needles") };
 }
 
 // A birch: one or two slim, white, dark-flecked stems with thin branches angling up, and a light,
@@ -194,7 +194,7 @@ function birch(rand: Rand): Tree {
       clumps.push(clump(rand, stem[at]!.clone().add(offset), between(rand, 0.3, 0.4)));
     }
   }
-  return { bark, leaves: mergeGeometries(clumps), sprigs: sprigs(rand, onClumps(rand, clumps, 5), 0.34, "leaves") };
+  return { bark, leaves: mergeGeometries(clumps), sprigs: makeSprigs(rand, onClumps(rand, clumps, 5), 0.34, "leaves") };
 }
 
 // Points along a bough from `start`, bending a little at random (`wobble`) and toward the light (`rise`).
@@ -292,8 +292,8 @@ function onClumps(rand: Rand, clumps: readonly THREE.BufferGeometry[], count: nu
   const anchors: Anchor[] = [];
   const middle = new THREE.Vector3();
   const point = new THREE.Vector3();
-  for (const clump of clumps) {
-    const position = clump.getAttribute("position");
+  for (const piece of clumps) {
+    const position = piece.getAttribute("position");
     middle.set(0, 0, 0);
     for (let i = 0; i < position.count; i++) middle.add(point.fromBufferAttribute(position, i));
     middle.divideScalar(position.count);
@@ -308,7 +308,7 @@ function onClumps(rand: Rand, clumps: readonly THREE.BufferGeometry[], count: nu
 // Sprigs at `anchors`: small squares `size` across, turned every which way, each showing a spray of
 // leaves or of needles (the two halves of foliageTexture). They break up the smooth outline of
 // the clumps and tiers the way real foliage does.
-function sprigs(rand: Rand, anchors: readonly Anchor[], size: number, kind: "leaves" | "needles") {
+function makeSprigs(rand: Rand, anchors: readonly Anchor[], size: number, kind: "leaves" | "needles") {
   const positions: number[] = [];
   const uvs: number[] = [];
   const indices: number[] = [];
@@ -410,7 +410,8 @@ function tier(rand: Rand, bottom: number, radius: number, height: number, sides:
     for (let s = 0; s < sides; s++) {
       const ridge = s % 2 === 0;
       const tip = ring === 2 && ridge;
-      const [low, high] = ring === 1 || ring === 2 ? (ridge ? [1.0, 1.12] : ring === 1 ? [0.82, 0.9] : [0.72, 0.82]) : [0.92, 1.08];
+      // On the middle ring and the rim, ridges stand out from the hollows between them.
+      const [low, high] = ring === 1 ? (ridge ? [1.0, 1.12] : [0.82, 0.9]) : ring === 2 ? (ridge ? [1.0, 1.12] : [0.72, 0.82]) : [0.92, 1.08];
       const out = r * between(rand, low, high);
       const angle = turn + (s / sides) * Math.PI * 2;
       const at = vec(Math.sin(angle) * out, bottom + y - (tip ? between(rand, 0.04, 0.12) : 0), Math.cos(angle) * out);
