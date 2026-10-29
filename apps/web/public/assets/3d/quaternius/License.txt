@@ -10,5 +10,5 @@ CC0 1.0 Universal (CC0 1.0) Public Domain Dedication
 https://creativecommons.org/publicdomain/zero/1.0/
 
 Changes made for this app: textures resized to 1024/512 px JPEGs, normal and roughness maps removed,
-glTF files rewritten to use those textures, and four clips (Idle_Loop, Walk_Loop, Jog_Fwd_Loop,
-Sitting_Idle_Loop) cut from AL_Standard.fbx into animations.json.
+glTF files rewritten to use those textures, and five clips (Idle_Loop, Walk_Loop, Jog_Fwd_Loop,
+Sitting_Idle_Loop, Sitting_Talking_Loop) cut from AL_Standard.fbx into animations.json.

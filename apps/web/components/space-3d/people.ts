@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { clone as cloneSkinned } from "three/addons/utils/SkeletonUtils.js";
+import type { AvatarLook } from "@repo/shared";
 
 // People for the 3D view: Quaternius's base characters (CC0) wearing clothes made here, with a
 // hairstyle each and the idle, jog and sitting clips from his animation library (CC0).
@@ -15,11 +16,46 @@ const JOG_SPEED = 1.5;
 const SIT_FORWARD = 0.21;
 
 type BodyKind = "male" | "female";
-const BODIES: Record<BodyKind, { file: string; mesh: string; skins: [string, string]; hair: string[] }> = {
-  male: { file: "Superhero_Male", mesh: "SuperHero_Male", skins: ["T_Male_Light.jpg", "T_Male_Dark.jpg"], hair: ["Hair_SimpleParted", "Hair_Buzzed"] },
+const BODIES: Record<BodyKind, { file: string; mesh: string; skins: [string, string]; hair: string[]; beard?: string }> = {
+  male: { file: "Superhero_Male", mesh: "SuperHero_Male", skins: ["T_Male_Light.jpg", "T_Male_Dark.jpg"], hair: ["Hair_SimpleParted", "Hair_Buzzed"], beard: "Hair_Beard" },
   female: { file: "Superhero_Female", mesh: "Superhero_Female", skins: ["T_Female_Light.jpg", "T_Female_Dark.jpg"], hair: ["Hair_Long", "Hair_Buns"] },
 };
-const CLIPS = { idle: "Idle_Loop", move: "Jog_Fwd_Loop", sit: "Sitting_Idle_Loop", talk: "Sitting_Talking_Loop" } as const;
+
+// A player's avatar look (the same one as the 2D map) picked as a body and hairstyle. Each
+// hairstyle model fits one body, so long hair and buns mean the female body and a beard the male.
+function bodyFor(look: AvatarLook): BodyKind {
+  if (look.beard) return "male";
+  return look.base === "amelia" || look.hairShape === "bun" ? "female" : "male";
+}
+function hairFor(look: AvatarLook, kind: BodyKind): string | null {
+  if (look.hairShape === "bald") return null;
+  if (kind === "female") return look.hairShape === "bun" ? "Hair_Buns" : "Hair_Long";
+  return look.base === "bob" && look.hairShape !== "curly" ? "Hair_Buzzed" : "Hair_SimpleParted";
+}
+// Curls are the parted hair made fuller.
+const CURLY_SCALE = 1.15;
+const CLIPS = {
+  idle: "Idle_Loop", move: "Jog_Fwd_Loop", sit: "Sitting_Idle_Loop", talk: "Sitting_Talking_Loop",
+  // Riding a bike takes its arms and back from the driving clip; holding a drink, the torch arm.
+  drive: "Driving_Loop", torch: "Idle_Torch_Loop",
+  // Played once: pressing the vending machine's button, and taking the can from its tray.
+  press: "Interact", pickup: "PickUp_Table",
+} as const;
+export type Gesture = "press" | "pickup";
+// Gestures are played this much faster than recorded (the button press is slow).
+const GESTURE_SPEED: Record<Gesture, number> = { press: 1.6, pickup: 1.1 };
+// Riding: the upper body from the driving clip, the hips standing, and each leg swinging between
+// standing straight and sitting bent (this much of the way) as the pedals go round.
+const RIDE_UPPER = /^(spine|neck|Head|clavicle|upperarm|lowerarm|hand|thumb|index|middle|ring|pinky)/;
+const LEGS = [/^(thigh|calf|foot|ball|ball_leaf)_l\./, /^(thigh|calf|foot|ball|ball_leaf)_r\./] as const;
+// How far toward the sitting pose a leg bends with its pedal at the bottom and at the top, so
+// the feet stay up on the pedals.
+const PEDAL_LOW = 0.4;
+const PEDAL_HIGH = 0.95;
+// A rider leans forward over the handlebars (radians).
+const RIDE_LEAN = 0.3;
+// A drink is held in the left hand, as the torch clip holds its torch.
+const LEFT_ARM = /^(clavicle_l|upperarm_l|lowerarm_l|hand_l|(thumb|index|middle|ring|pinky)_0\d(_leaf)?_l)\./;
 
 const HAIR_COLORS = ["#2b1d16", "#4a3022", "#14100e", "#7a5232", "#b58a4c", "#3a3a40"];
 const PANTS = ["#2f3a56", "#3b3f4a", "#46536b", "#2d4a6b", "#5b4a3a", "#c9b79a"];
@@ -41,20 +77,65 @@ const TUCK = { thigh_l: -0.07, thigh_r: 0.07, upperarm_l: -0.12, upperarm_r: 0.1
 const FORWARD = new THREE.Vector3(0, 0, 1);
 type Garment = keyof typeof OUTFIT;
 
+type HeadPiece = { mesh: THREE.Mesh; offset: THREE.Matrix4 };
 type BodyKit = {
   template: THREE.Object3D;
   clothes: Record<Garment, THREE.BufferGeometry>;
-  // Each hairstyle sits on the Head bone at this offset (found in the rest pose).
-  hair: { mesh: THREE.Mesh; offset: THREE.Matrix4 }[];
+  // Each hairstyle (and the beard) sits on the Head bone at this offset (found in the rest pose).
+  hair: (HeadPiece & { name: string })[];
+  beard: HeadPiece | null;
+  // Glasses sit on the Head bone here, in front of the eyes, sized to their width.
+  eyes: { offset: THREE.Matrix4; width: number } | null;
   skins: THREE.Texture[];
+  // Each skin texture's average colour (linear), so a tint can turn it into a chosen skin tone.
+  skinAverages: THREE.Color[];
   clips: Record<keyof typeof CLIPS, THREE.AnimationClip>;
+  // Playing a game standing up: the talking clip's busy arms and hands, and the idle's legs and back.
+  playing: { arms: THREE.AnimationClip; body: THREE.AnimationClip };
+  // On a bike (RIDE_UPPER, LEGS) and holding a drink (an additive left arm).
+  riding: { upper: THREE.AnimationClip; hips: THREE.AnimationClip; bent: THREE.AnimationClip[]; straight: THREE.AnimationClip[] };
+  holding: THREE.AnimationClip;
+  // The hips' height when standing, before SCALE.
+  hipHeight: number;
 };
+
+// The bones the playing pose takes from the talking clip.
+const PLAY_ARMS = /^(clavicle|upperarm|lowerarm|hand|thumb|index|middle|ring|pinky|neck|Head)/;
+
+// The average colour of a texture's image, read from a small copy of it.
+function averageColor(texture: THREE.Texture): THREE.Color {
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 16;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  const color = new THREE.Color(1, 1, 1);
+  if (!ctx || !texture.image) return color;
+  ctx.drawImage(texture.image as CanvasImageSource, 0, 0, 16, 16);
+  const data = ctx.getImageData(0, 0, 16, 16).data;
+  let r = 0, g = 0, b = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    r += data[i]!;
+    g += data[i + 1]!;
+    b += data[i + 2]!;
+  }
+  const n = data.length / 4;
+  return color.setRGB(r / n / 255, g / n / 255, b / n / 255, THREE.SRGBColorSpace);
+}
 export type PeopleKit = Record<BodyKind, BodyKit>;
+
+// Riding a bike and holding a drink, each 0 to 1 so they blend in and out. `pedal` is the cranks'
+// angle (radians); `drink` raises the drink to the mouth.
+export type Gear = { ride?: number; pedal?: number; hold?: number; drink?: number };
 
 export type Person = {
   root: THREE.Object3D;
-  // walk and sit run from 0 to 1 and blend the clips.
-  update: (dt: number, walk: number, sit: number) => void;
+  // walk, sit and play run from 0 to 1 and blend the clips; play shows while standing.
+  update: (dt: number, walk: number, sit: number, play?: number, gear?: Gear) => void;
+  // Puts something in their left hand (a drinks can, its middle at its origin), or empties it.
+  hold: (object: THREE.Object3D | null) => void;
+  // Plays a gesture once, over whatever else they are doing.
+  gesture: (kind: Gesture) => void;
+  // How high their hips are standing up, for sitting them on a bike.
+  hipHeight: number;
   dispose: () => void;
 };
 
@@ -167,9 +248,11 @@ export async function loadPeople(): Promise<PeopleKit> {
 
   const build = async (kind: BodyKind): Promise<BodyKit> => {
     const spec = BODIES[kind];
-    const [gltf, hairs, darkSkin, library] = await Promise.all([
+    const [gltf, hairs, beardGltf, darkSkin, library] = await Promise.all([
       loader.loadAsync(`${DIR}${spec.file}.gltf`),
       Promise.all(spec.hair.map((file) => loader.loadAsync(`${DIR}${file}.gltf`))),
+      // A missing beard only means no beards, so it doesn't fail the people.
+      spec.beard ? loader.loadAsync(`${DIR}${spec.beard}.gltf`).catch(() => null) : Promise.resolve(null),
       loadTexture(spec.skins[1]),
       animations,
     ]);
@@ -180,13 +263,27 @@ export async function loadPeople(): Promise<PeopleKit> {
     const pelvis = template.getObjectByName("pelvis")!.position.clone();
     const lightSkin = (body.material as THREE.MeshStandardMaterial).map!;
 
-    const hair = hairs.map((hairGltf) => {
-      hairGltf.scene.updateMatrixWorld(true);
+    const onHead = (scene: THREE.Object3D): HeadPiece => {
+      scene.updateMatrixWorld(true);
       let mesh: THREE.Mesh | undefined;
-      hairGltf.scene.traverse((child) => { if (!mesh && (child as THREE.Mesh).isMesh) mesh = child as THREE.Mesh; });
+      scene.traverse((child) => { if (!mesh && (child as THREE.Mesh).isMesh) mesh = child as THREE.Mesh; });
       const offset = head.matrixWorld.clone().invert().multiply(mesh!.matrixWorld);
       return { mesh: mesh!, offset };
-    });
+    };
+    const hair = hairs.map((hairGltf, index) => ({ ...onHead(hairGltf.scene), name: spec.hair[index]! }));
+    const beard = beardGltf ? onHead(beardGltf.scene) : null;
+
+    // Glasses go just in front of the eyes, which face +z in the rest pose.
+    const eyeMesh = template.getObjectByName("Eyes");
+    let eyes: BodyKit["eyes"] = null;
+    if (eyeMesh) {
+      const box = new THREE.Box3().setFromObject(eyeMesh);
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      center.z = box.max.z + size.x * 0.06;
+      const offset = head.matrixWorld.clone().invert().multiply(new THREE.Matrix4().makeTranslation(center.x, center.y, center.z));
+      eyes = { offset, width: size.x };
+    }
 
     const clips = Object.fromEntries(Object.entries(CLIPS).map(([key, name]) => {
       const json = library.clips.find((clip) => clip.name === name);
@@ -198,16 +295,66 @@ export async function loadPeople(): Promise<PeopleKit> {
       (Object.keys(OUTFIT) as Garment[]).map((part) => [part, garment(body, OUTFIT[part].bones, OUTFIT[part].push)]),
     ) as BodyKit["clothes"];
 
-    return { template, clothes, hair, skins: [lightSkin, darkSkin], clips };
+    const part = (clip: THREE.AnimationClip, arms: boolean) =>
+      new THREE.AnimationClip(`${clip.name}_${arms ? "arms" : "body"}`, clip.duration, clip.tracks.filter((track) => PLAY_ARMS.test(track.name) === arms));
+    const playing = { arms: part(clips.talk, true), body: part(clips.idle, false) };
+
+    const only = (clip: THREE.AnimationClip, bones: RegExp, name: string) =>
+      new THREE.AnimationClip(name, clip.duration, clip.tracks.filter((track) => bones.test(track.name)));
+    const riding = {
+      upper: only(clips.drive, RIDE_UPPER, "ride_upper"),
+      hips: only(clips.idle, /^pelvis\./, "ride_hips"),
+      bent: LEGS.map((leg, i) => only(clips.sit, leg, `pedal_bent_${i}`)),
+      straight: LEGS.map((leg, i) => only(clips.idle, leg, `pedal_straight_${i}`)),
+    };
+    // Added on top of whatever else the body does, so a drink stays in hand while walking or sitting.
+    const holding = THREE.AnimationUtils.makeClipAdditive(only(clips.torch, LEFT_ARM, "hold_drink"), 0, only(clips.idle, LEFT_ARM, "hold_rest"));
+
+    const skins = [lightSkin, darkSkin];
+    return {
+      template, clothes, hair, beard, eyes, skins, skinAverages: skins.map(averageColor), clips, playing, riding, holding,
+      hipHeight: template.getObjectByName("pelvis")!.getWorldPosition(new THREE.Vector3()).y,
+    };
   };
 
   const [male, female] = await Promise.all([build("male"), build("female")]);
   return { male, female };
 }
 
-// `talking` makes a seated person chat with their hands instead of sitting still.
-export function makePerson(kit: PeopleKit, id: string, shirtColor: string, { talking = false } = {}): Person {
-  const kind = pick(id, ["male", "female"] as const, 17);
+// Glasses built from shapes, sized to the eyes: two round rims, a bridge, and arms back to the ears.
+function makeGlasses(eyes: NonNullable<BodyKit["eyes"]>, owned: { dispose: () => void }[]) {
+  const glasses = new THREE.Group();
+  const frame = new THREE.MeshStandardMaterial({ color: "#1d1f26", roughness: 0.35, metalness: 0.3 });
+  owned.push(frame);
+  const w = eyes.width;
+  const rim = w * 0.2;
+  const add = (geometry: THREE.BufferGeometry, x: number, y: number, z: number) => {
+    owned.push(geometry);
+    const part = new THREE.Mesh(geometry, frame);
+    part.position.set(x, y, z);
+    part.castShadow = false;
+    glasses.add(part);
+    return part;
+  };
+  for (const side of [-1, 1]) {
+    add(new THREE.TorusGeometry(rim, rim * 0.14, 8, 28), side * w * 0.27, 0, 0);
+    add(new THREE.BoxGeometry(rim * 0.12, rim * 0.12, w * 0.9), side * (w * 0.27 + rim), 0, -w * 0.45);
+  }
+  add(new THREE.BoxGeometry(w * 0.54 - rim * 2, rim * 0.14, rim * 0.14), 0, rim * 0.25, 0);
+  eyes.offset.decompose(glasses.position, glasses.quaternion, glasses.scale);
+  return glasses;
+}
+
+// `talking` makes a seated person chat with their hands instead of sitting still. With a `look`
+// (a player's avatar look) the body, hair, skin, shirt, glasses and beard follow it; without one
+// they're picked from the id, so a coworker always looks the same.
+export function makePerson(
+  kit: PeopleKit,
+  id: string,
+  shirtColor: string,
+  { talking = false, look = null }: { talking?: boolean; look?: AvatarLook | null } = {},
+): Person {
+  const kind = look ? bodyFor(look) : pick(id, ["male", "female"] as const, 17);
   const spec = BODIES[kind];
   const body = kit[kind];
   const root = new THREE.Group();
@@ -223,11 +370,26 @@ export function makePerson(kit: PeopleKit, id: string, shirtColor: string, { tal
     owned.push(made);
     return made;
   };
-  const hairTint = new THREE.Color(pick(id, HAIR_COLORS, 23));
+  const hairTint = new THREE.Color(look?.hair ?? pick(id, HAIR_COLORS, 23));
 
   const mesh = model.getObjectByName(spec.mesh) as THREE.SkinnedMesh;
   const skin = (mesh.material as THREE.MeshStandardMaterial).clone();
-  skin.map = pick(id, body.skins, 29);
+  if (look) {
+    // The texture nearer the skin tone in brightness, tinted the rest of the way to it.
+    const target = new THREE.Color(look.skin);
+    const brightness = (color: THREE.Color) => Math.max(0.005, 0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b);
+    const gap = (average: THREE.Color) => Math.abs(Math.log(brightness(target) / brightness(average)));
+    const index = gap(body.skinAverages[1]!) < gap(body.skinAverages[0]!) ? 1 : 0;
+    const average = body.skinAverages[index]!;
+    skin.map = body.skins[index]!;
+    skin.color.setRGB(
+      Math.min(2, target.r / Math.max(0.01, average.r)),
+      Math.min(2, target.g / Math.max(0.01, average.g)),
+      Math.min(2, target.b / Math.max(0.01, average.b)),
+    );
+  } else {
+    skin.map = pick(id, body.skins, 29);
+  }
   owned.push(skin);
   mesh.material = skin;
   const brows = model.getObjectByName("Eyebrows") as THREE.SkinnedMesh | undefined;
@@ -240,7 +402,7 @@ export function makePerson(kit: PeopleKit, id: string, shirtColor: string, { tal
 
   const longSleeves = pick(id, [false, true], 31);
   const outfit: [Garment, THREE.Material][] = [
-    ["shirt", cloth(shirtColor, 0.8)],
+    ["shirt", cloth(look?.top ?? shirtColor, 0.8)],
     ["trousers", cloth(pick(id, PANTS, 37))],
     ["shoes", cloth("#24262d", 0.5)],
   ];
@@ -251,15 +413,33 @@ export function makePerson(kit: PeopleKit, id: string, shirtColor: string, { tal
     mesh.parent!.add(piece);
   }
 
-  const style = pick(id, body.hair, 41);
   const head = model.getObjectByName("Head")!;
-  const hairMesh = style.mesh.clone();
-  const hairMaterial = (style.mesh.material as THREE.MeshStandardMaterial).clone();
-  hairMaterial.color.copy(hairTint);
-  owned.push(hairMaterial);
-  hairMesh.material = hairMaterial;
-  style.offset.decompose(hairMesh.position, hairMesh.quaternion, hairMesh.scale);
-  head.add(hairMesh);
+  // Hair and a beard: a model on the head, in the hair colour.
+  const wear = (piece: HeadPiece) => {
+    const worn = piece.mesh.clone();
+    const material = (piece.mesh.material as THREE.MeshStandardMaterial).clone();
+    material.color.copy(hairTint);
+    owned.push(material);
+    worn.material = material;
+    piece.offset.decompose(worn.position, worn.quaternion, worn.scale);
+    head.add(worn);
+    return worn;
+  };
+  const hairName = look ? hairFor(look, kind) : undefined;
+  const style = hairName === undefined ? pick(id, body.hair, 41) : body.hair.find((hair) => hair.name === hairName);
+  if (style) {
+    const hairMesh = wear(style);
+    if (look?.hairShape === "curly") {
+      // Scale about the hair's own middle, so it grows outwards instead of drifting.
+      const geometry = style.mesh.geometry;
+      if (!geometry.boundingBox) geometry.computeBoundingBox();
+      const middle = geometry.boundingBox!.getCenter(new THREE.Vector3());
+      hairMesh.position.add(middle.multiply(hairMesh.scale).applyQuaternion(hairMesh.quaternion).multiplyScalar(1 - CURLY_SCALE));
+      hairMesh.scale.multiplyScalar(CURLY_SCALE);
+    }
+  }
+  if (look?.beard && body.beard) wear(body.beard);
+  if (look?.glasses && body.eyes) head.add(makeGlasses(body.eyes, owned));
 
   model.traverse((child) => {
     if (!(child as THREE.Mesh).isMesh) return;
@@ -273,39 +453,182 @@ export function makePerson(kit: PeopleKit, id: string, shirtColor: string, { tal
     idle: mixer.clipAction(body.clips.idle),
     move: mixer.clipAction(body.clips.move),
     sit: mixer.clipAction(talking ? body.clips.talk : body.clips.sit),
+    playArms: mixer.clipAction(body.playing.arms),
+    playBody: mixer.clipAction(body.playing.body),
   };
   actions.move.timeScale = JOG_SPEED;
-  for (const action of Object.values(actions)) {
+  const ride = {
+    upper: mixer.clipAction(body.riding.upper),
+    hips: mixer.clipAction(body.riding.hips),
+    bent: body.riding.bent.map((clip) => mixer.clipAction(clip)),
+    straight: body.riding.straight.map((clip) => mixer.clipAction(clip)),
+  };
+  const holdAction = mixer.clipAction(body.holding);
+  for (const action of [...Object.values(actions), ride.upper, ride.hips, ...ride.bent, ...ride.straight, holdAction]) {
     action.play();
     action.setEffectiveWeight(0);
   }
-  // Start people at different points in their idle so a room doesn't sway in step.
-  actions.idle.time = pick(id, [0, 0.4, 0.8, 1.2, 1.6, 2], 43);
-  actions.sit.time = pick(id, [0, 0.3, 0.6, 0.9, 1.2, 1.5], 47);
+  // The legs hold their pose; the cranks' angle moves them, not the clips' time.
+  for (const action of [...ride.bent, ...ride.straight]) action.timeScale = 0;
+  const gestures: Record<Gesture, THREE.AnimationAction> = { press: mixer.clipAction(body.clips.press), pickup: mixer.clipAction(body.clips.pickup) };
+  for (const [kind, action] of Object.entries(gestures) as [Gesture, THREE.AnimationAction][]) {
+    action.setLoop(THREE.LoopOnce, 1);
+    action.clampWhenFinished = true;
+    action.timeScale = GESTURE_SPEED[kind];
+    action.setEffectiveWeight(0);
+  }
+  let playingGesture: { action: THREE.AnimationAction; age: number; length: number } | null = null;
 
-  const tucked = Object.entries(TUCK).map(([name, angle]) => ({ bone: model.getObjectByName(name)!, angle }));
+  // The left arm, for raising a drink to the mouth, and the head that tips back to drink.
+  const bone = (name: string) => model.getObjectByName(name)!;
+  const arm = { upper: bone("upperarm_l"), lower: bone("lowerarm_l"), hand: bone("hand_l"), finger: bone("middle_01_l") };
+  const headBone = bone("Head");
+  const spine = bone("spine_01");
+  let held: THREE.Object3D | null = null;
+  const v = { shoulder: new THREE.Vector3(), elbow: new THREE.Vector3(), wrist: new THREE.Vector3(), target: new THREE.Vector3(), a: new THREE.Vector3(), b: new THREE.Vector3() };
+  const turn = new THREE.Quaternion();
+  const world = new THREE.Quaternion();
+  const parentWorld = new THREE.Quaternion();
+  const forward = new THREE.Vector3();
+  const up = new THREE.Vector3();
+  const left = new THREE.Vector3();
+
+  // Bones turned after the mixer this frame (the lean, the sip) and how they were before. The mixer
+  // only rewrites a bone whose animated value changes, so they are put back before it runs, or the
+  // turns would pile up frame after frame on a still pose.
+  const turned = new Map<THREE.Object3D, THREE.Quaternion>();
+  // Turns a bone by `rotation` (in world space), by `weight` of the way.
+  const turnBy = (target: THREE.Object3D, rotation: THREE.Quaternion, weight: number) => {
+    if (!turned.has(target)) turned.set(target, target.quaternion.clone());
+    target.getWorldQuaternion(world);
+    target.parent!.getWorldQuaternion(parentWorld);
+    const goal = rotation.clone().multiply(world).premultiply(parentWorld.invert());
+    target.quaternion.slerp(goal, weight);
+    target.updateMatrixWorld(true);
+  };
+  // Swings the upper arm and then the forearm so the wrist reaches `target`, the elbow bending
+  // toward `pole` (two-bone reach, in world space).
+  const reach = (target: THREE.Vector3, pole: THREE.Vector3, weight: number) => {
+    arm.upper.getWorldPosition(v.shoulder);
+    arm.lower.getWorldPosition(v.elbow);
+    arm.hand.getWorldPosition(v.wrist);
+    const upperLength = v.shoulder.distanceTo(v.elbow);
+    const lowerLength = v.elbow.distanceTo(v.wrist);
+    const toTarget = v.a.subVectors(target, v.shoulder);
+    const distance = Math.min(Math.max(toTarget.length(), 0.01), upperLength + lowerLength - 0.001);
+    toTarget.normalize();
+    const cosine = (upperLength ** 2 + distance ** 2 - lowerLength ** 2) / (2 * upperLength * distance);
+    const side = v.b.copy(pole).addScaledVector(toTarget, -pole.dot(toTarget)).normalize();
+    const elbowGoal = v.target.copy(v.shoulder).addScaledVector(toTarget, upperLength * cosine)
+      .addScaledVector(side, upperLength * Math.sqrt(Math.max(0, 1 - cosine * cosine)));
+    turnBy(arm.upper, turn.setFromUnitVectors(v.elbow.sub(v.shoulder).normalize(), elbowGoal.clone().sub(v.shoulder).normalize()), weight);
+    arm.lower.getWorldPosition(v.elbow);
+    arm.hand.getWorldPosition(v.wrist);
+    turnBy(arm.lower, turn.setFromUnitVectors(v.wrist.sub(v.elbow).normalize(), target.clone().sub(v.elbow).normalize()), weight);
+  };
+  // Start people at different points in their idle so a room doesn't sway in step.
+  actions.idle.time = actions.playBody.time = pick(id, [0, 0.4, 0.8, 1.2, 1.6, 2], 43);
+  actions.sit.time = actions.playArms.time = pick(id, [0, 0.3, 0.6, 0.9, 1.2, 1.5], 47);
+
+  // `turn` is the tuck each bone was given last frame.
+  const tucked = Object.entries(TUCK).map(([name, angle]) => ({ bone: model.getObjectByName(name)!, angle, turn: new THREE.Quaternion() }));
   const modelRotation = new THREE.Quaternion();
   const parentRotation = new THREE.Quaternion();
   const axis = new THREE.Vector3();
-  const turn = new THREE.Quaternion();
 
   return {
     root,
-    update: (dt, walk, sit) => {
+    hipHeight: body.hipHeight * SCALE,
+    hold: (object) => {
+      if (held) root.remove(held);
+      held = object;
+      if (held) root.add(held);
+    },
+    gesture: (kind) => {
+      playingGesture?.action.stop();
+      const action = gestures[kind];
+      action.reset().play();
+      playingGesture = { action, age: 0, length: action.getClip().duration / GESTURE_SPEED[kind] };
+    },
+    update: (dt, walk, sit, play = 0, gear = {}) => {
+      // Undo last frame's lean and sip first (they went on after the tuck).
+      for (const [target, before] of turned) target.quaternion.copy(before);
+      turned.clear();
+      // The mixer only writes a bone when its animated value changes, and the sitting clips hold
+      // the thighs still, so last frame's tuck would stay and another would go on top each frame,
+      // swinging the legs round and round. Take it off before the mixer runs.
+      for (const { bone, turn } of tucked) {
+        bone.quaternion.premultiply(turn.invert());
+        turn.identity();
+      }
+      // A gesture fades in quickly and out over its last quarter of a second.
+      let gestureWeight = 0;
+      if (playingGesture) {
+        playingGesture.age += dt;
+        const { age, length, action } = playingGesture;
+        gestureWeight = Math.max(0, Math.min(1, age / 0.15, (length - age) / 0.25));
+        action.setEffectiveWeight(gestureWeight);
+        if (age >= length) {
+          action.stop();
+          playingGesture = null;
+        }
+      }
+      const riding = (gear.ride ?? 0) * (1 - gestureWeight);
+      const keep = (1 - (gear.ride ?? 0)) * (1 - gestureWeight);
       const seated = sit * (1 - walk);
-      actions.move.setEffectiveWeight(walk);
-      actions.sit.setEffectiveWeight(seated);
-      actions.idle.setEffectiveWeight(Math.max(0, 1 - walk - seated));
+      const standing = Math.max(0, 1 - walk - seated);
+      const playing = play * standing;
+      actions.move.setEffectiveWeight(walk * keep);
+      actions.sit.setEffectiveWeight(seated * keep);
+      actions.idle.setEffectiveWeight((standing - playing) * keep);
+      actions.playArms.setEffectiveWeight(playing * keep);
+      actions.playBody.setEffectiveWeight(playing * keep);
+      // On a bike each leg bends as its pedal comes up, the two half a turn apart.
+      const rise = 0.5 + 0.5 * Math.sin(gear.pedal ?? 0);
+      ride.upper.setEffectiveWeight(riding);
+      ride.hips.setEffectiveWeight(riding);
+      [rise, 1 - rise].forEach((lift, i) => {
+        const bend = PEDAL_LOW + (PEDAL_HIGH - PEDAL_LOW) * lift;
+        ride.bent[i]!.setEffectiveWeight(riding * bend);
+        ride.straight[i]!.setEffectiveWeight(riding * (1 - bend));
+      });
+      holdAction.setEffectiveWeight(gear.hold ?? 0);
       mixer.update(dt);
-      model.position.z = SIT_FORWARD * seated;
-      // Turn each tucked bone about the body's front-to-back axis, measured in its parent's space.
-      if (walk > 0.99) return;
+      model.position.z = SIT_FORWARD * seated * keep;
       model.updateMatrixWorld(true);
       model.getWorldQuaternion(modelRotation);
-      for (const { bone, angle } of tucked) {
-        bone.parent!.getWorldQuaternion(parentRotation);
-        axis.copy(FORWARD).applyQuaternion(modelRotation).applyQuaternion(parentRotation.invert());
-        bone.quaternion.premultiply(turn.setFromAxisAngle(axis, angle * (1 - walk)));
+      // Turn each tucked bone about the body's front-to-back axis, measured in its parent's space.
+      const tuck = (1 - walk) * keep;
+      if (tuck > 0.01) {
+        for (const { bone, angle, turn } of tucked) {
+          bone.parent!.getWorldQuaternion(parentRotation);
+          axis.copy(FORWARD).applyQuaternion(modelRotation).applyQuaternion(parentRotation.invert());
+          bone.quaternion.premultiply(turn.setFromAxisAngle(axis, angle * tuck));
+        }
+        model.updateMatrixWorld(true);
+      }
+
+      // A sip: the head tips back and the hand brings the drink just under the mouth.
+      const drink = gear.drink ?? 0;
+      forward.set(0, 0, 1).applyQuaternion(modelRotation);
+      up.set(0, 1, 0).applyQuaternion(modelRotation);
+      left.set(1, 0, 0).applyQuaternion(modelRotation);
+      // On a bike the back leans forward, bringing the hands down to the handlebars.
+      if (riding > 0.01) turnBy(spine, turn.setFromAxisAngle(left, RIDE_LEAN * riding), 1);
+      if (drink > 0.01) {
+        turnBy(headBone, turn.setFromAxisAngle(left, -0.3 * drink), 1);
+        const mouth = headBone.getWorldPosition(v.target).addScaledVector(forward, 0.11 * SCALE).addScaledVector(up, 0.02 * SCALE);
+        const wrist = mouth.clone().addScaledVector(forward, 0.05 * SCALE).addScaledVector(up, -0.09 * SCALE).addScaledVector(left, 0.03 * SCALE);
+        reach(wrist, up.clone().negate().addScaledVector(left, 0.8), drink);
+      }
+      // The drink in the palm, upright, tipping toward the mouth as it is raised.
+      if (held) {
+        arm.hand.getWorldPosition(v.wrist);
+        arm.finger.getWorldPosition(v.a);
+        const palm = v.wrist.lerp(v.a, 0.55);
+        root.updateMatrixWorld(true);
+        held.position.copy(root.worldToLocal(palm));
+        held.quaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), -1.9 * drink);
       }
     },
     dispose: () => {
