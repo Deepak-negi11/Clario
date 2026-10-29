@@ -1,0 +1,31 @@
+{
+  "name": "viora-agent",
+  "version": "0.1.0",
+  "description": "Show what your Claude Code agent is doing (project, branch, commit) on your Viora avatar.",
+  "type": "module",
+  "bin": {
+    "viora-agent": "cli.mjs"
+  },
+  "files": [
+    "cli.mjs",
+    "setup.mjs",
+    "viora-agent-hook.mjs",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "viora",
+    "claude-code",
+    "hooks",
+    "agent",
+    "metaverse"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Deepak-negi11/graphite-hacks.git",
+    "directory": "tools/agent-hook"
+  },
+  "license": "MIT"
+}

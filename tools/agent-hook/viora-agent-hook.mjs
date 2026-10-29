@@ -36,7 +36,9 @@ function readStdin() {
 function loadConfig() {
   try {
     const config = JSON.parse(readFileSync(CONFIG_PATH, "utf8"));
-    if (config?.token && config?.apiUrl) return config;
+    // agentKey (setup.mjs, lasts 180 days) wins over a pasted 7-day login token.
+    const credential = config?.agentKey || config?.token;
+    if (credential && config?.apiUrl) return { ...config, credential };
   } catch {
   }
   return null;
@@ -200,7 +202,7 @@ async function main() {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${config.token}`,
+        Authorization: `Bearer ${config.credential}`,
       },
       body: JSON.stringify(state === "cooking" ? { text, state, ...gitInfo(event, config) } : { text, state }),
       signal: controller.signal,
