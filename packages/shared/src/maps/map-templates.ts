@@ -1,4 +1,4 @@
-export const MAP_TEMPLATE_IDS = ["classic-office", "coworking-campus", "clario-hq"] as const;
+export const MAP_TEMPLATE_IDS = ["classic-office", "coworking-campus", "clario-hq", "custom-office"] as const;
 
 export type MapTemplateId = (typeof MAP_TEMPLATE_IDS)[number];
 
@@ -69,8 +69,8 @@ export const MAP_TEMPLATES: Record<MapTemplateId, MapTemplateDefinition> = {
   "clario-hq": {
     id: "clario-hq",
     name: "Clario HQ",
-    description: "A full office with meeting rooms, desks, a kitchen, library, game room, a tech wing with a server room, maker lab, demo stage and hack space, and a 3D view.",
-    dimensions: { width: 62, height: 36 },
+    description: "A full office with meeting rooms, desks, a kitchen, library, game room, a tech wing with a server room, maker lab, demo stage and hack space, an east wing with workrooms, a lounge, a coffee corner and cubicles, and a 3D view.",
+    dimensions: { width: 88, height: 36 },
     spawn: { x: 23, y: 29 },
     thumbnail: "/assets/maps/clario-hq.png",
     chatRooms: [
@@ -90,7 +90,24 @@ export const MAP_TEMPLATES: Record<MapTemplateId, MapTemplateDefinition> = {
       { id: "hq-maker", name: "Maker Lab", bounds: { x: 53, y: 4, width: 6, height: 8 } },
       { id: "hq-demo", name: "Demo Stage", bounds: { x: 46, y: 15, width: 13, height: 8 } },
       { id: "hq-hack", name: "Hack Space", bounds: { x: 46, y: 26, width: 13, height: 6 } },
+      // East Wing
+      { id: "hq-meeting-blue", name: "Blue Workroom", bounds: { x: 60, y: 4, width: 11, height: 8 } },
+      { id: "hq-meeting-white", name: "White Workroom", bounds: { x: 72, y: 4, width: 12, height: 8 } },
+      { id: "hq-east-lounge", name: "East Lounge", bounds: { x: 60, y: 14, width: 12, height: 10 } },
+      { id: "hq-coffee", name: "Coffee Corner", bounds: { x: 72, y: 14, width: 12, height: 10 } },
+      { id: "hq-cubicles", name: "Cubicles", bounds: { x: 60, y: 26, width: 24, height: 6 } },
     ],
+  },
+  // Rooms on a custom map come from the layout stored on the space (see custom-map.ts), so the
+  // template itself has none. Size and spawn match the starter plot.
+  "custom-office": {
+    id: "custom-office",
+    name: "Build your own",
+    description: "Start from an empty plot and build your office: walls, floors, rooms, furniture and outdoor buildings.",
+    dimensions: { width: 48, height: 36 },
+    spawn: { x: 24, y: 24 },
+    thumbnail: "/assets/maps/custom-office.png",
+    chatRooms: [],
   },
 };
 

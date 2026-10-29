@@ -7,6 +7,11 @@ export const AVATAR_BASES = ["adam", "alex", "amelia", "bob"] as const;
 
 export type AvatarBase = (typeof AVATAR_BASES)[number];
 
+// Changes to the base character's own hair: shaved off, grown into curls, or tied in a bun.
+export const HAIR_SHAPES = ["bald", "curly", "bun"] as const;
+
+export type HairShape = (typeof HAIR_SHAPES)[number];
+
 const HexColor = z
   .string()
   .regex(/^#[0-9a-fA-F]{6}$/)
@@ -20,6 +25,8 @@ export const AvatarLookSchema = z.object({
   // Optional so looks saved before these existed still parse.
   glasses: z.boolean().optional(),
   beard: z.boolean().optional(),
+  // Absent: the base character's own hair.
+  hairShape: z.enum(HAIR_SHAPES).optional(),
 });
 
 export type AvatarLook = z.infer<typeof AvatarLookSchema>;

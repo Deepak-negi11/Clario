@@ -18,6 +18,12 @@ describe("parseAvatarLook", () => {
     expect(parseAvatarLook({ ...look, glasses: "yes" })).toBeNull();
   });
 
+  test("keeps a hair shape, and rejects unknown ones", () => {
+    expect(parseAvatarLook({ ...look, hairShape: "curly" })?.hairShape).toBe("curly");
+    expect(parseAvatarLook(look)?.hairShape).toBeUndefined();
+    expect(parseAvatarLook({ ...look, hairShape: "mohawk" })).toBeNull();
+  });
+
   test("rejects unknown characters, bad colours and broken JSON", () => {
     expect(parseAvatarLook({ ...look, base: "zelda" })).toBeNull();
     expect(parseAvatarLook({ ...look, hair: "brown" })).toBeNull();

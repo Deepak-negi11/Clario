@@ -1,5 +1,15 @@
 import * as z from "zod";
 import { AvatarLookSchema } from "../avatar/avatar-look";
+import { customMapSchema } from "../maps/custom-map";
+import {
+  DirectChatRequestBroadcast, DirectChatRequestMessage, DirectChatResponseBroadcast, DirectChatResponseMessage,
+  DirectMessage, DirectMessageBroadcast,
+} from "./dm.schema";
+import {
+  PlayAnswerBroadcast, PlayAnswerMessage, PlayDataBroadcast, PlayDataMessage, PlayInviteBroadcast, PlayInviteMessage,
+  PlayLeaveBroadcast, PlayLeaveMessage, TvBroadcast, TvMessage,
+} from "./play.schema";
+import { PlayerPropSchema, PropBroadcast, PropMessage } from "./prop.schema";
 
 
 const PositionSchema = z.object({
@@ -49,6 +59,8 @@ export const SpaceJoinedMessage = z.object({
         id: z.string(),
         x: z.number(),
         y: z.number(),
+        // A bike they're riding or a drink in their hand (prop.schema.ts).
+        prop: PlayerPropSchema.nullable().optional(),
       }),
     ),
     agentActivities: z.record(z.string(), AgentActivityInfo).optional(),
@@ -159,48 +171,18 @@ export const WebRtcSignalBroadcast = z.object({
 });
 
 
-// Private 1-on-1 chat: ask someone, they accept or decline, then messages flow between the two.
-export const DirectChatRequestMessage = z.object({
-  type: z.literal("dm-request"),
-  payload: z.object({ targetUserId: z.string() }),
-});
-
-export const DirectChatRequestBroadcast = z.object({
-  type: z.literal("dm-request"),
-  payload: z.object({ fromUserId: z.string(), at: z.number() }),
-});
-
-
-// targetUserId is the person who asked.
-export const DirectChatResponseMessage = z.object({
-  type: z.literal("dm-response"),
-  payload: z.object({ targetUserId: z.string(), accept: z.boolean() }),
-});
-
-export const DirectChatResponseBroadcast = z.object({
-  type: z.literal("dm-response"),
-  payload: z.object({ fromUserId: z.string(), accept: z.boolean(), at: z.number() }),
-});
-
-
-export const DirectMessage = z.object({
-  type: z.literal("dm"),
-  payload: z.object({
-    targetUserId: z.string(),
-    text: z.string().min(1).max(500),
-  }),
-});
-
-export const DirectMessageBroadcast = z.object({
-  type: z.literal("dm"),
-  payload: z.object({ fromUserId: z.string(), text: z.string(), at: z.number() }),
-});
-
 // Sent to one person when a task for them, or one they assigned, changes. It carries no task
 // details; the page reloads its tasks over HTTP.
 export const TasksChangedBroadcast = z.object({
   type: z.literal("tasks-changed"),
   payload: z.object({ at: z.number() }),
+});
+
+// The owner of a custom-office space saved a new layout. Sent to everyone in the space,
+// the owner included, so every open map redraws from the same layout.
+export const LayoutUpdatedBroadcast = z.object({
+  type: z.literal("layout-updated"),
+  payload: z.object({ layout: customMapSchema }),
 });
 
 
@@ -216,10 +198,20 @@ export const ServerMessage = z.discriminatedUnion("type", [
   LookBroadcastMessage,
   AgentActivityBroadcastMessage,
   WebRtcSignalBroadcast,
+  // Private chat, end-to-end encrypted (dm.schema.ts).
   DirectChatRequestBroadcast,
   DirectChatResponseBroadcast,
   DirectMessageBroadcast,
   TasksChangedBroadcast,
+  LayoutUpdatedBroadcast,
+  // Game Room play and the Lounge TV (play.schema.ts).
+  PlayInviteBroadcast,
+  PlayAnswerBroadcast,
+  PlayLeaveBroadcast,
+  PlayDataBroadcast,
+  TvBroadcast,
+  // Bikes and drinks (prop.schema.ts).
+  PropBroadcast,
 ]);
 
 
@@ -256,6 +248,12 @@ export const ClientMessage = z.discriminatedUnion("type", [
   DirectChatRequestMessage,
   DirectChatResponseMessage,
   DirectMessage,
+  PlayInviteMessage,
+  PlayAnswerMessage,
+  PlayLeaveMessage,
+  PlayDataMessage,
+  TvMessage,
+  PropMessage,
 ]);
 
 
@@ -281,10 +279,5 @@ export type AgentActivityInfo = z.infer<typeof AgentActivityInfo>;
 export type AgentActivityBroadcastMessage = z.infer<typeof AgentActivityBroadcastMessage>;
 export type WebRtcSignalMessage = z.infer<typeof WebRtcSignalMessage>;
 export type WebRtcSignalBroadcast = z.infer<typeof WebRtcSignalBroadcast>;
-export type DirectChatRequestMessage = z.infer<typeof DirectChatRequestMessage>;
-export type DirectChatRequestBroadcast = z.infer<typeof DirectChatRequestBroadcast>;
-export type DirectChatResponseMessage = z.infer<typeof DirectChatResponseMessage>;
-export type DirectChatResponseBroadcast = z.infer<typeof DirectChatResponseBroadcast>;
-export type DirectMessage = z.infer<typeof DirectMessage>;
-export type DirectMessageBroadcast = z.infer<typeof DirectMessageBroadcast>;
 export type TasksChangedBroadcast = z.infer<typeof TasksChangedBroadcast>;
+export type LayoutUpdatedBroadcast = z.infer<typeof LayoutUpdatedBroadcast>;

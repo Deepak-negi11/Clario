@@ -33,7 +33,15 @@ describe("clario-hq", () => {
     expect(getChatRoomAtPosition("clario-hq", { x: 55, y: 9 })?.id).toBe("hq-maker");
     expect(getChatRoomAtPosition("clario-hq", { x: 51, y: 20 })?.id).toBe("hq-demo");
     expect(getChatRoomAtPosition("clario-hq", { x: 51, y: 29 })?.id).toBe("hq-hack");
-    expect(getMapTemplate("clario-hq").dimensions.width).toBe(62);
+  });
+
+  test("the East Wing rooms are where the map draws them", () => {
+    expect(getChatRoomAtPosition("clario-hq", { x: 65, y: 7 })?.id).toBe("hq-meeting-blue");
+    expect(getChatRoomAtPosition("clario-hq", { x: 77, y: 7 })?.id).toBe("hq-meeting-white");
+    expect(getChatRoomAtPosition("clario-hq", { x: 65, y: 19 })?.id).toBe("hq-east-lounge");
+    expect(getChatRoomAtPosition("clario-hq", { x: 79, y: 17 })?.id).toBe("hq-coffee");
+    expect(getChatRoomAtPosition("clario-hq", { x: 64, y: 27 })?.id).toBe("hq-cubicles");
+    expect(getMapTemplate("clario-hq").dimensions.width).toBe(88);
   });
 
   test("the commons between Open Desks and the Lounge is not a room", () => {

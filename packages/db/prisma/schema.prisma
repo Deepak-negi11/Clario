@@ -12,6 +12,15 @@ enum Role {
   User
 }
 
+// WorkLevel in @repo/shared, in rank order. Tasks only go to someone with a lower level.
+enum WorkLevel {
+  Fresher
+  Junior
+  Mid
+  Senior
+  Lead
+}
+
 model User {
   id        String   @id @default(cuid())
   username  String
@@ -22,6 +31,8 @@ model User {
   avatar    Avatar?  @relation(fields: [avatarId], references: [id])
   // JSON of AvatarLook (@repo/shared): base character plus skin, hair and top colours.
   avatarLook String?
+  // Null until the user picks one on the join screen.
+  level     WorkLevel?
   spaces    Space[]
   tasksAssigned Task[] @relation("TasksAssigned")
   tasksReceived Task[] @relation("TasksReceived")
@@ -66,6 +77,8 @@ model Space {
   mapId       String?
   map         Map?            @relation(fields: [mapId], references: [id])
   mapTemplate String          @default("classic-office")
+  // CustomMap (@repo/shared) for "custom-office" spaces; null for every other template.
+  layout      Json?
   elements    spaceElements[]
   tasks       Task[]
   createdAt DateTime        @default(now())
@@ -115,7 +128,7 @@ enum TaskStatus {
   Done
 }
 
-// A task the space owner gives to someone in the space. Only the owner (Space.creatorId) assigns.
+// A task someone gives to a person in the same space whose WorkLevel is lower than theirs.
 model Task {
   id          String     @id @default(cuid())
   spaceId     String
