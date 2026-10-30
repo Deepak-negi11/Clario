@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { getChatRoomAtPosition, getMapTemplate } from "./map-templates";
+import { getChatRoomAtPosition, getMapTemplate, isClarioHq, isMapTemplateId } from "./map-templates";
 
 describe("map chat rooms", () => {
   test("finds the classic-office Summit Room", () => {
@@ -60,5 +60,19 @@ describe("clario-hq", () => {
         expect(overlap ? `${a.id} overlaps ${b.id}` : "ok").toBe("ok");
       }
     }
+  });
+});
+
+describe("clario-hq-3d", () => {
+  test("is a map of its own with Clario HQ's rooms", () => {
+    expect(isMapTemplateId("clario-hq-3d")).toBe(true);
+    expect(getMapTemplate("clario-hq-3d").chatRooms).toEqual(getMapTemplate("clario-hq").chatRooms);
+    expect(getChatRoomAtPosition("clario-hq-3d", { x: 23, y: 29 })?.id).toBe("hq-reception");
+  });
+
+  test("counts as Clario HQ, the other maps don't", () => {
+    expect(isClarioHq("clario-hq")).toBe(true);
+    expect(isClarioHq("clario-hq-3d")).toBe(true);
+    expect(isClarioHq("custom-office")).toBe(false);
   });
 });

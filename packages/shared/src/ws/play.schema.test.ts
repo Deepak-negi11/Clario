@@ -28,11 +28,14 @@ describe("play messages", () => {
     expect(ClientMessage.safeParse({ type: "tv", payload: { action: "play", videoId: "<script>" } }).success).toBe(false);
     expect(ClientMessage.safeParse({ type: "tv", payload: { action: "play", videoId: "arj7oStGLkU", start: -3 } }).success).toBe(false);
     expect(ClientMessage.safeParse({ type: "tv", payload: { action: "stop" } }).success).toBe(true);
+    expect(ClientMessage.safeParse({ type: "tv", payload: { action: "pause" } }).success).toBe(true);
+    expect(ClientMessage.safeParse({ type: "tv", payload: { action: "resume" } }).success).toBe(true);
     expect(ClientMessage.safeParse({ type: "tv", payload: { action: "rewind" } }).success).toBe(false);
   });
 
   test("server broadcasts for play and the TV parse on the client", () => {
     expect(ServerMessage.safeParse({ type: "play-invite", payload: { fromUserId: "u1", game: "snake", at: 1 } }).success).toBe(true);
+    expect(ServerMessage.safeParse({ type: "play-invite", payload: { fromUserId: "u1", game: "tetris", at: 1 } }).success).toBe(true);
     expect(ServerMessage.safeParse({ type: "tv", payload: { state: { videoId: "arj7oStGLkU", position: 12.5, byUserId: "u1" }, at: 1 } }).success).toBe(true);
     expect(ServerMessage.safeParse({ type: "tv", payload: { state: null, at: 1 } }).success).toBe(true);
   });

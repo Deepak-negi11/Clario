@@ -1,4 +1,4 @@
-export const MAP_TEMPLATE_IDS = ["classic-office", "coworking-campus", "clario-hq", "custom-office"] as const;
+export const MAP_TEMPLATE_IDS = ["classic-office", "coworking-campus", "clario-hq", "clario-hq-3d", "custom-office"] as const;
 
 export type MapTemplateId = (typeof MAP_TEMPLATE_IDS)[number];
 
@@ -69,7 +69,7 @@ export const MAP_TEMPLATES: Record<MapTemplateId, MapTemplateDefinition> = {
   "clario-hq": {
     id: "clario-hq",
     name: "Clario HQ",
-    description: "A full office with meeting rooms, desks, a kitchen, library, game room, a tech wing with a server room, maker lab, demo stage and hack space, an east wing with workrooms, a lounge, a coffee corner and cubicles, and a 3D view.",
+    description: "A full office with meeting rooms, desks, a kitchen, library, game room, a tech wing with a server room, maker lab, demo stage and hack space, an east wing with workrooms, a lounge, a coffee corner and cubicles.",
     dimensions: { width: 88, height: 36 },
     spawn: { x: 23, y: 29 },
     thumbnail: "/assets/maps/clario-hq.png",
@@ -98,6 +98,17 @@ export const MAP_TEMPLATES: Record<MapTemplateId, MapTemplateDefinition> = {
       { id: "hq-cubicles", name: "Cubicles", bounds: { x: 60, y: 26, width: 24, height: 6 } },
     ],
   },
+  // The same office as Clario HQ (rooms, people, errands), seen only in 3D: its spaces open in
+  // the 3D view with no way back to the 2D map. See isClarioHq.
+  "clario-hq-3d": {
+    id: "clario-hq-3d",
+    name: "Clario HQ 3D",
+    description: "Clario HQ in 3D: walk the whole office, its rooms, kitchen, game room and tech wing, in a 3D view.",
+    dimensions: { width: 88, height: 36 },
+    spawn: { x: 23, y: 29 },
+    thumbnail: "/assets/maps/clario-hq-3d.png",
+    chatRooms: [],
+  },
   // Rooms on a custom map come from the layout stored on the space (see custom-map.ts), so the
   // template itself has none. Size and spawn match the starter plot.
   "custom-office": {
@@ -110,6 +121,14 @@ export const MAP_TEMPLATES: Record<MapTemplateId, MapTemplateDefinition> = {
     chatRooms: [],
   },
 };
+
+// Clario HQ's 3D map shares the 2D map's rooms.
+MAP_TEMPLATES["clario-hq-3d"].chatRooms = MAP_TEMPLATES["clario-hq"].chatRooms;
+
+// Both Clario HQ maps: the same office, with its people, errands and play spots.
+export function isClarioHq(id: unknown) {
+  return id === "clario-hq" || id === "clario-hq-3d";
+}
 
 export function isMapTemplateId(value: unknown): value is MapTemplateId {
   return typeof value === "string" && MAP_TEMPLATE_IDS.includes(value as MapTemplateId);

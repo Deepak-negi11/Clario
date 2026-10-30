@@ -61,12 +61,14 @@ export const customMapSchema = z.object({
     const spec = itemSpec(item.kind);
     if (item.dir && item.dir !== "down" && !spec.faces?.includes(item.dir)) problem(`item ${index} (${item.kind}) can't face ${item.dir}`);
     if (item.fabric && !spec.fabric) problem(`item ${index} (${item.kind}) has no fabric`);
+    // Rugs and flowers lie on the floor, under everything else, so they are tracked apart.
+    const layer = spec.under ? "under" : "on";
     for (const { x, y } of itemFootprint(item)) {
       if (!inside(x, y)) { problem(`item ${index} (${item.kind}) is off the map`); return; }
       if (map.walls[y]![x] === WALL) problem(`item ${index} (${item.kind}) stands on a wall`);
-      const other = taken.get(`${x},${y}`);
+      const other = taken.get(`${layer}:${x},${y}`);
       if (other !== undefined) problem(`item ${index} (${item.kind}) overlaps item ${other}`);
-      taken.set(`${x},${y}`, index);
+      taken.set(`${layer}:${x},${y}`, index);
     }
   });
 
@@ -101,12 +103,13 @@ export function isWallAt(map: CustomMap, x: number, y: number) {
   return map.walls[y]?.[x] === WALL;
 }
 
-// Every tile you can't walk onto: walls, and furniture that isn't a seat.
+// Every tile you can't walk onto: walls, and furniture that isn't a seat or on the floor.
 export function customBlockedTiles(map: Pick<CustomMap, "walls" | "items">) {
   const blocked = new Set<string>();
   map.walls.forEach((row, y) => { for (let x = 0; x < row.length; x++) if (row[x] === WALL) blocked.add(`${x},${y}`); });
   for (const item of map.items) {
-    if (itemSpec(item.kind).seat) continue;
+    const spec = itemSpec(item.kind);
+    if (spec.seat || spec.under) continue;
     for (const { x, y } of itemFootprint(item)) blocked.add(`${x},${y}`);
   }
   return blocked;
@@ -147,25 +150,21 @@ export function customRoomAt(map: Pick<CustomMap, "rooms">, position: { x: numbe
   return best;
 }
 
-// A new space starts on a grass plot with an empty walled office, a door, a path out front and
-// one room, so there's somewhere to stand and something to build from.
+// A new space starts on a grass plot with an open wooden floor, a path up to it and one room,
+// so there's somewhere to stand and something to build from. It has no walls: the owner draws
+// every wall themselves with the map builder's Walls tool.
 export function createStarterMap(cols = 48, rows = 36): CustomMap {
   const floor = Array.from({ length: rows }, () => Array<string>(cols).fill(GRASS));
-  const walls = Array.from({ length: rows }, () => Array<string>(cols).fill(GRASS));
   const left = Math.floor(cols / 2) - 12, top = 4, right = left + 23, bottom = top + 17;
   const door = Math.floor(cols / 2);
-  for (let y = top; y <= bottom; y++) for (let x = left; x <= right; x++) {
-    const edge = x === left || x === right || y === top || y === bottom;
-    if (edge && !(y === bottom && (x === door - 1 || x === door))) walls[y]![x] = WALL;
-    else floor[y]![x] = FLOOR_CODES.wood;
-  }
-  for (let y = bottom; y < rows; y++) { floor[y]![door - 1] = FLOOR_CODES.path; floor[y]![door] = FLOOR_CODES.path; }
+  for (let y = top; y <= bottom; y++) for (let x = left; x <= right; x++) floor[y]![x] = FLOOR_CODES.wood;
+  for (let y = bottom + 1; y < rows; y++) { floor[y]![door - 1] = FLOOR_CODES.path; floor[y]![door] = FLOOR_CODES.path; }
   return {
     version: 1,
     cols,
     rows,
     floor: floor.map((row) => row.join("")),
-    walls: walls.map((row) => row.join("")),
+    walls: Array.from({ length: rows }, () => GRASS.repeat(cols)),
     items: [],
     rooms: [{ id: "office", name: "Office", bounds: { x: left + 1, y: top + 1, width: right - left - 1, height: bottom - top - 1 } }],
     spawn: { x: door, y: bottom + 3 },

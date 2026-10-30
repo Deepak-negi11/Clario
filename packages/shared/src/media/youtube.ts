@@ -79,10 +79,16 @@ export function parseYouTubeUrl(input: string): YouTubeVideo | null {
 }
 
 // The privacy-enhanced embed (youtube-nocookie.com). rel=0 keeps suggestions to the same channel.
-export function youTubeEmbedUrl(video: YouTubeVideo, options: { autoplay?: boolean } = {}): string {
+// `api` turns on YouTube's IFrame Player API (enablejsapi) so the page can pause, play and set the
+// volume with postMessage; `origin` is the page's origin, which YouTube wants alongside it.
+export function youTubeEmbedUrl(video: YouTubeVideo, options: { autoplay?: boolean; api?: boolean; origin?: string } = {}): string {
   const params = new URLSearchParams({ rel: "0", playsinline: "1" });
   if (options.autoplay) params.set("autoplay", "1");
   if (video.start) params.set("start", String(video.start));
+  if (options.api) {
+    params.set("enablejsapi", "1");
+    if (options.origin) params.set("origin", options.origin);
+  }
   return `https://www.youtube-nocookie.com/embed/${video.id}?${params}`;
 }
 

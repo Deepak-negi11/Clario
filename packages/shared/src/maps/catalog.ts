@@ -19,7 +19,12 @@ export type ItemCategory = "Office" | "Meetings" | "Lounge" | "Kitchen" | "Fun" 
 // w/h: the tiles the item stands on (the same whichever way it faces). Seats are walkable and
 // let you sit; everything else blocks. `faces`: the directions it can be turned to (the 2D map
 // only has side views for some seats). `fabric`: it can be upholstered in one of FABRICS.
-export type ItemSpec = { w: number; h: number; label: string; category: ItemCategory; seat?: boolean; faces?: readonly Dir[]; fabric?: boolean };
+// `looks`: how many looks it is drawn in (an item's `variant` picks one). `under`: it lies on the
+// floor (a rug, flowers): people walk over it, and furniture can stand on it, but not another one.
+export type ItemSpec = {
+  w: number; h: number; label: string; category: ItemCategory;
+  seat?: boolean; faces?: readonly Dir[]; fabric?: boolean; looks?: number; under?: boolean;
+};
 
 const ALL_WAYS = DIRS;
 const FRONT_BACK = ["down", "up"] as const;
@@ -28,9 +33,9 @@ const SPECS = {
   "desk-l": { w: 2, h: 1, label: "Desk (screen left)", category: "Office" },
   "desk-r": { w: 2, h: 1, label: "Desk (screen right)", category: "Office" },
   "task-chair": { w: 1, h: 1, label: "Office chair", category: "Office", seat: true, faces: ALL_WAYS },
-  "desk-white": { w: 2, h: 1, label: "White desk", category: "Office" },
-  bookshelf: { w: 2, h: 1, label: "Bookshelf", category: "Office" },
-  "filing-cabinet": { w: 1, h: 1, label: "Filing cabinet", category: "Office" },
+  "desk-white": { w: 2, h: 1, label: "White desk", category: "Office", looks: 2 },
+  bookshelf: { w: 2, h: 1, label: "Bookshelf", category: "Office", looks: 2 },
+  "filing-cabinet": { w: 1, h: 1, label: "Filing cabinet", category: "Office", looks: 2 },
   "water-cooler": { w: 1, h: 1, label: "Water cooler", category: "Office" },
   "exec-chair": { w: 1, h: 1, label: "Executive chair", category: "Office", seat: true, faces: ALL_WAYS, fabric: true },
   wardrobe: { w: 1, h: 1, label: "Wardrobe", category: "Office" },
@@ -38,17 +43,18 @@ const SPECS = {
   "reception-desk": { w: 4, h: 2, label: "Reception desk", category: "Office" },
   "meeting-table": { w: 6, h: 2, label: "Meeting table (12)", category: "Meetings" },
   "meeting-table-sm": { w: 4, h: 2, label: "Meeting table (8)", category: "Meetings" },
-  "meeting-table-md": { w: 3, h: 2, label: "Meeting table (6 + ends)", category: "Meetings" },
+  "meeting-table-md": { w: 3, h: 2, label: "Meeting table (6 + ends)", category: "Meetings", looks: 2 },
   "meet-chair": { w: 1, h: 1, label: "Meeting chair", category: "Meetings", seat: true, faces: ALL_WAYS, fabric: true },
   whiteboard: { w: 2, h: 1, label: "Whiteboard", category: "Meetings" },
   "flip-chart": { w: 1, h: 1, label: "Flip chart", category: "Meetings" },
   podium: { w: 1, h: 1, label: "Podium", category: "Meetings" },
   "theatre-seat": { w: 1, h: 1, label: "Theatre seat", category: "Meetings", seat: true, faces: FRONT_BACK },
   sofa: { w: 3, h: 1, label: "Sofa", category: "Lounge", seat: true, faces: FRONT_BACK, fabric: true },
+  loveseat: { w: 2, h: 1, label: "Loveseat", category: "Lounge", seat: true, faces: FRONT_BACK, fabric: true },
   armchair: { w: 1, h: 1, label: "Armchair", category: "Lounge", seat: true, faces: ALL_WAYS, fabric: true },
   beanbag: { w: 1, h: 1, label: "Beanbag", category: "Lounge", seat: true, fabric: true },
   "coffee-table": { w: 3, h: 1, label: "Coffee table", category: "Lounge" },
-  "side-table": { w: 1, h: 1, label: "Side table", category: "Lounge" },
+  "side-table": { w: 1, h: 1, label: "Side table", category: "Lounge", looks: 3 },
   "cube-shelf": { w: 2, h: 1, label: "Cube shelf", category: "Lounge" },
   "tv-console": { w: 3, h: 1, label: "TV", category: "Lounge" },
   "floor-lamp": { w: 1, h: 1, label: "Floor lamp", category: "Lounge" },
@@ -59,11 +65,11 @@ const SPECS = {
   "counter-coffee": { w: 1, h: 1, label: "Coffee machine", category: "Kitchen" },
   "cafe-table": { w: 2, h: 1, label: "Cafe table", category: "Kitchen" },
   "cafe-chair": { w: 1, h: 1, label: "Cafe chair", category: "Kitchen", seat: true, faces: ALL_WAYS },
-  "round-table": { w: 1, h: 1, label: "Round cafe table", category: "Kitchen" },
+  "round-table": { w: 1, h: 1, label: "Round cafe table", category: "Kitchen", looks: 3 },
   "coffee-bar": { w: 2, h: 1, label: "Coffee station", category: "Kitchen" },
   "vending-machine": { w: 1, h: 1, label: "Vending machine", category: "Kitchen" },
-  pingpong: { w: 3, h: 2, label: "Ping-pong table", category: "Fun" },
-  arcade: { w: 1, h: 1, label: "Arcade machine", category: "Fun" },
+  pingpong: { w: 3, h: 2, label: "Ping-pong table", category: "Fun", looks: 2 },
+  arcade: { w: 1, h: 1, label: "Arcade machine", category: "Fun", looks: 3 },
   foosball: { w: 2, h: 1, label: "Foosball", category: "Fun" },
   "server-rack": { w: 1, h: 1, label: "Server rack", category: "Tech" },
   "printer-3d": { w: 1, h: 1, label: "3D printer", category: "Tech" },
@@ -73,11 +79,19 @@ const SPECS = {
   "plant-big": { w: 1, h: 1, label: "Plant", category: "Decor" },
   "plant-small": { w: 1, h: 1, label: "Small plant", category: "Decor" },
   "plant-tree": { w: 1, h: 1, label: "Indoor tree", category: "Decor" },
+  "plant-fern": { w: 1, h: 1, label: "Fern", category: "Decor" },
+  "plant-tall": { w: 1, h: 1, label: "Tall plant", category: "Decor" },
+  rug: { w: 4, h: 3, label: "Rug", category: "Decor", looks: 6, under: true },
+  "rug-round": { w: 4, h: 3, label: "Round rug", category: "Decor", under: true },
   globe: { w: 1, h: 1, label: "Globe", category: "Decor" },
   aquarium: { w: 2, h: 1, label: "Aquarium", category: "Decor" },
   "traffic-cone": { w: 1, h: 1, label: "Traffic cone", category: "Decor" },
   tree: { w: 2, h: 1, label: "Tree", category: "Outdoor" },
   bush: { w: 1, h: 1, label: "Bush", category: "Outdoor" },
+  "bush-small": { w: 1, h: 1, label: "Small bush", category: "Outdoor" },
+  flower: { w: 1, h: 1, label: "Flowers", category: "Outdoor", looks: 3, under: true },
+  rock: { w: 1, h: 1, label: "Rock", category: "Outdoor", looks: 2 },
+  pond: { w: 5, h: 4, label: "Pond", category: "Outdoor" },
   bench: { w: 2, h: 1, label: "Park bench", category: "Outdoor", seat: true },
   "lamp-post": { w: 1, h: 1, label: "Street lamp", category: "Outdoor" },
   "bike-rack": { w: 2, h: 1, label: "Bike rack", category: "Outdoor" },
@@ -94,6 +108,11 @@ export const ITEM_KINDS = Object.keys(ITEM_SPECS) as ItemKind[];
 
 export function itemSpec(kind: ItemKind): ItemSpec {
   return ITEM_SPECS[kind];
+}
+
+// Whether two items may share a tile: only when exactly one of them lies on the floor.
+export function itemsStack(a: ItemKind, b: ItemKind) {
+  return !!itemSpec(a).under !== !!itemSpec(b).under;
 }
 
 // Tiles an item covers: w x h from its top-left tile.

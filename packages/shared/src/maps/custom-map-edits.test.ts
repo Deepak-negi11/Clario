@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createStarterMap, customMapSchema, floorAt, isWallAt, type CustomMap } from "./custom-map";
+import { createStarterMap, customBlockedTiles, customMapSchema, floorAt, isWallAt, type CustomMap } from "./custom-map";
 import { addRoom, eraseAt, paintFloor, placeItem, placementProblem, removeRoom, renameRoom, setSpawn, setWall, type EditResult } from "./custom-map-edits";
 
 const ok = (result: EditResult): CustomMap => {
@@ -23,7 +23,7 @@ describe("map builder edits", () => {
   });
 
   test("refuses walls, the map edge and the spawn tile", () => {
-    const map = createStarterMap();
+    const map = ok(setWall(createStarterMap(), 12, 4, true));
     expect(placementProblem(map, { kind: "plant-big", x: 12, y: 4 })).toBe("There's a wall in the way");
     expect(placementProblem(map, { kind: "office-block", x: 45, y: 30 })).toBe("That goes off the edge of the map");
     expect(placementProblem(map, { kind: "bush", ...map.spawn })).toContain("spawn");
@@ -34,7 +34,7 @@ describe("map builder edits", () => {
     let map = ok(placeItem(createStarterMap(), "plant-big", 14, 6));
     map = ok(eraseAt(map, 14, 6));
     expect(map.items).toHaveLength(0);
-    map = ok(eraseAt(map, 12, 10));
+    map = ok(eraseAt(ok(setWall(map, 12, 10, true)), 12, 10));
     expect(isWallAt(map, 12, 10)).toBe(false);
     expect(eraseAt(map, 2, 2)).toEqual({ error: "Nothing to remove here" });
   });
@@ -53,7 +53,7 @@ describe("map builder edits", () => {
   });
 
   test("moves the spawn only to a tile people can stand on", () => {
-    const map = createStarterMap();
+    const map = ok(setWall(createStarterMap(), 12, 4, true));
     expect(setSpawn(map, 12, 4)).toEqual({ error: "People can't stand there" });
     expect(ok(setSpawn(map, 20, 10)).spawn).toEqual({ x: 20, y: 10 });
   });
@@ -68,5 +68,23 @@ describe("map builder edits", () => {
     expect(map.rooms[1]!.id).toBe("meeting-room-2");
     expect(ok(renameRoom(map, "meeting-room", "Boardroom")).rooms[0]!.name).toBe("Boardroom");
     expect(addRoom(map, "   ", { x: 1, y: 1 }, { x: 2, y: 2 })).toEqual({ error: "Give the room a name" });
+  });
+});
+
+describe("rugs and flowers", () => {
+  test("lie under furniture, which can stand on them, and erase after it", () => {
+    let map = ok(placeItem(createStarterMap(), "rug", 15, 7, undefined, undefined, 3));
+    expect(map.items[0]).toEqual({ kind: "rug", x: 15, y: 7, variant: 3 });
+    map = ok(placeItem(map, "sofa", 15, 8, "up", "sage"));
+    expect(placeItem(map, "rug-round", 16, 8)).toEqual({ error: "Rug is in the way" });
+    map = ok(eraseAt(map, 16, 8));
+    expect(map.items.map((item) => item.kind)).toEqual(["rug"]);
+  });
+
+  test("don't block walking or the spawn, and drop a look the piece doesn't have", () => {
+    const start = createStarterMap();
+    const map = ok(placeItem(start, "flower", start.spawn.x, start.spawn.y, undefined, undefined, 9));
+    expect(map.items[0]).toEqual({ kind: "flower", ...start.spawn });
+    expect(customBlockedTiles(map).has(`${start.spawn.x},${start.spawn.y}`)).toBe(false);
   });
 });

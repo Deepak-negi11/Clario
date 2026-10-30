@@ -6,18 +6,22 @@ import {
 } from "./custom-map";
 
 const starter = () => createStarterMap();
+// The starter map with one wall tile, for checks that need a wall.
+const withWall = (map: CustomMap, x: number, y: number): CustomMap =>
+  ({ ...map, walls: map.walls.map((row, j) => (j === y ? row.slice(0, x) + "#" + row.slice(x + 1) : row)) });
 const errors = (map: unknown) => {
   const result = customMapSchema.safeParse(map);
   return result.success ? [] : result.error.issues.map((issue) => issue.message);
 };
 
 describe("the starter map", () => {
-  test("is valid, with walls, a wood floor, a door and a path", () => {
+  test("is valid, with a wood floor and a path but no walls", () => {
     const map = starter();
     expect(errors(map)).toEqual([]);
-    expect(isWallAt(map, 12, 4)).toBe(true);
+    expect(map.walls.every((row) => !row.includes("#"))).toBe(true);
+    expect(isWallAt(map, 12, 4)).toBe(false);
+    expect(floorAt(map, 12, 4)).toBe("wood");
     expect(floorAt(map, 20, 10)).toBe("wood");
-    expect(isWallAt(map, 24, 21)).toBe(false);
     expect(floorAt(map, 24, 30)).toBe("path");
     expect(floorAt(map, 2, 2)).toBeNull();
   });
@@ -48,7 +52,7 @@ describe("validation", () => {
   test("rejects overlapping, off-map and on-wall items", () => {
     expect(errors(withItems([{ kind: "sofa", x: 16, y: 8 }, { kind: "coffee-table", x: 17, y: 8 }])).join()).toContain("overlaps");
     expect(errors(withItems([{ kind: "house", x: 46, y: 2 }])).join()).toContain("off the map");
-    expect(errors(withItems([{ kind: "plant-big", x: 12, y: 4 }])).join()).toContain("on a wall");
+    expect(errors(withWall(withItems([{ kind: "plant-big", x: 12, y: 4 }]), 12, 4)).join()).toContain("on a wall");
   });
 
   test("rejects a facing the item has no art for, and fabric on hard furniture", () => {
@@ -60,7 +64,7 @@ describe("validation", () => {
     const map = starter();
     expect(errors({ ...map, rooms: [...map.rooms, { id: "porch", name: "Porch", bounds: { x: 30, y: 18, width: 10, height: 6 } }] }).join()).toContain("overlap");
     expect(errors({ ...map, rooms: [...map.rooms, { id: "twin", name: "Twin", bounds: { ...map.rooms[0]!.bounds } }] }).join()).toContain("overlap");
-    expect(errors({ ...map, spawn: { x: 12, y: 4 } }).join()).toContain("spawn");
+    expect(errors({ ...withWall(map, 12, 4), spawn: { x: 12, y: 4 } }).join()).toContain("spawn");
     expect(errors({ ...map, floor: [...map.floor.slice(1), "w"] }).join()).toContain("floor must have");
   });
 

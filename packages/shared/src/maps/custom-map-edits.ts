@@ -1,4 +1,4 @@
-import { itemFootprint, itemSpec, type Dir, type Fabric, type ItemKind } from "./catalog";
+import { itemFootprint, itemSpec, itemsStack, type Dir, type Fabric, type ItemKind } from "./catalog";
 import {
   CUSTOM_MAP_LIMITS, FLOOR_CODES, customBlockedTiles, customRoomAt, isWallAt, roomsClash,
   type CustomFloor, type CustomMap, type CustomMapItem,
@@ -14,12 +14,18 @@ const setChar = (rows: string[], x: number, y: number, char: string) =>
 
 const inside = (map: CustomMap, x: number, y: number) => x >= 0 && y >= 0 && x < map.cols && y < map.rows;
 
-// The item covering a tile, if any (its index in map.items).
-export function itemIndexAt(map: CustomMap, x: number, y: number) {
+// The item covering a tile, if any (its index in map.items): furniture before a rug under it.
+// With `clashes`, only an item that can't share the tile with that kind.
+export function itemIndexAt(map: CustomMap, x: number, y: number, clashes?: ItemKind) {
+  let under = -1;
   for (let i = map.items.length - 1; i >= 0; i--) {
-    if (itemFootprint(map.items[i]!).some((cell) => cell.x === x && cell.y === y)) return i;
+    const item = map.items[i]!;
+    if (clashes && itemsStack(clashes, item.kind)) continue;
+    if (!itemFootprint(item).some((cell) => cell.x === x && cell.y === y)) continue;
+    if (!itemSpec(item.kind).under) return i;
+    if (under < 0) under = i;
   }
-  return -1;
+  return under;
 }
 
 // Why an item can't go here, or null if it can.
@@ -29,20 +35,21 @@ export function placementProblem(map: CustomMap, item: { kind: ItemKind; x: numb
   for (const { x, y } of itemFootprint(item)) {
     if (!inside(map, x, y)) return "That goes off the edge of the map";
     if (isWallAt(map, x, y)) return "There's a wall in the way";
-    const other = itemIndexAt(map, x, y);
+    const other = itemIndexAt(map, x, y, item.kind);
     if (other >= 0) return `${itemSpec(map.items[other]!.kind).label} is in the way`;
-    if (!spec.seat && map.spawn.x === x && map.spawn.y === y) return "That's where people arrive; move the spawn point first";
+    if (!spec.seat && !spec.under && map.spawn.x === x && map.spawn.y === y) return "That's where people arrive; move the spawn point first";
   }
   return null;
 }
 
-export function placeItem(map: CustomMap, kind: ItemKind, x: number, y: number, dir?: Dir, fabric?: Fabric): EditResult {
+export function placeItem(map: CustomMap, kind: ItemKind, x: number, y: number, dir?: Dir, fabric?: Fabric, variant?: number): EditResult {
   const problem = placementProblem(map, { kind, x, y });
   if (problem) return { error: problem };
   const spec = itemSpec(kind);
   const item: CustomMapItem = { kind, x, y };
   if (dir && dir !== "down" && spec.faces?.includes(dir)) item.dir = dir;
   if (fabric && spec.fabric) item.fabric = fabric;
+  if (variant && spec.looks && variant < spec.looks) item.variant = variant;
   return { map: { ...map, items: [...map.items, item] } };
 }
 

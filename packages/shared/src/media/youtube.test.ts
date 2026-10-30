@@ -85,6 +85,9 @@ describe("embed and watch URLs", () => {
     expect(youTubeEmbedUrl({ id: ID, start: 90 }, { autoplay: true })).toBe(
       `https://www.youtube-nocookie.com/embed/${ID}?rel=0&playsinline=1&autoplay=1&start=90`,
     );
+    expect(youTubeEmbedUrl({ id: ID }, { api: true, origin: "http://localhost:3000" })).toBe(
+      `https://www.youtube-nocookie.com/embed/${ID}?rel=0&playsinline=1&enablejsapi=1&origin=http%3A%2F%2Flocalhost%3A3000`,
+    );
   });
 
   test("links back to the watch page", () => {

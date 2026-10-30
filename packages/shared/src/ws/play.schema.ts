@@ -4,7 +4,7 @@ import * as z from "zod";
 // table), and the Lounge TV that everyone in the space watches together. The server checks who may
 // talk to whom and relays the rest.
 
-export const PlayGame = z.enum(["pong", "breakout", "snake", "sumo"]);
+export const PlayGame = z.enum(["pong", "breakout", "snake", "sumo", "tetris"]);
 
 // Largest game message the server relays (a snapshot of the board), in JSON characters.
 export const PLAY_DATA_MAX_CHARS = 12_000;
@@ -65,20 +65,29 @@ export const PlayDataBroadcast = z.object({
   payload: z.object({ fromUserId: z.string(), data: z.unknown() }),
 });
 
-// The Lounge TV: one per space, the same YouTube video for everyone. "sync" asks for what's on.
+// The Lounge TV: one per space, the same YouTube video for everyone. "sync" asks for what's on;
+// "pause" and "resume" pause it for everyone (the TV's remote).
 const YouTubeVideoId = z.string().regex(/^[A-Za-z0-9_-]{11}$/);
 
 export const TvMessage = z.object({
   type: z.literal("tv"),
   payload: z.discriminatedUnion("action", [
-    z.object({ action: z.literal("play"), videoId: YouTubeVideoId, start: z.number().int().min(0).max(86_400).default(0) }),
+    z.object({ action: z.literal("play"), videoId: YouTubeVideoId, start: z.number().int().min(0).max(86_400).default(0), title: z.string().max(200).optional() }),
     z.object({ action: z.literal("stop") }),
+    z.object({ action: z.literal("pause") }),
+    z.object({ action: z.literal("resume") }),
     z.object({ action: z.literal("sync") }),
   ]),
 });
 
-// position: seconds into the video when the server sent this.
-export const TvState = z.object({ videoId: YouTubeVideoId, position: z.number().min(0), byUserId: z.string() });
+// position: seconds into the video when the server sent this (it stays put while paused).
+export const TvState = z.object({
+  videoId: YouTubeVideoId,
+  position: z.number().min(0),
+  byUserId: z.string(),
+  paused: z.boolean().default(false),
+  title: z.string().max(200).optional(),
+});
 
 export const TvBroadcast = z.object({
   type: z.literal("tv"),
