@@ -22,6 +22,9 @@ type Status = "connecting" | "joined" | "reconnecting" | "error";
 // Waits 0.5 s, 1 s, 2 s, 4 s, then 8 s between tries: about a minute before giving up.
 const MAX_RECONNECTS = 10;
 const reconnectDelay = (attempt: number) => Math.min(8000, 500 * 2 ** attempt);
+// A server that accepts the connection but never answers the join (it hung, or an older version
+// crashed mid-join) would keep the loading screen up forever: drop the connection and retry.
+const JOIN_TIMEOUT_MS = 10_000;
 
 // Sets (or, with null, clears) one person's prop, keeping the same object when nothing changes.
 function withProp(props: Record<string, PlayerProp>, userId: string, prop: PlayerProp | null) {
@@ -154,6 +157,9 @@ export function useSpaceSocket(spaceId: string, mapTemplate: MapTemplateId, cust
     const retry = retryRef.current;
     let joined = false;
     let rejected = false; // the server refused the join itself (bad token, no such space): don't retry
+    const joinTimer = window.setTimeout(() => {
+      if (!joined && !rejected) ws.close();
+    }, JOIN_TIMEOUT_MS);
 
     ws.onopen = () => {
       ws.send(JSON.stringify({ type: "join", payload: { spaceId, token } }));
@@ -206,6 +212,8 @@ export function useSpaceSocket(spaceId: string, mapTemplate: MapTemplateId, cust
         case "movement": {
           const { userId, x, y } = message.payload;
           setOthers((current) => ({ ...current, [userId]: { x, y } }));
+          // Someone (re)joining arrives empty-handed, even if an older tab of theirs had a bike.
+          if (message.type === "user-join") setProps((current) => withProp(current, userId, null));
           break;
         }
         case "movement-rejected":
@@ -383,6 +391,7 @@ export function useSpaceSocket(spaceId: string, mapTemplate: MapTemplateId, cust
 
     return () => {
       window.clearTimeout(retry.timer);
+      window.clearTimeout(joinTimer);
       if (socketRef.current === ws) socketRef.current = null;
       ws.close();
     };
@@ -563,12 +572,14 @@ export function useSpaceSocket(spaceId: string, mapTemplate: MapTemplateId, cust
 
   // Your bike or drink changed: shown at once, and the server tells everyone else. If someone
   // else already rides that bike, the server sends back what you really have.
+  // False when it couldn't be sent (reconnecting), so the map can keep things as they were.
   const sendProp = useCallback((prop: PlayerProp | null) => {
     const ws = socketRef.current;
     const me = selfIdRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN || !me) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN || !me) return false;
     setProps((current) => withProp(current, me, prop));
     ws.send(JSON.stringify({ type: "prop", payload: { prop } }));
+    return true;
   }, []);
 
   const subscribePlay = useCallback((listener: (message: PlayServerMessage) => void) => {

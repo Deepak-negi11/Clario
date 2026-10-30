@@ -31,7 +31,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { LoaderCircle, MessageSquare } from "lucide-react";
-import { ERRANDS, WORK_LEVEL_INFO, getChatRoom, getChatRoomAtPosition, type AvatarLook, type MapTemplateId, type WorkLevel, createStarterMap, type CustomMap } from "@repo/shared";
+import { ERRANDS, WORK_LEVEL_INFO, getChatRoom, getChatRoomAtPosition, isClarioHq, type AvatarLook, type MapTemplateId, type WorkLevel, createStarterMap, type CustomMap } from "@repo/shared";
 import { useSpaceSocket } from "../../../hooks/use-space-socket";
 import { useProximityVideo } from "../../../hooks/use-proximity-video";
 import { useLocalMedia, type LocalMediaController } from "../../../hooks/use-local-media";
@@ -133,6 +133,7 @@ export default function SpacePage() {
         spaceName={spaceName}
         initialName={displayName}
         initialLevel={savedLevel}
+        avatarView={mapTemplate === "clario-hq-3d" ? "3d" : "2d"}
         onEnter={async (name, look, level) => {
           const token = getAuthToken();
           if (!token) throw new Error("You are not signed in.");
@@ -266,9 +267,12 @@ function LiveSpace({
     [selfId, playPeople, sendPlay, subscribePlay],
   );
   const [view3d, setView3d] = useState(false);
-  // Clario HQ and built maps have a 3D view; errands are written for Clario HQ's rooms.
-  const isHq = mapTemplate === "clario-hq";
-  const can3d = isHq || (isCustomMap && !!customMap);
+  // Clario HQ 3D is only ever shown in 3D; built maps can switch to a 3D view. Errands are written
+  // for Clario HQ's rooms (both Clario HQ maps).
+  const isHq = isClarioHq(mapTemplate);
+  const only3d = mapTemplate === "clario-hq-3d";
+  const can3d = only3d || (isCustomMap && !!customMap);
+  const show3d = only3d || (can3d && view3d);
   // False until the map has loaded its art; the blue loading screen stays up until then.
   const [mapReady, setMapReady] = useState(false);
 
@@ -450,9 +454,6 @@ function LiveSpace({
         newTaskCount={countNewTasks(spaceTasks.tasks)}
         errandsLeft={isHq ? ERRANDS.filter((errand) => !errands.progress.done[errand.id]).length : undefined}
         canBuild={isCustomMap && canBuild && !!customMap}
-        can3d={can3d}
-        view3d={view3d}
-        onToggle3d={() => setView3d((open) => !open)}
         onLeave={onLeave}
       />
       {status === "reconnecting" && (
@@ -527,7 +528,7 @@ function LiveSpace({
         nearbyIds={nearbyIds}
         names={names}
       />
-      <MapControls bridgeRef={bridgeRef} />
+      <MapControls bridgeRef={bridgeRef} onOpen3d={can3d && !only3d ? () => setView3d(true) : undefined} />
       <ControlBar
         displayName={(selfId ? names[selfId] : undefined) ?? "You"}
         onReact={sendReaction}
@@ -541,13 +542,13 @@ function LiveSpace({
         look={selfId ? looksRef.current[selfId] ?? null : null}
         onUpdateLook={handleUpdateLook}
       />
-      {can3d && view3d && (
+      {show3d && (
         <Office3D
           selfId={selfId}
           selfRef={selfRef}
           othersRef={othersRef}
           namesRef={namesRef}
-          onClose={() => setView3d(false)}
+          onClose={only3d ? undefined : () => setView3d(false)}
           onWalkTo={(x, y) => bridgeRef.current.walkTo?.(x, y)}
           errandTarget={errandTarget}
           customMap={isCustomMap ? draftMap ?? customMap : null}
@@ -564,7 +565,7 @@ function LiveSpace({
           run={errands.run}
           now={errands.now}
           self={self}
-          raised={can3d && view3d}
+          raised={show3d}
           onCancel={errands.cancel}
         />
       ) : (

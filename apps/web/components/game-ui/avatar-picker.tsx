@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { ImageUp, LoaderCircle, RotateCcw } from "lucide-react";
 import { AVATAR_BASES, type AvatarBase, type AvatarLook, type HairShape } from "@repo/shared";
 import { readPhoto } from "../../lib/avatar/photo-detect";
@@ -12,6 +13,18 @@ const STYLE_LABELS: Record<AvatarBase, string> = {
   amelia: "Long hair",
   bob: "Short hair",
 };
+
+// On a 3D map you pick the 3D person: three.js only loads there.
+const Avatar3D = dynamic(() => import("../space-3d/avatar-3d").then((module) => module.Avatar3D), { ssr: false });
+
+// The 3D people have fewer hairstyles than the 2D sprites: the side part is the same person as
+// messy hair there, so 3D shows three styles (space-3d/people.ts, hairFor).
+const STYLE_LABELS_3D: Partial<Record<AvatarBase, string>> = {
+  adam: "Short hair",
+  amelia: "Long hair",
+  bob: "Buzz cut",
+};
+const sameIn3d = (base: AvatarBase) => (base === "alex" ? "adam" : base);
 
 const SWATCHES = {
   skin: ["#ffd9c2", "#f1c27d", "#e0ac69", "#c68642", "#8d5524", "#5c3a21"],
@@ -81,8 +94,14 @@ function Character({ sheet, frame, scale, label }: { sheet: HTMLCanvasElement | 
   );
 }
 
-export function AvatarPicker({ look, onChange }: { look: AvatarLook; onChange: (look: AvatarLook) => void }) {
+// `view="3d"` shows you as the 3D view does (for 3D maps) instead of the 2D sprite.
+export function AvatarPicker({ look, onChange, view = "2d" }: { look: AvatarLook; onChange: (look: AvatarLook) => void; view?: "2d" | "3d" }) {
   const sheets = useSheets();
+  // The 3D style pictures (made by Avatar3D), and whether the 3D people failed to load: then the
+  // picker falls back to the 2D sprites.
+  const [thumbs, setThumbs] = useState<Partial<Record<AvatarBase, string>>>({});
+  const [failed3d, setFailed3d] = useState(false);
+  const in3d = view === "3d" && !failed3d;
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [frameIndex, setFrameIndex] = useState(0);
   const [stage, setStage] = useState<"loading" | "reading" | null>(null);
@@ -119,7 +138,8 @@ export function AvatarPicker({ look, onChange }: { look: AvatarLook; onChange: (
     setNote(null);
     setPhotoUrl(URL.createObjectURL(file));
     try {
-      const result = await readPhoto(file, setStage);
+      // On 3D maps the face itself goes on your 3D head (and is saved, for others to see).
+      const result = await readPhoto(file, setStage, { cutFace: view === "3d" });
       if (result.method === "none") {
         setNote({ tone: "warn", text: "Couldn't find a face in that photo. Try a clear, front-facing one, or pick below." });
         return;
@@ -134,9 +154,11 @@ export function AvatarPicker({ look, onChange }: { look: AvatarLook; onChange: (
         glasses: photo.glasses,
         beard: photo.beard,
         ...(hairShape ? { hairShape } : {}),
+        ...(result.method === "detected" && result.face ? { face: result.face } : {}),
       });
       // Say what was read, so a wrong guess is easy to spot and undo below.
       const found = [
+        result.method === "detected" && result.face ? "face" : null,
         "skin",
         photo.hair && "hair colour",
         hairShape ? SHAPE_NAMES[hairShape] : photo.style && `hairstyle (${STYLE_LABELS[photo.style].toLowerCase()})`,
@@ -157,8 +179,16 @@ export function AvatarPicker({ look, onChange }: { look: AvatarLook; onChange: (
   return (
     <div className="mb-5 rounded-[14px] border border-[#e1e1e1] bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
       <div className="flex items-start gap-4">
-        <div className="relative grid h-[136px] w-[88px] shrink-0 place-items-center rounded-[10px] bg-[#eef0f6]">
-          <Character sheet={recolored[look.base] ?? null} frame={WALK_DOWN[frameIndex]!} scale={4} label="Your avatar" />
+        <div className={`relative grid shrink-0 place-items-center rounded-[10px] ${in3d ? "h-[176px] w-[112px] bg-gradient-to-b from-[#e3eef8] to-[#eef0f6]" : "h-[136px] w-[88px] bg-[#eef0f6]"}`}>
+          {in3d ? (
+            <Avatar3D
+              look={look}
+              onThumbs={setThumbs}
+              onError={() => setFailed3d(true)}
+            />
+          ) : (
+            <Character sheet={recolored[look.base] ?? null} frame={WALK_DOWN[frameIndex]!} scale={4} label="Your avatar" />
+          )}
           {photoUrl && (
             // eslint-disable-next-line @next/next/no-img-element -- a local blob URL, which next/image can't optimise
             <img
@@ -171,24 +201,54 @@ export function AvatarPicker({ look, onChange }: { look: AvatarLook; onChange: (
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold text-[#1a1a1a]">Your avatar</p>
           <p className="mt-0.5 text-xs leading-4 text-[#606060]">Pick a style and colours, or match them to a photo.</p>
-          <div className="mt-2.5 grid grid-cols-4 gap-1.5" role="radiogroup" aria-label="Avatar style">
-            {AVATAR_BASES.map((base) => (
-              <button
-                key={base}
-                type="button"
-                role="radio"
-                aria-checked={look.base === base}
-                aria-label={STYLE_LABELS[base]}
-                title={STYLE_LABELS[base]}
-                onClick={() => onChange({ ...look, base })}
-                className={`grid h-[52px] cursor-pointer place-items-center overflow-hidden rounded-lg transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#3f4ae8] ${
-                  look.base === base ? "bg-[#e6e8fd] ring-2 ring-[#3f4ae8]" : "bg-[#f4f4f5] hover:bg-[#ebebee]"
-                }`}
-              >
-                <Character sheet={recolored[base] ?? null} frame={WALK_DOWN[0]!} scale={1.5} />
-              </button>
-            ))}
-          </div>
+          {in3d ? (
+            <div className="mt-2.5 grid grid-cols-3 gap-1.5" role="radiogroup" aria-label="Avatar style">
+              {(Object.keys(STYLE_LABELS_3D) as AvatarBase[]).map((base) => {
+                const checked = sameIn3d(look.base) === base;
+                const picture = thumbs[base];
+                return (
+                  <button
+                    key={base}
+                    type="button"
+                    role="radio"
+                    aria-checked={checked}
+                    aria-label={STYLE_LABELS_3D[base]}
+                    title={STYLE_LABELS_3D[base]}
+                    onClick={() => onChange({ ...look, base })}
+                    className={`grid h-[60px] cursor-pointer place-items-center overflow-hidden rounded-lg transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#3f4ae8] ${
+                      checked ? "bg-[#e6e8fd] ring-2 ring-[#3f4ae8]" : "bg-[#f4f4f5] hover:bg-[#ebebee]"
+                    }`}
+                  >
+                    {picture ? (
+                      // eslint-disable-next-line @next/next/no-img-element -- a picture drawn here, which next/image can't optimise
+                      <img src={picture} alt="" className="h-14 w-14" />
+                    ) : (
+                      <span className="h-8 w-8 animate-pulse rounded-full bg-[#e2e4ea]" aria-hidden="true" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="mt-2.5 grid grid-cols-4 gap-1.5" role="radiogroup" aria-label="Avatar style">
+              {AVATAR_BASES.map((base) => (
+                <button
+                  key={base}
+                  type="button"
+                  role="radio"
+                  aria-checked={look.base === base}
+                  aria-label={STYLE_LABELS[base]}
+                  title={STYLE_LABELS[base]}
+                  onClick={() => onChange({ ...look, base })}
+                  className={`grid h-[52px] cursor-pointer place-items-center overflow-hidden rounded-lg transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#3f4ae8] ${
+                    look.base === base ? "bg-[#e6e8fd] ring-2 ring-[#3f4ae8]" : "bg-[#f4f4f5] hover:bg-[#ebebee]"
+                  }`}
+                >
+                  <Character sheet={recolored[base] ?? null} frame={WALK_DOWN[0]!} scale={1.5} />
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -231,7 +291,9 @@ export function AvatarPicker({ look, onChange }: { look: AvatarLook; onChange: (
       <p className="mt-1.5 text-[11px] leading-4 text-[#7a7a7a]">
         {stage === "loading"
           ? "The first time, this downloads the face detector (about 8 MB). Your photo isn't uploaded."
-          : "Your photo stays on this device. Only the avatar made from it is saved."}
+          : view === "3d"
+            ? "Your photo stays on this device. A small picture of your face from it is saved with your avatar, and others in the space see it on your 3D head."
+            : "Your photo stays on this device. Only the avatar made from it is saved."}
       </p>
       {note && (
         <p role="status" className={`mt-1.5 text-xs leading-4 ${note.tone === "ok" ? "text-[#1f7a4a]" : "text-amber-700"}`}>
@@ -304,6 +366,22 @@ export function AvatarPicker({ look, onChange }: { look: AvatarLook; onChange: (
         <div className="flex items-center gap-2" role="group" aria-label="Face details">
           <span className="w-9 shrink-0 text-xs font-medium text-[#606060]">Face</span>
           <div className="flex flex-1 flex-wrap items-center gap-1.5">
+            {look.face && (
+              <button
+                type="button"
+                aria-pressed="true"
+                aria-label="Remove photo face"
+                title="Remove the face from your photo"
+                onClick={() => {
+                  const next: AvatarLook = { ...look };
+                  delete next.face;
+                  onChange(next);
+                }}
+                className="h-6 cursor-pointer rounded-full bg-[#e6e8fd] px-2.5 text-xs font-medium text-[#2f39c9] ring-2 ring-[#3f4ae8] transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#3f4ae8]"
+              >
+                Photo face ×
+              </button>
+            )}
             {FACE_DETAILS.map(({ key, label }) => (
               <button
                 key={key}

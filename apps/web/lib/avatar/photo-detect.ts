@@ -1,5 +1,6 @@
 import type { FaceLandmarker, ImageSegmenter } from "@mediapipe/tasks-vision";
-import { lookFromDetection, type DetectedLook } from "./photo-analysis";
+import { FACE_POINTS, FACE_SIZE, affineFrom } from "@repo/shared";
+import { lookFromDetection, type DetectedLook, type Landmark } from "./photo-analysis";
 import { readPhotoLook, type PhotoLook } from "./photo-look";
 
 // Reads a look from a photo with MediaPipe's face landmarker and hair segmenter, in the browser.
@@ -69,7 +70,8 @@ function loadTasks(): Promise<Tasks> {
 }
 
 export type PhotoReading =
-  | { method: "detected"; look: DetectedLook }
+  // `face`: the face cut from the photo (see cutFace), when asked for.
+  | { method: "detected"; look: DetectedLook; face?: string }
   | { method: "colours"; look: PhotoLook }
   | { method: "none" };
 
@@ -77,7 +79,11 @@ export type PhotoReading =
  * Reads a photo. `onStage` hears "loading" while the models download (first time only) and
  * "reading" while the photo is read.
  */
-export async function readPhoto(file: Blob, onStage?: (stage: "loading" | "reading") => void): Promise<PhotoReading> {
+export async function readPhoto(
+  file: Blob,
+  onStage?: (stage: "loading" | "reading") => void,
+  { cutFace: wantFace = false }: { cutFace?: boolean } = {},
+): Promise<PhotoReading> {
   let tasks: Tasks;
   try {
     if (!loaded) onStage?.("loading");
@@ -100,10 +106,12 @@ export async function readPhoto(file: Blob, onStage?: (stage: "loading" | "readi
     return { method: "none" };
   }
   ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-  bitmap.close();
   const { width, height } = canvas;
 
   const landmarks = quietly(() => tasks.face.detect(canvas)).faceLandmarks[0];
+  // The face is cut from the full photo, for detail; the landmarks are fractions of its size.
+  const face = landmarks && wantFace ? cutFace(bitmap, landmarks) : undefined;
+  bitmap.close();
   if (!landmarks) return { method: "none" };
 
   const segmented = quietly(() => tasks.hair.segment(canvas));
@@ -129,5 +137,34 @@ export async function readPhoto(file: Blob, onStage?: (stage: "loading" | "readi
   }
 
   const look = lookFromDetection({ data: ctx.getImageData(0, 0, width, height).data, width, height, landmarks, hair });
-  return look ? { method: "detected", look } : { method: "none" };
+  return look ? { method: "detected", look, ...(face ? { face } : {}) } : { method: "none" };
+}
+
+// The face, turned and scaled so the eyes and mouth land on FACE_POINTS, as a small JPEG data
+// URL. The 3D people paint it onto their head (space-3d/people.ts).
+function cutFace(photo: ImageBitmap, landmarks: Landmark[]) {
+  const at = (index: number) => landmarks[index] ?? null;
+  const middle = (...indices: number[]) => {
+    const points = indices.map(at);
+    if (points.some((point) => !point)) return null;
+    return {
+      x: (points.reduce((sum, point) => sum + point!.x, 0) / points.length) * photo.width,
+      y: (points.reduce((sum, point) => sum + point!.y, 0) / points.length) * photo.height,
+    };
+  };
+  // MediaPipe's face mesh: the eye corners (33, 133 and 362, 263) and the inner lips (13, 14).
+  const imageLeftEye = middle(33, 133);
+  const imageRightEye = middle(362, 263);
+  const mouth = middle(13, 14);
+  if (!imageLeftEye || !imageRightEye || !mouth) return undefined;
+  const transform = affineFrom([imageLeftEye, imageRightEye, mouth], [FACE_POINTS.leftEye, FACE_POINTS.rightEye, FACE_POINTS.mouth]);
+  if (!transform) return undefined;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = FACE_SIZE;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return undefined;
+  ctx.imageSmoothingQuality = "high";
+  ctx.setTransform(...transform);
+  ctx.drawImage(photo, 0, 0);
+  return canvas.toDataURL("image/jpeg", 0.85);
 }

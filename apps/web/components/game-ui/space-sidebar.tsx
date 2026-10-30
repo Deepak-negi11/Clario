@@ -1,6 +1,6 @@
 "use client";
 
-import { Box, ClipboardList, Gamepad2, Hammer, LogOut, Mail, Trophy, Users } from "lucide-react";
+import { ClipboardList, Gamepad2, Hammer, LogOut, Mail, Trophy, Users } from "lucide-react";
 
 // Chat is opened from its own button in the bottom-left corner, not from this rail,
 // but it still shares this state so only one panel is open at a time.
@@ -16,9 +16,6 @@ type SpaceSidebarProps = {
   errandsLeft?: number;
   /** The space's owner on a map built in the map builder: shows the Build button. */
   canBuild?: boolean;
-  can3d: boolean;
-  view3d: boolean;
-  onToggle3d: () => void;
   onLeave: () => void;
 };
 
@@ -31,9 +28,6 @@ export function SpaceSidebar({
   newTaskCount,
   errandsLeft,
   canBuild,
-  can3d,
-  view3d,
-  onToggle3d,
   onLeave,
 }: SpaceSidebarProps) {
   const toggle = (next: SidePanel) => onPanelChange(panel === next ? null : next);
@@ -73,11 +67,6 @@ export function SpaceSidebar({
       {canBuild && (
         <RailButton label="Build" title="Build your map" active={panel === "builder"} onClick={() => toggle("builder")}>
           <Hammer size={20} aria-hidden="true" />
-        </RailButton>
-      )}
-      {can3d && (
-        <RailButton label={view3d ? "2D" : "3D"} title={view3d ? "Back to the 2D map" : "See the office in 3D"} active={view3d} onClick={onToggle3d}>
-          <Box size={20} aria-hidden="true" />
         </RailButton>
       )}
       {/* A new tab, so you stay in the space. */}

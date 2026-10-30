@@ -15,13 +15,15 @@ type PrejoinScreenProps = {
   /** The level saved on the profile, if any; it can arrive after the screen mounts. */
   initialLevel: WorkLevel | null;
   onEnter: (displayName: string, look: AvatarLook, level: WorkLevel) => Promise<void>;
+  /** "3d" on a map only seen in 3D: the avatar picker shows the 3D person. */
+  avatarView?: "2d" | "3d";
 };
 
 const LEVEL_BARS = 12;
 const blueButton =
   "flex h-11 w-full items-center justify-center rounded-[10px] bg-[#3f4ae8] px-5 text-[16px] font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.08)] transition hover:bg-[#3540d7] disabled:cursor-wait disabled:opacity-60";
 
-export function PrejoinScreen({ media, spaceName, initialName, initialLevel, onEnter }: PrejoinScreenProps) {
+export function PrejoinScreen({ media, spaceName, initialName, initialLevel, onEnter, avatarView = "2d" }: PrejoinScreenProps) {
   const previewRef = useRef<HTMLVideoElement | null>(null);
   const [displayName, setDisplayName] = useState(initialName);
   const [look, setLook] = useState<AvatarLook>(() => readSavedLook() ?? originalLook("adam"));
@@ -171,7 +173,7 @@ export function PrejoinScreen({ media, spaceName, initialName, initialLevel, onE
               <p className="mb-5 text-sm text-[#606060]">
                 Choose how you look, then enter your display name.
               </p>
-              <AvatarPicker look={look} onChange={setLook} />
+              <AvatarPicker look={look} onChange={setLook} view={avatarView} />
               <label htmlFor="prejoin-name" className="sr-only">Display name</label>
               <input
                 id="prejoin-name"
