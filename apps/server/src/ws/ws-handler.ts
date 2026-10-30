@@ -38,7 +38,7 @@ import {
   unsubscribeFromSpaceEvents,
 } from "./pubsub";
 
-import { isInRoom, propOf, sendToUser } from "./room-manager";
+import { forgetRemoteProps, isCurrentSocket, isInRoom, propOf, sendToUser, setRemoteProp } from "./room-manager";
 import { forgetSpaceLayout, isInsideMap, loadSpaceMap, mapRoomAt, mapSpawn } from "./space-layout";
 import {
   answerDirectChat,
@@ -91,7 +91,12 @@ export async function onMessage(ws: Socket, raw: string | Buffer) {
 
   switch (parsed.data.type) {
     case "join":
-      return handleJoin(ws, parsed.data.payload);
+      // If the database or Redis is down, the join fails without an answer and the browser would
+      // wait on "Loading your space…" forever. Closing the socket makes it retry with backoff.
+      return handleJoin(ws, parsed.data.payload).catch((error) => {
+        console.error("[ws] join failed:", error);
+        ws.close(1011, "Could not join the space");
+      });
     case "move": {
       // Each step is checked against the last accepted one, so a player's steps are handled one
       // at a time, in the order they arrive. Otherwise a step that arrives while the one before
@@ -170,11 +175,14 @@ async function handleJoin(ws: Socket, payload: JoinPayload) {
 
     .filter((user) => user.userId !== userId)
     .map((user) => {
-      // Their bike or drink, for people on this server (prop-handler.ts).
+      // Their bike or drink, whichever server they are on (prop-handler.ts).
       const prop = propOf(payload.spaceId, user.userId);
       return { id: user.userId, x: user.x, y: user.y, ...(prop ? { prop } : {}) };
     });
 
+  // A second tab or a reconnect starts empty-handed: whatever the old connection had (a bike
+  // goes back to its rack) is put down for everyone, so nobody keeps seeing it.
+  const hadProp = propOf(payload.spaceId, userId);
   addToRoom(payload.spaceId, {
     socket: ws,
     userId,
@@ -182,6 +190,12 @@ async function handleJoin(ws: Socket, payload: JoinPayload) {
     y: spawn.y,
   });
   await subscribeToSpaceEvents(payload.spaceId);
+  if (hadProp) {
+    setRemoteProp(payload.spaceId, userId, null);
+    const putDown = { type: "prop", payload: { userId, prop: null } } as const;
+    broadcast(payload.spaceId, userId, putDown);
+    await publishRoomEvent(payload.spaceId, userId, putDown);
+  }
 
 
   send(ws, {
@@ -214,6 +228,9 @@ async function handleMove(ws: Socket, payload: MovePayload) {
   const currentPosition = { x: currentX, y: currentY };
   const space = await prisma.space.findUnique({ where: { id: spaceId }, select: { mapTemplate: true } });
   const map = await loadSpaceMap(spaceId, space?.mapTemplate);
+  // A step still queued when this connection closed (or another tab replaced it) would move a
+  // person who has left, after everyone was told they left.
+  if (!isCurrentSocket(spaceId, userId, ws)) return;
   const isInBounds = isInsideMap(map, payload);
   if (!isInBounds || !isOneTileMove(currentPosition, payload)) {
     return send(ws, {
@@ -435,6 +452,7 @@ export async function onClose(ws: Socket) {
   if (roomSize(spaceId) === 0) {
     forgetSpaceLayout(spaceId);
     forgetSpacePlay(spaceId);
+    forgetRemoteProps(spaceId);
     await unsubscribeFromSpaceEvents(spaceId);
   }
 }

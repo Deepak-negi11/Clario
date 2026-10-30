@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   allowPlayMessage, answerPlay, arePlaying, forgetPlay, forgetSpacePlay, INVITE_TTL_MS, invitePlay, leavePlay,
-  PLAY_MESSAGES_PER_SECOND, setTv, TABLE_SEATS, TV_CHANGE_EVERY_MS, tvState,
+  PLAY_MESSAGES_PER_SECOND, pauseTv, setTv, TABLE_SEATS, TV_CHANGE_EVERY_MS, tvState,
 } from "./play";
 
 const space = () => `space-${crypto.randomUUID()}`;
@@ -107,7 +107,20 @@ describe("lounge tv", () => {
     const u = user();
     expect(tvState(s)).toBeNull();
     expect(setTv(s, u, { videoId: "arj7oStGLkU", start: 30 }, 10_000)).toBe(true);
-    expect(tvState(s, 25_000)).toEqual({ videoId: "arj7oStGLkU", position: 45, byUserId: u });
+    expect(tvState(s, 25_000)).toEqual({ videoId: "arj7oStGLkU", position: 45, byUserId: u, paused: false });
+  });
+
+  test("pausing holds the picture for everyone, and resuming carries on from there", () => {
+    const s = space();
+    const owner = user();
+    const other = user();
+    setTv(s, owner, { videoId: "arj7oStGLkU", start: 10 }, 0);
+    expect(pauseTv(s, other, true, 5_000)).toBe(true);
+    expect(tvState(s, 60_000)).toMatchObject({ position: 15, paused: true });
+    expect(pauseTv(s, other, true, 61_000)).toBe(false); // already paused
+    expect(pauseTv(s, other, false, 62_000)).toBe(true);
+    expect(tvState(s, 72_000)).toMatchObject({ position: 25, paused: false, byUserId: owner });
+    expect(pauseTv(space(), other, true, 80_000)).toBe(false); // nothing on
   });
 
   test("one person can't flip channels faster than the limit; off clears it", () => {

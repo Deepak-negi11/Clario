@@ -311,6 +311,40 @@ describe("WebSocket", () => {
       wsB.close();
       wsC.close();
     });
+
+    test("a second tab starts empty-handed, puts the old bike back for everyone and silences the old tab", async () => {
+      const { token: tokenA, spaceId } = await setupUserAndSpace();
+      const { token: tokenB } = await setupUserAndSpace();
+
+      const wsA = new TestSocket(WS_URL);
+      await wsA.waitForOpen();
+      wsA.send({ type: "join", payload: { spaceId, token: tokenA } });
+      const userA = (await wsA.nextMessage()).payload?.userId;
+      const wsB = new TestSocket(WS_URL);
+      await wsB.waitForOpen();
+      wsB.send({ type: "join", payload: { spaceId, token: tokenB } });
+      await wsB.nextMessage();
+      await wsA.nextMessage();
+      wsA.send({ type: "prop", payload: { prop: { kind: "bike", bike: "orange" } } });
+      expect((await wsB.nextMessage()).payload?.prop).toEqual({ kind: "bike", bike: "orange" });
+
+      const wsA2 = new TestSocket(WS_URL);
+      await wsA2.waitForOpen();
+      wsA2.send({ type: "join", payload: { spaceId, token: tokenA } });
+      expect((await wsA2.nextMessage()).type).toBe("space-joined");
+      expect(await wsB.nextMessage()).toEqual({ type: "prop", payload: { userId: userA, prop: null } });
+      expect((await wsB.nextMessage()).type).toBe("user-join");
+
+      // The old tab's messages are ignored, and the bike is free again.
+      wsA.send({ type: "prop", payload: { prop: { kind: "bike", bike: "teal" } } });
+      await expect(wsB.nextMessage(300)).rejects.toThrow("timed out");
+      wsB.send({ type: "prop", payload: { prop: { kind: "bike", bike: "orange" } } });
+      expect((await wsA2.nextMessage()).payload?.prop).toEqual({ kind: "bike", bike: "orange" });
+
+      wsA.close();
+      wsA2.close();
+      wsB.close();
+    });
   });
 
   describe("leave", () => {

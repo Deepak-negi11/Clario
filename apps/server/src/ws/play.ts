@@ -3,7 +3,7 @@
 // only then does game traffic flow between them. Kept in memory like the rest of the room state,
 // so it resets on restart.
 
-export type PlayGame = "pong" | "breakout" | "snake" | "sumo";
+export type PlayGame = "pong" | "breakout" | "snake" | "sumo" | "tetris";
 
 export const TABLE_SEATS = 4;
 // An invite nobody answered stops counting after this long.
@@ -16,7 +16,8 @@ export const TV_CHANGE_EVERY_MS = 1_500;
 // players[0] is the host.
 type Table = { game: PlayGame; players: string[]; invites: Map<string, number> };
 
-export type TvNow = { videoId: string; start: number; startedAt: number; byUserId: string };
+// start: seconds into the video at startedAt. pausedAt: when it was paused, if it is.
+export type TvNow = { videoId: string; start: number; startedAt: number; byUserId: string; pausedAt?: number; title?: string };
 
 const spaces = new Map<string, Map<string, Table>>(); // space -> host -> table
 const tvs = new Map<string, TvNow>();
@@ -154,20 +155,44 @@ export function allowPlayMessage(fromUserId: string, toUserId: string, now = Dat
   return window.count <= PLAY_MESSAGES_PER_SECOND;
 }
 
-// The TV. position is how far into the video it is now, in seconds.
+// The TV. position is how far into the video it is now (or where it was paused), in seconds.
 export function tvState(spaceId: string, now = Date.now()) {
   const tv = tvs.get(spaceId);
   if (!tv) return null;
-  return { videoId: tv.videoId, position: tv.start + Math.max(0, now - tv.startedAt) / 1000, byUserId: tv.byUserId };
+  const until = tv.pausedAt ?? now;
+  return {
+    videoId: tv.videoId,
+    position: tv.start + Math.max(0, until - tv.startedAt) / 1000,
+    byUserId: tv.byUserId,
+    paused: tv.pausedAt !== undefined,
+    ...(tv.title ? { title: tv.title } : {}),
+  };
 }
 
 // Put a video on (or switch it off with null). False when this person changed it too recently.
-export function setTv(spaceId: string, userId: string, video: { videoId: string; start: number } | null, now = Date.now()) {
+export function setTv(spaceId: string, userId: string, video: { videoId: string; start: number; title?: string } | null, now = Date.now()) {
   const last = tvChangedAt.get(userId);
   if (last !== undefined && now - last < TV_CHANGE_EVERY_MS) return false;
   tvChangedAt.set(userId, now);
   if (video) tvs.set(spaceId, { ...video, startedAt: now, byUserId: userId });
   else tvs.delete(spaceId);
+  return true;
+}
+
+// Pause the TV for everyone, or carry on from where it was paused. False when nothing's on, it's
+// already that way, or this person changed it too recently.
+export function pauseTv(spaceId: string, userId: string, paused: boolean, now = Date.now()) {
+  const tv = tvs.get(spaceId);
+  if (!tv || (tv.pausedAt !== undefined) === paused) return false;
+  const last = tvChangedAt.get(userId);
+  if (last !== undefined && now - last < TV_CHANGE_EVERY_MS) return false;
+  tvChangedAt.set(userId, now);
+  if (paused) tv.pausedAt = now;
+  else {
+    tv.start += Math.max(0, tv.pausedAt! - tv.startedAt) / 1000;
+    tv.startedAt = now;
+    tv.pausedAt = undefined;
+  }
   return true;
 }
 

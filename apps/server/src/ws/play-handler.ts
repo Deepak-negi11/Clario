@@ -1,7 +1,7 @@
 import type { ClientMessage } from "@repo/shared";
 import type { Socket } from "./room-manager";
 import { broadcast, isInRoom, sendToUser } from "./room-manager";
-import { allowPlayMessage, answerPlay, arePlaying, forgetPlay, invitePlay, leavePlay, setTv, tvState } from "./play";
+import { allowPlayMessage, answerPlay, arePlaying, forgetPlay, invitePlay, leavePlay, pauseTv, setTv, tvState } from "./play";
 
 // Messages for Game Room play and the Lounge TV (rules in play.ts).
 export type PlayMessage = Extract<ClientMessage, { type: "play-invite" | "play-answer" | "play-leave" | "play-data" | "tv" }>;
@@ -60,7 +60,10 @@ export function handlePlay(ws: Socket, message: PlayMessage) {
       const request = message.payload;
       const now = () => ({ type: "tv", payload: { state: tvState(spaceId), at: Date.now() } }) as const;
       if (request.action === "sync") return send(ws, now());
-      const changed = setTv(spaceId, userId, request.action === "play" ? { videoId: request.videoId, start: request.start } : null);
+      const changed =
+        request.action === "pause" || request.action === "resume"
+          ? pauseTv(spaceId, userId, request.action === "pause")
+          : setTv(spaceId, userId, request.action === "play" ? { videoId: request.videoId, start: request.start, title: request.title?.trim() || undefined } : null);
       // Too soon to change it again: just put this person back in step with everyone.
       if (!changed) return send(ws, now());
       const update = now();

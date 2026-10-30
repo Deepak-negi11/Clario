@@ -1,5 +1,5 @@
 import type { ServerWebSocket } from "bun";
-import type { PlayerProp } from "@repo/shared";
+import type { Bike, PlayerProp } from "@repo/shared";
 
 
 
@@ -126,8 +126,27 @@ export function updatePosition(spaceId: string, userId: string, x: number, y: nu
 }
 
 
+// Props of people connected to other servers, as those servers announced them (pubsub.ts), so
+// people joining here see them too and a bike ridden there isn't handed out here.
+const remoteProps = new Map<string, Map<string, PlayerProp>>();
+
+export function setRemoteProp(spaceId: string, userId: string, prop: PlayerProp | null) {
+  let space = remoteProps.get(spaceId);
+  if (!prop) {
+    space?.delete(userId);
+    return;
+  }
+  if (!space) remoteProps.set(spaceId, (space = new Map()));
+  space.set(userId, prop);
+}
+
+export function forgetRemoteProps(spaceId: string) {
+  remoteProps.delete(spaceId);
+}
+
+// Someone's bike or drink, whichever server they are on.
 export function propOf(spaceId: string, userId: string): PlayerProp | null {
-  return rooms.get(spaceId)?.get(userId)?.prop ?? null;
+  return rooms.get(spaceId)?.get(userId)?.prop ?? remoteProps.get(spaceId)?.get(userId) ?? null;
 }
 
 export function setProp(spaceId: string, userId: string, prop: PlayerProp | null) {
@@ -135,8 +154,22 @@ export function setProp(spaceId: string, userId: string, prop: PlayerProp | null
   if (member) member.prop = prop;
 }
 
+// Whether anyone but `exceptUserId`, here or on another server, is riding this bike.
+export function bikeTaken(spaceId: string, bike: Bike, exceptUserId: string) {
+  const rides = (prop: PlayerProp | null | undefined) => prop?.kind === "bike" && prop.bike === bike;
+  if (othersInRoom(spaceId, exceptUserId).some((member) => rides(member.prop))) return true;
+  for (const [userId, prop] of remoteProps.get(spaceId) ?? []) if (userId !== exceptUserId && rides(prop)) return true;
+  return false;
+}
+
 export function isInRoom(spaceId: string, userId: string) {
   return rooms.get(spaceId)?.has(userId) ?? false;
+}
+
+// Whether this socket is still the one a person is in the space with (a second tab or a
+// reconnect replaces it, and a closed one is gone).
+export function isCurrentSocket(spaceId: string, userId: string, socket: Socket) {
+  return rooms.get(spaceId)?.get(userId)?.socket === socket;
 }
 
 

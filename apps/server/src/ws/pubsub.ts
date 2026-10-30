@@ -1,6 +1,6 @@
 import { ServerMessage } from "@repo/shared";
-import { redis } from "./redis";
-import { broadcast, broadcastWhere } from "./room-manager";
+import { onRedisRecovered, redis } from "./redis";
+import { broadcast, broadcastWhere, setRemoteProp } from "./room-manager";
 import { cachedSpaceMap, layoutSaved, mapRoomAt } from "./space-layout";
 
 
@@ -59,6 +59,15 @@ function closeSubscriber() {
     subscriber = null;
   }
 }
+
+// When Redis was away long enough for the client to give up (redis.ts), the subscriber gave up
+// too: start a new one and subscribe again to the spaces people are in.
+onRedisRecovered(() => {
+  const spaces = [...subscribedSpaces];
+  closeSubscriber();
+  subscribedSpaces.clear();
+  for (const spaceId of spaces) subscribeToSpaceEvents(spaceId).catch(() => {});
+});
 
 
 
@@ -152,6 +161,9 @@ export async function subscribeToSpaceEvents(spaceId: string) {
         if (event.message.type === "layout-updated") {
           layoutSaved(event.spaceId, event.message.payload.layout);
         }
+        // Bikes and drinks of people on that server (prop-handler.ts).
+        if (event.message.type === "prop") setRemoteProp(event.spaceId, event.message.payload.userId, event.message.payload.prop);
+        if (event.message.type === "user-left") setRemoteProp(event.spaceId, event.message.payload.userId, null);
 
         if (event.roomFilter) {
           const { mapTemplate, roomId } = event.roomFilter;
