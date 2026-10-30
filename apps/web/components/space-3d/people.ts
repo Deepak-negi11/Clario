@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { clone as cloneSkinned } from "three/addons/utils/SkeletonUtils.js";
-import type { AvatarLook } from "@repo/shared";
+import { FACE_POINTS, FACE_SIZE, affineFrom, type AvatarLook } from "@repo/shared";
 
 // People for the 3D view: Quaternius's base characters (CC0) wearing clothes made here, with a
 // hairstyle each and the idle, jog and sitting clips from his animation library (CC0).
@@ -44,16 +44,28 @@ const CLIPS = {
 export type Gesture = "press" | "pickup";
 // Gestures are played this much faster than recorded (the button press is slow).
 const GESTURE_SPEED: Record<Gesture, number> = { press: 1.6, pickup: 1.1 };
-// Riding: the upper body from the driving clip, the hips standing, and each leg swinging between
-// standing straight and sitting bent (this much of the way) as the pedals go round.
-const RIDE_UPPER = /^(spine|neck|Head|clavicle|upperarm|lowerarm|hand|thumb|index|middle|ring|pinky)/;
+// Riding: the arms from the driving clip, the hips and back standing (the driving clip twists the
+// back toward its steering wheel), and each leg swinging between standing straight and sitting
+// bent as the pedals go round. Reaching (in update) then puts the hands and feet on the bike.
+const RIDE_ARMS = /^(upperarm|lowerarm|hand|thumb|index|middle|ring|pinky)/;
+const RIDE_BACK = /^(pelvis|spine|neck|Head|clavicle)/;
 const LEGS = [/^(thigh|calf|foot|ball|ball_leaf)_l\./, /^(thigh|calf|foot|ball|ball_leaf)_r\./] as const;
 // How far toward the sitting pose a leg bends with its pedal at the bottom and at the top, so
 // the feet stay up on the pedals.
 const PEDAL_LOW = 0.4;
 const PEDAL_HIGH = 0.95;
-// A rider leans forward over the handlebars (radians).
-const RIDE_LEAN = 0.3;
+// A rider leans forward over the handlebars (radians), sitting up this much of it when stopped,
+// looks up the road again with this much of it, and their hips rock this much as each leg pushes down.
+const RIDE_LEAN = 0.6;
+const SIT_UP = 0.5;
+const LOOK_AHEAD = 0.8;
+const HIP_ROCK = 0.05;
+// The ball of the foot is this high over what it stands on, and the wrist this far behind and above
+// the middle of the grip (metres, before SCALE), the knuckles curled this far down over it (radians).
+const BALL_HEIGHT = 0.035;
+const WRIST_BEHIND = 0.07;
+const WRIST_ABOVE = 0.02;
+const KNUCKLES_DOWN = 0.6;
 // A drink is held in the left hand, as the torch clip holds its torch.
 const LEFT_ARM = /^(clavicle_l|upperarm_l|lowerarm_l|hand_l|(thumb|index|middle|ring|pinky)_0\d(_leaf)?_l)\./;
 
@@ -78,6 +90,8 @@ const FORWARD = new THREE.Vector3(0, 0, 1);
 type Garment = keyof typeof OUTFIT;
 
 type HeadPiece = { mesh: THREE.Mesh; offset: THREE.Matrix4 };
+// An arm or a leg for reaching: shoulder or hip, elbow or knee, wrist or ankle.
+type Limb = { upper: THREE.Object3D; lower: THREE.Object3D; end: THREE.Object3D };
 type BodyKit = {
   template: THREE.Object3D;
   clothes: Record<Garment, THREE.BufferGeometry>;
@@ -92,7 +106,7 @@ type BodyKit = {
   clips: Record<keyof typeof CLIPS, THREE.AnimationClip>;
   // Playing a game standing up: the talking clip's busy arms and hands, and the idle's legs and back.
   playing: { arms: THREE.AnimationClip; body: THREE.AnimationClip };
-  // On a bike (RIDE_UPPER, LEGS) and holding a drink (an additive left arm).
+  // On a bike (RIDE_ARMS, RIDE_BACK, LEGS) and holding a drink (an additive left arm).
   riding: { upper: THREE.AnimationClip; hips: THREE.AnimationClip; bent: THREE.AnimationClip[]; straight: THREE.AnimationClip[] };
   holding: THREE.AnimationClip;
   // The hips' height when standing, before SCALE.
@@ -123,8 +137,20 @@ function averageColor(texture: THREE.Texture): THREE.Color {
 export type PeopleKit = Record<BodyKind, BodyKit>;
 
 // Riding a bike and holding a drink, each 0 to 1 so they blend in and out. `pedal` is the cranks'
-// angle (radians); `drink` raises the drink to the mouth.
-export type Gear = { ride?: number; pedal?: number; hold?: number; drink?: number };
+// angle (radians); `drink` raises the drink to the mouth. A rider's hands hold `grips` and the balls
+// of their feet press on `feet` (world space, left then right): the pedals, or the floor for a
+// foot put down. `upright` (0 to 1) sits a stopped rider up from leaning over the handlebars.
+export type Gear = {
+  ride?: number;
+  pedal?: number;
+  hold?: number;
+  drink?: number;
+  grips?: readonly [THREE.Vector3, THREE.Vector3];
+  upright?: number;
+  feet?: readonly [Foothold, Foothold];
+};
+// Where the ball of a foot rests, with the foot tipped `pitch` toes down (radians).
+export type Foothold = { at: THREE.Vector3; pitch: number };
 
 export type Person = {
   root: THREE.Object3D;
@@ -302,8 +328,8 @@ export async function loadPeople(): Promise<PeopleKit> {
     const only = (clip: THREE.AnimationClip, bones: RegExp, name: string) =>
       new THREE.AnimationClip(name, clip.duration, clip.tracks.filter((track) => bones.test(track.name)));
     const riding = {
-      upper: only(clips.drive, RIDE_UPPER, "ride_upper"),
-      hips: only(clips.idle, /^pelvis\./, "ride_hips"),
+      upper: only(clips.drive, RIDE_ARMS, "ride_arms"),
+      hips: only(clips.idle, RIDE_BACK, "ride_back"),
       bent: LEGS.map((leg, i) => only(clips.sit, leg, `pedal_bent_${i}`)),
       straight: LEGS.map((leg, i) => only(clips.idle, leg, `pedal_straight_${i}`)),
     };
@@ -343,6 +369,69 @@ function makeGlasses(eyes: NonNullable<BodyKit["eyes"]>, owned: { dispose: () =>
   add(new THREE.BoxGeometry(w * 0.54 - rim * 2, rim * 0.14, rim * 0.14), 0, rim * 0.25, 0);
   eyes.offset.decompose(glasses.position, glasses.quaternion, glasses.scale);
   return glasses;
+}
+
+// Where each body's skin texture (1024 square) has the eyes and the middle of the mouth: a
+// photo face is lined up on these.
+type FaceSpots = Record<keyof typeof FACE_POINTS, { x: number; y: number }>;
+const FACE_SPOTS: Record<BodyKind, FaceSpots> = {
+  male: { leftEye: { x: 140, y: 182 }, rightEye: { x: 241, y: 182 }, mouth: { x: 190, y: 272 } },
+  female: { leftEye: { x: 132, y: 182 }, rightEye: { x: 243, y: 182 }, mouth: { x: 187, y: 270 } },
+};
+
+// A copy of the skin texture, tinted to the skin colour, with the photo face (AvatarLook.face)
+// blended onto its face, fading out at the edge into the skin. The face paints in once its
+// picture has decoded.
+function paintFace(base: THREE.Texture, tint: THREE.Color, face: string, spots: FaceSpots, owned: { dispose: () => void }[]) {
+  const image = base.image as HTMLImageElement;
+  const canvas = document.createElement("canvas");
+  canvas.width = image.width;
+  canvas.height = image.height;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+  ctx.drawImage(image, 0, 0);
+  // The tint (up to 2x) baked in, so the photo keeps its own colours.
+  const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = pixels.data;
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = Math.min(255, data[i]! * tint.r);
+    data[i + 1] = Math.min(255, data[i + 1]! * tint.g);
+    data[i + 2] = Math.min(255, data[i + 2]! * tint.b);
+  }
+  ctx.putImageData(pixels, 0, 0);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.flipY = false;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  owned.push(texture);
+
+  const photo = new Image();
+  photo.onload = () => {
+    // The face in an oval, soft at the edge.
+    const oval = document.createElement("canvas");
+    oval.width = oval.height = FACE_SIZE;
+    const octx = oval.getContext("2d")!;
+    octx.drawImage(photo, 0, 0, FACE_SIZE, FACE_SIZE);
+    octx.globalCompositeOperation = "destination-in";
+    octx.translate(FACE_SIZE / 2, FACE_SIZE * 0.58);
+    octx.scale(1, 1.25);
+    const fade = octx.createRadialGradient(0, 0, 0, 0, 0, FACE_SIZE * 0.4);
+    fade.addColorStop(0.7, "rgba(0,0,0,1)");
+    fade.addColorStop(1, "rgba(0,0,0,0)");
+    octx.fillStyle = fade;
+    octx.fillRect(-FACE_SIZE, -FACE_SIZE, FACE_SIZE * 2, FACE_SIZE * 2);
+
+    const scale = canvas.width / 1024;
+    const at = (point: { x: number; y: number }) => ({ x: point.x * scale, y: point.y * scale });
+    const transform = affineFrom(
+      [FACE_POINTS.leftEye, FACE_POINTS.rightEye, FACE_POINTS.mouth],
+      [at(spots.leftEye), at(spots.rightEye), at(spots.mouth)],
+    );
+    if (!transform) return;
+    ctx.setTransform(...transform);
+    ctx.drawImage(oval, 0, 0);
+    texture.needsUpdate = true;
+  };
+  photo.src = face;
+  return texture;
 }
 
 // `talking` makes a seated person chat with their hands instead of sitting still. With a `look`
@@ -392,8 +481,14 @@ export function makePerson(
   }
   owned.push(skin);
   mesh.material = skin;
+  if (look?.face && skin.map) {
+    skin.map = paintFace(skin.map, skin.color, look.face, FACE_SPOTS[kind], owned);
+    skin.color.setRGB(1, 1, 1);
+  }
   const brows = model.getObjectByName("Eyebrows") as THREE.SkinnedMesh | undefined;
-  if (brows) {
+  // A photo face brings its own eyebrows.
+  if (brows && look?.face) brows.visible = false;
+  else if (brows) {
     const browMaterial = (brows.material as THREE.MeshStandardMaterial).clone();
     browMaterial.color.copy(hairTint);
     owned.push(browMaterial);
@@ -477,11 +572,22 @@ export function makePerson(
     action.timeScale = GESTURE_SPEED[kind];
     action.setEffectiveWeight(0);
   }
-  let playingGesture: { action: THREE.AnimationAction; age: number; length: number } | null = null;
+  let playingGesture: { action: THREE.AnimationAction; age: number; length: number; weight: number } | null = null;
+  // A gesture cut short by another, fading out under it instead of snapping away.
+  let fadingGesture: { action: THREE.AnimationAction; weight: number } | null = null;
 
   // The left arm, for raising a drink to the mouth, and the head that tips back to drink.
   const bone = (name: string) => model.getObjectByName(name)!;
-  const arm = { upper: bone("upperarm_l"), lower: bone("lowerarm_l"), hand: bone("hand_l"), finger: bone("middle_01_l") };
+  const arm = { upper: bone("upperarm_l"), lower: bone("lowerarm_l"), end: bone("hand_l"), finger: bone("middle_01_l") };
+  // A rider's arms and legs, left then right, and the balls of their feet.
+  const arms = (["l", "r"] as const).map((side) => ({
+    upper: bone(`upperarm_${side}`), lower: bone(`lowerarm_${side}`), end: bone(`hand_${side}`),
+    knuckle: bone(`middle_01_${side}`), thumb: bone(`thumb_02_${side}`),
+  }));
+  const legs = (["l", "r"] as const).map((side) => ({ upper: bone(`thigh_${side}`), lower: bone(`calf_${side}`), end: bone(`foot_${side}`) }));
+  const balls = [bone("ball_l"), bone("ball_r")];
+  const pelvis = bone("pelvis");
+  const upperBack = bone("spine_03");
   const headBone = bone("Head");
   const spine = bone("spine_01");
   let held: THREE.Object3D | null = null;
@@ -492,6 +598,15 @@ export function makePerson(
   const forward = new THREE.Vector3();
   const up = new THREE.Vector3();
   const left = new THREE.Vector3();
+  // A rider's reach: where a wrist or ankle goes, which way the elbow or knee bends, the toes, and the
+  // way the knuckles and the thumb point on the bars.
+  const aim = new THREE.Vector3();
+  const bend = new THREE.Vector3();
+  const toes = new THREE.Vector3();
+  const knuckles = new THREE.Vector3();
+  const inward = new THREE.Vector3();
+  const handNow = new THREE.Matrix4();
+  const handGoal = new THREE.Matrix4();
 
   // Bones turned after the mixer this frame (the lean, the sip) and how they were before. The mixer
   // only rewrites a bone whose animated value changes, so they are put back before it runs, or the
@@ -506,12 +621,12 @@ export function makePerson(
     target.quaternion.slerp(goal, weight);
     target.updateMatrixWorld(true);
   };
-  // Swings the upper arm and then the forearm so the wrist reaches `target`, the elbow bending
-  // toward `pole` (two-bone reach, in world space).
-  const reach = (target: THREE.Vector3, pole: THREE.Vector3, weight: number) => {
-    arm.upper.getWorldPosition(v.shoulder);
-    arm.lower.getWorldPosition(v.elbow);
-    arm.hand.getWorldPosition(v.wrist);
+  // Swings the upper bone of a limb and then the lower one so its end (a wrist or an ankle) reaches
+  // `target`, the middle joint (elbow or knee) bending toward `pole` (two-bone reach, world space).
+  const reach = (limb: Limb, target: THREE.Vector3, pole: THREE.Vector3, weight: number) => {
+    limb.upper.getWorldPosition(v.shoulder);
+    limb.lower.getWorldPosition(v.elbow);
+    limb.end.getWorldPosition(v.wrist);
     const upperLength = v.shoulder.distanceTo(v.elbow);
     const lowerLength = v.elbow.distanceTo(v.wrist);
     const toTarget = v.a.subVectors(target, v.shoulder);
@@ -521,10 +636,26 @@ export function makePerson(
     const side = v.b.copy(pole).addScaledVector(toTarget, -pole.dot(toTarget)).normalize();
     const elbowGoal = v.target.copy(v.shoulder).addScaledVector(toTarget, upperLength * cosine)
       .addScaledVector(side, upperLength * Math.sqrt(Math.max(0, 1 - cosine * cosine)));
-    turnBy(arm.upper, turn.setFromUnitVectors(v.elbow.sub(v.shoulder).normalize(), elbowGoal.clone().sub(v.shoulder).normalize()), weight);
-    arm.lower.getWorldPosition(v.elbow);
-    arm.hand.getWorldPosition(v.wrist);
-    turnBy(arm.lower, turn.setFromUnitVectors(v.wrist.sub(v.elbow).normalize(), target.clone().sub(v.elbow).normalize()), weight);
+    turnBy(limb.upper, turn.setFromUnitVectors(v.elbow.sub(v.shoulder).normalize(), elbowGoal.clone().sub(v.shoulder).normalize()), weight);
+    limb.lower.getWorldPosition(v.elbow);
+    limb.end.getWorldPosition(v.wrist);
+    turnBy(limb.lower, turn.setFromUnitVectors(v.wrist.sub(v.elbow).normalize(), target.clone().sub(v.elbow).normalize()), weight);
+  };
+  // The turn that takes a hand to `fingers` and `thumbWay` (world space) as a matrix whose columns
+  // are the way the knuckles point, a third axis, and the side the thumb is on.
+  const handAxes = (fingers: THREE.Vector3, thumbWay: THREE.Vector3, into: THREE.Matrix4) => {
+    const across = v.b.crossVectors(fingers, thumbWay).normalize();
+    return into.makeBasis(fingers, v.a.crossVectors(across, fingers), across);
+  };
+  // Turns a hand about its wrist so its knuckles point along `fingers` and its thumb (as near as it
+  // can) toward `thumbWay`: palm down on a handlebar, thumb on the inside.
+  const holdBar = (hand: (typeof arms)[number], fingers: THREE.Vector3, thumbWay: THREE.Vector3, weight: number) => {
+    hand.end.getWorldPosition(v.wrist);
+    const knuckle = hand.knuckle.getWorldPosition(v.elbow).sub(v.wrist).normalize();
+    const thumb = hand.thumb.getWorldPosition(v.shoulder).sub(v.wrist).normalize();
+    handAxes(knuckle, thumb, handNow);
+    handAxes(fingers, thumbWay, handGoal);
+    turnBy(hand.end, turn.setFromRotationMatrix(handGoal.multiply(handNow.transpose())), weight);
   };
   // Start people at different points in their idle so a room doesn't sway in step.
   actions.idle.time = actions.playBody.time = pick(id, [0, 0.4, 0.8, 1.2, 1.6, 2], 43);
@@ -545,10 +676,12 @@ export function makePerson(
       if (held) root.add(held);
     },
     gesture: (kind) => {
-      playingGesture?.action.stop();
       const action = gestures[kind];
+      fadingGesture?.action.stop();
+      fadingGesture = null;
+      if (playingGesture && playingGesture.action !== action) fadingGesture = { action: playingGesture.action, weight: playingGesture.weight };
       action.reset().play();
-      playingGesture = { action, age: 0, length: action.getClip().duration / GESTURE_SPEED[kind] };
+      playingGesture = { action, age: 0, length: action.getClip().duration / GESTURE_SPEED[kind], weight: 0 };
     },
     update: (dt, walk, sit, play = 0, gear = {}) => {
       // Undo last frame's lean and sip first (they went on after the tuck).
@@ -563,16 +696,27 @@ export function makePerson(
       }
       // A gesture fades in quickly and out over its last quarter of a second.
       let gestureWeight = 0;
+      let fadingWeight = 0;
+      if (fadingGesture) {
+        fadingGesture.weight -= dt / 0.2;
+        if (fadingGesture.weight <= 0) {
+          fadingGesture.action.stop();
+          fadingGesture = null;
+        } else fadingWeight = fadingGesture.weight;
+      }
       if (playingGesture) {
         playingGesture.age += dt;
         const { age, length, action } = playingGesture;
-        gestureWeight = Math.max(0, Math.min(1, age / 0.15, (length - age) / 0.25));
+        gestureWeight = Math.max(0, Math.min(1 - fadingWeight, age / 0.15, (length - age) / 0.25));
+        playingGesture.weight = gestureWeight;
         action.setEffectiveWeight(gestureWeight);
         if (age >= length) {
           action.stop();
           playingGesture = null;
         }
       }
+      fadingGesture?.action.setEffectiveWeight(fadingWeight);
+      gestureWeight += fadingWeight;
       const riding = (gear.ride ?? 0) * (1 - gestureWeight);
       const keep = (1 - (gear.ride ?? 0)) * (1 - gestureWeight);
       const seated = sit * (1 - walk);
@@ -613,17 +757,49 @@ export function makePerson(
       forward.set(0, 0, 1).applyQuaternion(modelRotation);
       up.set(0, 1, 0).applyQuaternion(modelRotation);
       left.set(1, 0, 0).applyQuaternion(modelRotation);
-      // On a bike the back leans forward, bringing the hands down to the handlebars.
-      if (riding > 0.01) turnBy(spine, turn.setFromAxisAngle(left, RIDE_LEAN * riding), 1);
+      // On a bike the hips rock with the pedalling and the back leans forward over the handlebars,
+      // the head looking up the road. The hands hold the grips, and the ball of each foot presses
+      // its pedal (or the floor), the ankle following the pedal round.
+      if (riding > 0.01) {
+        turnBy(pelvis, turn.setFromAxisAngle(forward, HIP_ROCK * Math.sin(gear.pedal ?? 0) * riding), 1);
+        const lean = RIDE_LEAN * (1 - SIT_UP * (gear.upright ?? 0)) * riding;
+        turnBy(spine, turn.setFromAxisAngle(left, lean), 1);
+        // Square and level the shoulders to the handlebars: the standing clip turns them a little,
+        // and the rocking hips would tip them. The hips rock under a steady back.
+        arms[0]!.upper.getWorldPosition(v.a);
+        arms[1]!.upper.getWorldPosition(v.b);
+        turnBy(upperBack, turn.setFromUnitVectors(v.a.sub(v.b).normalize(), left), riding);
+        turnBy(headBone, turn.setFromAxisAngle(left, -lean * LOOK_AHEAD), 1);
+        gear.grips?.forEach((grip, i) => {
+          const outward = i === 0 ? 1 : -1;
+          aim.copy(grip).addScaledVector(forward, -WRIST_BEHIND * SCALE).addScaledVector(up, WRIST_ABOVE * SCALE);
+          bend.copy(up).negate().addScaledVector(left, 0.7 * outward).addScaledVector(forward, -0.3);
+          reach(arms[i]!, aim, bend, riding);
+          knuckles.copy(forward).multiplyScalar(Math.cos(KNUCKLES_DOWN)).addScaledVector(up, -Math.sin(KNUCKLES_DOWN));
+          holdBar(arms[i]!, knuckles, inward.copy(left).multiplyScalar(-outward), riding);
+        });
+        gear.feet?.forEach(({ at, pitch }, i) => {
+          const leg = legs[i]!;
+          toes.copy(forward).multiplyScalar(Math.cos(pitch)).addScaledVector(up, -Math.sin(pitch));
+          const length = leg.end.getWorldPosition(v.wrist).distanceTo(balls[i]!.getWorldPosition(v.elbow));
+          aim.copy(at).addScaledVector(up, BALL_HEIGHT * SCALE).addScaledVector(toes, -length);
+          bend.copy(forward).addScaledVector(up, 0.3).addScaledVector(left, 0.15 * (i === 0 ? 1 : -1));
+          reach(leg, aim, bend, riding);
+          // Then the foot turned along `toes`, so its ball comes down where it should.
+          leg.end.getWorldPosition(v.wrist);
+          balls[i]!.getWorldPosition(v.elbow);
+          turnBy(leg.end, turn.setFromUnitVectors(v.elbow.sub(v.wrist).normalize(), toes), riding);
+        });
+      }
       if (drink > 0.01) {
         turnBy(headBone, turn.setFromAxisAngle(left, -0.3 * drink), 1);
         const mouth = headBone.getWorldPosition(v.target).addScaledVector(forward, 0.11 * SCALE).addScaledVector(up, 0.02 * SCALE);
         const wrist = mouth.clone().addScaledVector(forward, 0.05 * SCALE).addScaledVector(up, -0.09 * SCALE).addScaledVector(left, 0.03 * SCALE);
-        reach(wrist, up.clone().negate().addScaledVector(left, 0.8), drink);
+        reach(arm, wrist, up.clone().negate().addScaledVector(left, 0.8), drink);
       }
       // The drink in the palm, upright, tipping toward the mouth as it is raised.
       if (held) {
-        arm.hand.getWorldPosition(v.wrist);
+        arm.end.getWorldPosition(v.wrist);
         arm.finger.getWorldPosition(v.a);
         const palm = v.wrist.lerp(v.a, 0.55);
         root.updateMatrixWorld(true);

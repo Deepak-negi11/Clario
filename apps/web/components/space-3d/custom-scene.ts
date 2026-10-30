@@ -1,12 +1,14 @@
 import * as THREE from "three";
 import { floorAt, isWallAt, ITEM_SPECS, type CustomFloor, type CustomMap } from "@repo/shared";
+import { quarterFloor, wallBars } from "../../lib/maps/custom-walls";
 import {
   buildItem, CAP_COLOR, floorTexture, GRASS_COLOR, roomLabel, standard, WALL_COLORS, WALL_HEIGHT, type ModelSet,
 } from "./office-scene";
 
 // Builds a map someone made in the map builder (custom-map.ts in @repo/shared) in the same units
 // and style as Clario HQ (office-scene.ts): one tile is one unit, x runs east, z runs south (the
-// map's y), y is up. Walls here are whole tiles, so each one is a block filling its tile.
+// map's y), y is up. Walls are slim, down the middle of their tiles, as on the 2D map
+// (lib/maps/custom-walls.ts).
 
 export function buildCustomOffice(root: THREE.Object3D, models: ModelSet, map: CustomMap) {
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(map.cols + 60, map.rows + 60), standard(GRASS_COLOR));
@@ -36,15 +38,22 @@ export function buildCustomOffice(root: THREE.Object3D, models: ModelSet, map: C
 // One mesh for each kind of floor, made of a square per tile. Its texture coordinates come from
 // where each tile is, so planks and tiles run on from one tile to the next, one texture to every
 // two tiles as on Clario HQ's floors. (Instancing one tile would restart the texture on every tile.)
+// A wall tile's floor is laid in quarters, each carrying on the floor beside it.
 function buildFloors(root: THREE.Object3D, map: CustomMap) {
-  const tiles = new Map<CustomFloor, [number, number][]>();
+  const tiles = new Map<CustomFloor, Cell[]>();
+  const add = (kind: CustomFloor | null, cell: Cell) => {
+    if (!kind) return;
+    const list = tiles.get(kind) ?? [];
+    list.push(cell);
+    tiles.set(kind, list);
+  };
   for (let y = 0; y < map.rows; y++) {
     for (let x = 0; x < map.cols; x++) {
-      const kind = floorAt(map, x, y);
-      if (!kind || isWallAt(map, x, y)) continue;
-      const list = tiles.get(kind) ?? [];
-      list.push([x, y]);
-      tiles.set(kind, list);
+      if (!isWallAt(map, x, y)) {
+        add(floorAt(map, x, y), [x, y, 1]);
+        continue;
+      }
+      for (const dx of [-1, 1]) for (const dy of [-1, 1]) add(quarterFloor(map, x, y, dx, dy), [x + (dx > 0 ? 0.5 : 0), y + (dy > 0 ? 0.5 : 0), 0.5]);
     }
   }
   for (const [kind, cells] of tiles) {
@@ -56,14 +65,17 @@ function buildFloors(root: THREE.Object3D, map: CustomMap) {
   }
 }
 
-function tileSurface(cells: readonly (readonly [number, number])[]) {
+// A square of floor: its north-west corner and its size (a tile, or a quarter of one beside a wall).
+type Cell = readonly [x: number, z: number, size: number];
+
+function tileSurface(cells: readonly Cell[]) {
   const positions = new Float32Array(cells.length * 12);
   const normals = new Float32Array(cells.length * 12);
   const uvs = new Float32Array(cells.length * 8);
   const indices = new Uint32Array(cells.length * 6);
-  cells.forEach(([x, z], i) => {
+  cells.forEach(([x, z, size], i) => {
     // North-west, north-east, south-west and south-east corners.
-    const corners = [[x, z], [x + 1, z], [x, z + 1], [x + 1, z + 1]] as const;
+    const corners = [[x, z], [x + size, z], [x, z + size], [x + size, z + size]] as const;
     corners.forEach(([cx, cz], c) => {
       positions.set([cx, 0, cz], i * 12 + c * 3);
       normals.set([0, 1, 0], i * 12 + c * 3);
@@ -113,21 +125,31 @@ function pavingTexture() {
   return texture;
 }
 
-// A block on every wall tile, WALL_HEIGHT tall with the dark cap Clario HQ's walls have, and a
-// skirting band round its foot. Two instanced meshes draw them all.
+// The slim walls, WALL_HEIGHT tall with the dark cap Clario HQ's walls have and a skirting band
+// round their foot: a box for each bar of each wall tile, joined where walls meet. Two instanced
+// meshes draw them all.
 function buildWalls(root: THREE.Object3D, map: CustomMap) {
-  const cells: [number, number][] = [];
-  for (let y = 0; y < map.rows; y++) for (let x = 0; x < map.cols; x++) if (isWallAt(map, x, y)) cells.push([x, y]);
-  if (!cells.length) return;
+  const bars: { x: number; z: number; w: number; d: number }[] = [];
+  for (let y = 0; y < map.rows; y++) {
+    for (let x = 0; x < map.cols; x++) {
+      if (!isWallAt(map, x, y)) continue;
+      for (const bar of wallBars(map, x, y)) bars.push({ x: x + (bar.x0 + bar.x1) / 2, z: y + (bar.y0 + bar.y1) / 2, w: bar.x1 - bar.x0, d: bar.y1 - bar.y0 });
+    }
+  }
+  if (!bars.length) return;
   const colors = WALL_COLORS.exterior;
   const face = standard(colors.face);
   // Box faces: +x, -x, top, bottom, +z, -z. The top is the cap.
-  const blocks = new THREE.InstancedMesh(new THREE.BoxGeometry(1, WALL_HEIGHT, 1), [face, face, standard(CAP_COLOR), face, face, face], cells.length);
-  const skirting = new THREE.InstancedMesh(new THREE.BoxGeometry(1.02, 0.42, 1.02), standard(colors.wainscot), cells.length);
+  const blocks = new THREE.InstancedMesh(new THREE.BoxGeometry(1, WALL_HEIGHT, 1), [face, face, standard(CAP_COLOR), face, face, face], bars.length);
+  const skirting = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 0.42, 1), standard(colors.wainscot), bars.length);
   const matrix = new THREE.Matrix4();
-  cells.forEach(([x, z], i) => {
-    blocks.setMatrixAt(i, matrix.makeTranslation(x + 0.5, WALL_HEIGHT / 2, z + 0.5));
-    skirting.setMatrixAt(i, matrix.makeTranslation(x + 0.5, 0.21, z + 0.5));
+  const position = new THREE.Vector3();
+  const size = new THREE.Vector3();
+  const turn = new THREE.Quaternion();
+  bars.forEach(({ x, z, w, d }, i) => {
+    blocks.setMatrixAt(i, matrix.compose(position.set(x, WALL_HEIGHT / 2, z), turn, size.set(w, 1, d)));
+    // The skirting stands a little proud of the wall.
+    skirting.setMatrixAt(i, matrix.compose(position.set(x, 0.21, z), turn, size.set(w + 0.02, 1, d + 0.02)));
   });
   for (const mesh of [blocks, skirting]) {
     mesh.castShadow = true;

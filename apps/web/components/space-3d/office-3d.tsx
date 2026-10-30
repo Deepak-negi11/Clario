@@ -14,14 +14,15 @@ import { companions, type TalkerId } from "../../lib/companions/store";
 import { lookKey, originalLook } from "../../lib/avatar/recolor";
 import { readSavedLook } from "../../lib/avatar/saved-look";
 import { AvatarPicker } from "../game-ui/avatar-picker";
-import { HQ_CLAUDE_SEATS, HQ_COLS, HQ_COWORKERS, HQ_ITEMS, HQ_MENTOR, HQ_ROWS, type Dir } from "../../lib/maps/clario-hq";
-import { hqPlaySpots, spotFront, spotInReach, type PlayAction } from "../../lib/maps/play-spots";
+import { HQ_CLAUDE_SEATS, HQ_COLS, HQ_COWORKERS, HQ_ITEMS, HQ_MENTOR, HQ_ROWS, type Dir, type HqItem } from "../../lib/maps/clario-hq";
+import { hqPlaySpots, playSpotsFor, spotFront, spotInReach, type PlayAction } from "../../lib/maps/play-spots";
 import { buildCustomOffice } from "./custom-scene";
 import { buildOffice, clearOffice, disposeScene, loadModels, seatMap, textSprite, type DeskSpot, type ModelSet, type SwivelChair } from "./office-scene";
 import { loadPeople, makePerson, type PeopleKit, type Person } from "./people";
 import { applyProp, disposeObject, dropCan, emptyProps, makeCan, stepFalling, type Falling, type PropState } from "./props-3d";
 import { createTalkerMover, makeTalker, type Talker } from "./talkers";
 import type { SceneBridge, SceneMapInfo } from "../phaser/scene-bridge";
+import { attachTvScreen } from "../tv/tv-screen-3d";
 
 type Position = { x: number; y: number };
 
@@ -84,10 +85,13 @@ const SEATED_HIP_Y = 0.5;
 const WALK_SPEED = 5.5; // tiles a second; the 2D map moves one tile every 200 ms
 const STRIDE = 4; // walk-cycle radians per tile walked, so feet don't slide
 const RIDE_FACTOR = 200 / RIDE_STEP_MS; // a bike crosses a tile in RIDE_STEP_MS instead of 200 ms
-// Where a bought can lies in Clario HQ's vending machine tray: office-scene.ts builds the machine
-// 0.12 back from its tile's middle, with the tray low on its front, a little left of centre.
-const VENDING_ITEM = HQ_ITEMS.find((item) => item.kind === "vending-machine");
-const VENDING = VENDING_ITEM ? { x: VENDING_ITEM.x + 0.5 - 0.11, y: 0.27, z: VENDING_ITEM.y + 0.5 - 0.12 + 0.3 } : null;
+// Where a bought can lies in a map's (first) vending machine tray: office-scene.ts builds the
+// machine 0.12 back from its tile's middle, its front 0.36 ahead of that, with the tray low on the
+// front a little left of centre. The can lies just proud of the front so it shows in the slot.
+function vendingTray(items: readonly HqItem[]) {
+  const machine = items.find((item) => item.kind === "vending-machine");
+  return machine ? { x: machine.x + 0.5 - 0.11, y: 0.25, z: machine.y + 0.5 - 0.12 + 0.36 + 0.035 } : null;
+}
 
 type Limb = { upper: THREE.Group; lower: THREE.Group };
 type Rig = { hips: THREE.Group; torso: THREE.Group; head: THREE.Group; arms: [Limb, Limb]; legs: [Limb, Limb] };
@@ -114,6 +118,10 @@ type Avatar = {
   walk: number;
   sit: number;
   lastMoved: number;
+  // How fast the 2D map hands them new tiles while they keep moving (tiles a second, measured),
+  // and when it last did (the 3D clock's time).
+  pace: number;
+  lastTileAt: number;
   // So people in a room don't breathe and glance around in step.
   offset: number;
   // Their bike or drink (props-3d.ts).
@@ -149,7 +157,7 @@ function makeAvatar(id: string, name: string, isSelf: boolean, people: PeopleKit
   return {
     group, body, person, rig, label, name, look: look ? lookKey(look) : "",
     target: new THREE.Vector3(), route: [], heading: 0, seated: false, seatHeading: null,
-    phase: 0, walk: 0, sit: 0, lastMoved: -1, offset: pick(id, [0, 1.3, 2.6, 3.9, 5.2], 13), props: emptyProps(),
+    phase: 0, walk: 0, sit: 0, lastMoved: -1, pace: WALK_SPEED, lastTileAt: -Infinity, offset: pick(id, [0, 1.3, 2.6, 3.9, 5.2], 13), props: emptyProps(),
   };
 }
 
@@ -224,6 +232,12 @@ function buildRig(id: string, body: THREE.Group, look: AvatarLook | null = null)
 // geometry in three.js, so theirs is left alone too.
 function removeAvatar(scene: THREE.Scene, avatar: Avatar) {
   scene.remove(avatar.group);
+  // A can in their hand hangs off the person's root, which leaves the group below.
+  if (avatar.props.can) {
+    avatar.person?.hold(null);
+    disposeObject(avatar.props.can);
+    avatar.props.can = null;
+  }
   if (avatar.person) {
     avatar.person.dispose();
     avatar.body.remove(avatar.person.root);
@@ -245,9 +259,20 @@ function removeAvatar(scene: THREE.Scene, avatar: Avatar) {
 function stepAvatar(avatar: Avatar, dt: number, time: number, prop: PlayerProp | null, onDrop: (can: THREE.Group) => void) {
   // Far behind (a hidden tab, a long freeze): skip to a tile on the way rather than run a marathon.
   if (avatar.route.length > 16) avatar.group.position.copy(avatar.route.splice(0, avatar.route.length - 16).at(-1)!);
-  // Catch up faster the further the 2D map has run ahead. A bike goes faster than a walk.
+  // Keep pace with the 2D map: go at the rate it hands out tiles, a little faster when behind and a
+  // little slower as the last tile nears. Going at a set speed reached each tile before the next
+  // came (the 2D map's steps run a frame or so over their tween) and stood there, a stutter on
+  // every tile. A bike goes faster than a walk.
   const riding = prop?.kind === "bike";
-  let budget = WALK_SPEED * (riding ? RIDE_FACTOR : 1) * Math.min(1 + 0.35 * Math.max(0, avatar.route.length - 1), 2.5) * dt;
+  const nominal = WALK_SPEED * (riding ? RIDE_FACTOR : 1);
+  let behind = 0;
+  let from = avatar.group.position;
+  for (const to of avatar.route) {
+    behind += from.distanceTo(to);
+    from = to;
+  }
+  const pace = THREE.MathUtils.clamp(avatar.pace, 0.4 * nominal, 1.1 * nominal);
+  let budget = pace * THREE.MathUtils.clamp(0.7 + 0.3 * behind, 0.7, 2.5) * dt;
   while (avatar.route.length && budget > 0) {
     const next = avatar.route[0]!;
     const toNext = next.clone().sub(avatar.group.position);
@@ -332,7 +357,8 @@ export function Office3D({
   selfRef: RefObject<Position>;
   othersRef: RefObject<Record<string, Position>>;
   namesRef: RefObject<Record<string, string>>;
-  onClose: () => void;
+  // Back to the 2D map. Without it (Clario HQ 3D, which has no 2D map) there's no Close button.
+  onClose?: () => void;
   // Everyone's avatar look, the same as on the 2D map, so people look alike in both.
   looksRef?: RefObject<Record<string, AvatarLook>>;
   // Saves your look (on your account and for everyone in the space). Without it you can't edit it here.
@@ -402,7 +428,7 @@ export function Office3D({
       if (event.key !== "Escape") return;
       // Escape closes the look panel first, then the 3D view.
       if (draftRef.current) setDraftLook(null);
-      else onClose();
+      else onClose?.();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -414,7 +440,9 @@ export function Office3D({
     let disposed = false;
     let frame = 0;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    // alpha: the Lounge TV's video shows through a see-through patch on its screen (tv-screen-3d.ts);
+    // everywhere else the scene's background colour keeps the canvas solid.
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setSize(mount.clientWidth, mount.clientHeight);
     renderer.shadowMap.enabled = true;
@@ -435,6 +463,10 @@ export function Office3D({
     let cols = HQ_COLS;
     let rows = HQ_ROWS;
     let reach = 1;
+    // What can be played or watched, and where a bought can lands: Clario HQ's until a custom map
+    // is built (applyLayout).
+    let spots = PLAY_SPOTS;
+    let vending = vendingTray(HQ_ITEMS);
     const center = new THREE.Vector3(HQ_COLS / 2, 0, HQ_ROWS / 2);
     const camera = new THREE.PerspectiveCamera(42, mount.clientWidth / Math.max(1, mount.clientHeight), 0.1, 400);
     camera.position.set(center.x, 34, center.z + 38);
@@ -518,12 +550,10 @@ export function Office3D({
         else walkTo(talker.x, talker.y + 1);
         return;
       }
-      // A game or a TV on Clario HQ: use it from next to it, or walk over to it. The margin
-      // catches clicks on an arcade machine's front or a screen on the face of its wall.
+      // A game or a TV: use it from next to it, or walk over to it. The margin catches clicks on an
+      // arcade machine's front or a screen on the face of its wall.
       const { x: px, z: pz } = hit.point;
-      const spot = customMapRef.current
-        ? undefined
-        : PLAY_SPOTS.find((s) => px >= s.x && px <= s.x + s.w && pz >= s.y - 0.1 && pz <= s.y + s.h + 0.1);
+      const spot = spots.find((s) => px >= s.x && px <= s.x + s.w && pz >= s.y - 0.1 && pz <= s.y + s.h + 0.1);
       if (spot) {
         const self = selfRef.current;
         if (self && spotInReach([spot], self.x, self.y)) playRef.current?.(spot.action);
@@ -602,10 +632,14 @@ export function Office3D({
     sun.shadow.normalBias = 0.03;
     scene.add(sun, sun.target);
 
+    // The Lounge TV plays what's on (the TV's remote, components/tv) on its screen.
+    const tvScreen = attachTvScreen({ scene, camera, mount, canvas: renderer.domElement, bridgeRef });
+
     const resize = new ResizeObserver(() => {
       const { clientWidth, clientHeight } = mount;
       if (!clientWidth || !clientHeight) return;
       renderer.setSize(clientWidth, clientHeight);
+      tvScreen.resize(clientWidth, clientHeight);
       camera.aspect = clientWidth / clientHeight;
       camera.updateProjectionMatrix();
     });
@@ -652,7 +686,13 @@ export function Office3D({
       clearOffice(office, models);
       roomLabels = (map ? buildCustomOffice(office, models, map) : buildOffice(office, models)).roomLabels;
       rackBikes.clear();
-      if (!map) office.traverse((child) => { if (child.userData.bike) rackBikes.set(child.userData.bike as string, child); });
+      // On a custom map only the first rack's bikes can be ridden (as on its 2D map), and the
+      // first bikes found are that rack's: items are built in order.
+      office.traverse((child) => {
+        if (child.userData.bike && (!map || !rackBikes.has(child.userData.bike as string))) rackBikes.set(child.userData.bike as string, child);
+      });
+      spots = map ? playSpotsFor(map.items) : PLAY_SPOTS;
+      vending = vendingTray(map ? map.items : HQ_ITEMS);
       desks = [];
       chairs = [];
       office.traverse((child) => {
@@ -729,7 +769,10 @@ export function Office3D({
         avatar = makeAvatar(id, name, isSelf, people, look);
         avatar.group.position.copy(old.group.position);
         avatar.target.copy(old.target);
-        Object.assign(avatar, { route: old.route, heading: old.heading, seated: old.seated, seatHeading: old.seatHeading, walk: old.walk, sit: old.sit, phase: old.phase });
+        Object.assign(avatar, {
+          route: old.route, heading: old.heading, seated: old.seated, seatHeading: old.seatHeading,
+          walk: old.walk, sit: old.sit, phase: old.phase, pace: old.pace, lastTileAt: old.lastTileAt,
+        });
         avatars.set(id, avatar);
         scene.add(avatar.group);
       }
@@ -743,7 +786,12 @@ export function Office3D({
       const seat = seats.get(`${position.x},${position.y}`);
       const next = new THREE.Vector3(position.x + 0.5, 0, position.y + 0.5);
       // Each new tile joins the route; stepAvatar walks them in order and faces the way it goes.
+      // Tiles that follow on from each other (not the first after a pause, nor two in one frame)
+      // set the pace it goes at.
       if (next.distanceToSquared(avatar.target) > 0.0001) {
+        const gap = clock.elapsedTime - avatar.lastTileAt;
+        if (gap > 0.04 && gap < 0.6 && next.distanceTo(avatar.target) < 1.5) avatar.pace += (1 / gap - avatar.pace) * 0.35;
+        avatar.lastTileAt = clock.elapsedTime;
         avatar.route.push(next);
         avatar.target.copy(next);
       }
@@ -777,7 +825,7 @@ export function Office3D({
       });
       // Bikes and drinks: everyone's from the 2D map. A bike someone rides isn't in its rack.
       const bridge = bridgeRef?.current;
-      const props = customMapRef.current ? {} : bridge?.props ?? {};
+      const props = bridge?.props ?? {};
       for (const [id, avatar] of avatars) {
         if (!seen.has(id)) {
           removeAvatar(scene, avatar);
@@ -807,7 +855,7 @@ export function Office3D({
       for (const [bike, parked] of rackBikes) parked.visible = !Object.values(props).some((prop) => prop.kind === "bike" && prop.bike === bike);
       stepFalling(scene, falling, dt);
       // The can you bought, dropping into the vending machine's tray and lying there till you take it.
-      const tray = customMapRef.current ? null : bridge?.vendingTray ?? null;
+      const tray = bridge?.vendingTray ?? null;
       const trayKey = tray ? `${tray.drink}:${tray.at}` : "";
       if (trayKey !== shownTray) {
         if (trayCan) {
@@ -815,22 +863,23 @@ export function Office3D({
           disposeObject(trayCan);
           trayCan = null;
         }
-        if (tray && VENDING) {
+        if (tray && vending) {
           trayCan = makeCan(tray.drink);
           trayCan.rotation.z = Math.PI / 2;
           scene.add(trayCan);
-          // You just bought it: turn to the machine and press its button.
+          // You just bought it: turn to the machine and press its button (not when the 3D view
+          // opens with a can already waiting).
           const me = selfId ? avatars.get(selfId) : undefined;
-          if (me?.person) {
-            me.heading = Math.atan2(VENDING.x - me.group.position.x, VENDING.z - me.group.position.z);
+          if (me?.person && performance.now() - tray.at < 1000) {
+            me.heading = Math.atan2(vending.x - me.group.position.x, vending.z - me.group.position.z);
             me.person.gesture("press");
           }
         }
         shownTray = trayKey;
       }
-      if (trayCan && tray && VENDING) {
+      if (trayCan && tray && vending) {
         const fall = Math.min(1, (performance.now() - tray.at) / 260);
-        trayCan.position.set(VENDING.x, VENDING.y + 0.32 * (1 - fall * fall), VENDING.z);
+        trayCan.position.set(vending.x, vending.y + 0.32 * (1 - fall * fall), vending.z);
       }
 
       const mine = selfId ? avatars.get(selfId) : undefined;
@@ -869,6 +918,7 @@ export function Office3D({
         label.material.opacity += ((covered ? 0.15 : 1) - label.material.opacity) * (1 - Math.exp(-dt * 10));
       }
       renderer.render(scene, camera);
+      tvScreen.render(selfRef.current);
     };
 
     Promise.all([
@@ -911,6 +961,7 @@ export function Office3D({
       renderer.domElement.removeEventListener("pointerup", onPointerUp);
       renderer.domElement.removeEventListener("pointercancel", onPointerCancel);
       controls.dispose();
+      tvScreen.dispose();
       disposeScene(scene);
       environment.dispose();
       renderer.dispose();
@@ -927,7 +978,9 @@ export function Office3D({
 
   return (
     <section aria-label="3D view" className="absolute inset-0 z-[55] bg-[#cfe4f2]">
-      <div ref={mountRef} className="absolute inset-0 cursor-grab active:cursor-grabbing" />
+      {/* Its own stacking layer: the TV's video layer and the canvas stack inside it (tv-screen-3d.ts),
+          so the canvas never covers the toolbar and labels drawn after it. */}
+      <div ref={mountRef} className="absolute inset-0 isolate cursor-grab active:cursor-grabbing" />
 
       <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-3 p-4">
         <div className="pointer-events-auto flex items-center gap-2 rounded-xl bg-[#1b1d2a]/90 px-3 py-2 text-sm font-semibold text-white shadow-lg ring-1 ring-white/10 backdrop-blur-md">
@@ -948,10 +1001,12 @@ export function Office3D({
             <MapIcon size={16} aria-hidden="true" />
             <span className="hidden sm:inline">Whole office</span>
           </ToolbarButton>
-          <ToolbarButton label="Back to the 2D map" onClick={onClose}>
-            <X size={16} aria-hidden="true" />
-            <span className="hidden sm:inline">Close</span>
-          </ToolbarButton>
+          {onClose && (
+            <ToolbarButton label="Back to the 2D map" onClick={onClose}>
+              <X size={16} aria-hidden="true" />
+              <span className="hidden sm:inline">Close</span>
+            </ToolbarButton>
+          )}
         </div>
       </div>
 
@@ -978,7 +1033,7 @@ export function Office3D({
             </button>
           </div>
           <div className="overflow-y-auto px-3 pt-3">
-            <AvatarPicker look={draftLook} onChange={setDraftLook} />
+            <AvatarPicker look={draftLook} onChange={setDraftLook} view="3d" />
           </div>
           <div className="flex items-center justify-end gap-2 border-t border-[#eceef1] px-4 py-3">
             {lookError && <p role="alert" className="mr-auto text-xs text-[#b42318]">{lookError}</p>}
@@ -1021,8 +1076,8 @@ export function Office3D({
               <>
                 <p className="text-sm font-semibold">The 3D view didn&apos;t load</p>
                 <p className="mt-1 text-xs text-[#8a909b]">{status.message}</p>
-                <button type="button" onClick={onClose} className="mt-3 cursor-pointer rounded-xl bg-[#12151c] px-4 py-2 text-sm font-semibold text-white">
-                  Back to the map
+                <button type="button" onClick={onClose ?? (() => window.location.reload())} className="mt-3 cursor-pointer rounded-xl bg-[#12151c] px-4 py-2 text-sm font-semibold text-white">
+                  {onClose ? "Back to the map" : "Try again"}
                 </button>
               </>
             )}
