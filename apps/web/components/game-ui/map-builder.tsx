@@ -72,6 +72,7 @@ export function MapBuilder({
   const [kind, setKind] = useState<ItemKind>("desk-l");
   const [dir, setDir] = useState<Dir>("down");
   const [fabric, setFabric] = useState<Fabric>("navy");
+  const [look, setLook] = useState(0);
   const [floor, setFloor] = useState<CustomFloor | null>("wood");
   const [message, setMessage] = useState<string | null>(null);
   const [pendingRoom, setPendingRoom] = useState<{ from: { x: number; y: number }; to: { x: number; y: number } } | null>(null);
@@ -80,8 +81,8 @@ export function MapBuilder({
   const dirty = draft !== map;
 
   // The scene calls back through the bridge, so it reads everything through this ref.
-  const state = useRef({ draft, tool, kind, dir, fabric, floor, dragFrom: null as { x: number; y: number } | null, lastTile: "" });
-  state.current = { ...state.current, draft, tool, kind, dir, fabric, floor };
+  const state = useRef({ draft, tool, kind, dir, fabric, look, floor, dragFrom: null as { x: number; y: number } | null, lastTile: "" });
+  state.current = { ...state.current, draft, tool, kind, dir, fabric, look, floor };
 
   useEffect(() => onPreview(draft), [draft, onPreview]);
   useEffect(() => setDraft(map), [map]);
@@ -112,11 +113,11 @@ export function MapBuilder({
   }, []);
 
   const showGhost = useCallback((x: number, y: number) => {
-    const { draft: current, tool: active, kind: piece, dir: facing, fabric: cloth, dragFrom } = state.current;
+    const { draft: current, tool: active, kind: piece, dir: facing, fabric: cloth, look: variant, dragFrom } = state.current;
     const bridge = bridgeRef.current;
     if (active === "furniture") {
       const spec = itemSpec(piece);
-      bridge.setBuilderGhost?.({ x, y, w: spec.w, h: spec.h, ok: !placementProblem(current, { kind: piece, x, y }), item: { kind: piece, dir: facing, fabric: cloth } });
+      bridge.setBuilderGhost?.({ x, y, w: spec.w, h: spec.h, ok: !placementProblem(current, { kind: piece, x, y }), item: { kind: piece, dir: facing, fabric: cloth, variant } });
     } else if (active === "rooms" && dragFrom) {
       bridge.setBuilderGhost?.({ x: Math.min(dragFrom.x, x), y: Math.min(dragFrom.y, y), w: Math.abs(x - dragFrom.x) + 1, h: Math.abs(y - dragFrom.y) + 1, ok: true });
     } else {
@@ -145,7 +146,7 @@ export function MapBuilder({
     const newStep = phase === "down";
     s.lastTile = tile;
     switch (s.tool) {
-      case "furniture": if (newStep) commit(placeItem(s.draft, s.kind, x, y, s.dir, s.fabric), true); break;
+      case "furniture": if (newStep) commit(placeItem(s.draft, s.kind, x, y, s.dir, s.fabric, s.look), true); break;
       case "walls": commit(setWall(s.draft, x, y, true), newStep); break;
       case "floors": commit(paintFloor(s.draft, x, y, s.floor), newStep); break;
       case "erase": {
@@ -197,6 +198,11 @@ export function MapBuilder({
   }, [bridgeRef, kindsInCategory, previews]);
 
   const spec = itemSpec(kind);
+  // Pictures of each look of the chosen piece, for the Look picker.
+  const lookPreviews = useMemo(() => {
+    const preview = bridgeRef.current.previewItem;
+    return Array.from({ length: spec.looks ?? 0 }, (_, variant) => preview?.({ kind, fabric, variant }) ?? null);
+  }, [bridgeRef, kind, fabric, spec.looks]);
   const hint = TOOLS.find((entry) => entry.id === tool)!.hint;
 
   const confirmRoom = () => {
@@ -263,7 +269,7 @@ export function MapBuilder({
                 <button
                   key={item}
                   type="button"
-                  onClick={() => { setKind(item); setDir("down"); }}
+                  onClick={() => { setKind(item); setDir("down"); setLook(0); }}
                   aria-pressed={kind === item}
                   className={`flex cursor-pointer flex-col items-center gap-1 rounded-xl border p-1.5 text-center text-[11px] leading-[14px] transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#12151c] ${
                     kind === item ? "border-[#12151c] bg-[#f4f5f7]" : "border-[#eceef1] hover:border-[#c9ccd3]"
@@ -281,8 +287,35 @@ export function MapBuilder({
                 </button>
               ))}
             </div>
-            {(spec.faces?.length || spec.fabric) && (
+            {(spec.faces?.length || spec.fabric || spec.looks) && (
               <div className="mt-3 space-y-2.5 rounded-xl bg-[#f7f8fa] p-2.5">
+                {!!spec.looks && (
+                  <div className="flex items-center gap-2">
+                    <span className={fieldLabel}>Look</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {lookPreviews.map((src, variant) => (
+                        <button
+                          key={variant}
+                          type="button"
+                          onClick={() => setLook(variant)}
+                          aria-pressed={look === variant}
+                          aria-label={`Look ${variant + 1}`}
+                          title={`Look ${variant + 1}`}
+                          className={`grid h-10 w-10 cursor-pointer place-items-center rounded-lg border bg-white p-0.5 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#12151c] ${
+                            look === variant ? "border-[#12151c]" : "border-[#e1e4e9] hover:border-[#c9ccd3]"
+                          }`}
+                        >
+                          {src ? (
+                            // eslint-disable-next-line @next/next/no-img-element -- a data URL from the game canvas, not a file
+                            <img src={src} alt="" className="max-h-9 max-w-9 object-contain [image-rendering:pixelated]" />
+                          ) : (
+                            <span className="text-[11px] font-semibold text-[#5c6371]">{variant + 1}</span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {!!spec.faces?.length && (
                   <div className="flex items-center gap-2">
                     <span className={fieldLabel}>Facing</span>

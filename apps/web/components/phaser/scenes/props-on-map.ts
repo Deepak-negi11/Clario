@@ -1,11 +1,13 @@
 import Phaser from "phaser";
 import { BIKES, DRINK_NAMES, DRINKS, SIPS_PER_CAN, type Bike, type Dir, type Drink, type PlayerProp } from "@repo/shared";
 export { RIDE_STEP_MS } from "@repo/shared";
-import { HQ_ITEMS, ITEM_SPECS } from "../../../lib/maps/clario-hq";
+import { ITEM_SPECS, type HqItem } from "../../../lib/maps/clario-hq";
 import type { SceneBridge } from "../scene-bridge";
 import { BIKE_SIDE_HUB, RACK_SIZE, RACK_SLOTS } from "./reference-art";
+import { vendingPickupOffset, vendingPickupScale } from "./office-props-art";
 
-// Bikes and drinks on Clario HQ's 2D map. Stand next to the bike rack and press E to ride one
+// Bikes and drinks on the 2D map (Clario HQ, or a map someone built with a bike rack or a
+// vending machine). Stand next to the bike rack and press E to ride one
 // (faster than walking; E again gets off and the bike goes back to its rack). Stand in front of
 // the vending machine and press E: a can drops into the tray; E again takes it. With a can in
 // hand, E takes a sip and Q throws it away. Everyone sees who rides which bike and who is
@@ -30,9 +32,21 @@ export type PropsOnMap = {
     riding: (userId: string | null | undefined) => boolean;
     // True while getOff would take E, so other tags stay hidden.
     busy: () => boolean;
+    // The map's items changed (the map builder): find the rack and the machine again.
+    setItems: (items: readonly HqItem[]) => void;
 };
 
-type Options = { font: string; bridge?: SceneBridge; selfId: () => string | null };
+// `items`: the map's furniture. The bikes stand in the rack whose variant is 1 (drawn empty, see
+// rideableRack), and drinks come from the first vending machine.
+type Options = { items: readonly HqItem[]; font: string; bridge?: SceneBridge; selfId: () => string | null };
+
+// The items with one rack drawn empty for the bikes to stand in: the one marked so (variant 1), or
+// else the first. A map someone built has no marked rack, so its first one is used.
+export function rideableRack(items: readonly HqItem[]): HqItem[] {
+    if (items.some((item) => item.kind === "bike-rack" && item.variant === 1)) return [...items];
+    const first = items.findIndex((item) => item.kind === "bike-rack");
+    return items.map((item, i) => (i === first ? { ...item, variant: 1 } : item));
+}
 
 // Next to a rectangle of tiles (diagonals count).
 function inReach(rect: Rect, x: number, y: number) {
@@ -65,29 +79,47 @@ function clunk() {
     }
 }
 
-export function addPropsOnMap(scene: Phaser.Scene, { font, bridge, selfId }: Options): PropsOnMap {
-    const rackItem = HQ_ITEMS.find((item) => item.kind === "bike-rack" && item.variant === 1);
-    const machineItem = HQ_ITEMS.find((item) => item.kind === "vending-machine");
-    const rack: Rect | null = rackItem ? { x: rackItem.x, y: rackItem.y, ...ITEM_SPECS["bike-rack"] } : null;
-    const machine: Rect | null = machineItem ? { x: machineItem.x, y: machineItem.y, ...ITEM_SPECS["vending-machine"] } : null;
-
+export function addPropsOnMap(scene: Phaser.Scene, { items, font, bridge, selfId }: Options): PropsOnMap {
+    let rack: Rect | null = null;
+    let machine: Rect | null = null;
     // The rack's bikes, drawn on their own over the empty rack so a ridden bike can leave it.
     const rackBikes = new Map<Bike, Phaser.GameObjects.Image>();
-    if (rack) {
-        const left = (rack.x + rack.w / 2) * TILE - (RACK_SIZE.w * ART) / 2;
-        const top = (rack.y + rack.h) * TILE - RACK_SIZE.h * ART;
-        BIKES.forEach((bike, i) => {
-            const slot = RACK_SLOTS[bike];
-            const image = scene.add.image(left + (slot.x - BIKE_SIDE_HUB.x) * ART, top + (slot.y - BIKE_SIDE_HUB.y) * ART, `hq-ride-${bike}-side`)
-                .setOrigin(0, 0).setDepth((rack.y + rack.h) * TILE + 1 + i);
-            rackBikes.set(bike, image);
-        });
-    }
-
-    // The vending machine's tray (its sprite is 16 x 42 art pixels, the tray near its foot).
-    const tray = machine ? { x: (machine.x + 0.5) * TILE - 2, y: (machine.y + 1) * TILE - 18, depth: (machine.y + 1) * TILE + 1 } : null;
+    // The vending machine's tray, aligned with the artwork's pickup opening.
+    let tray: { x: number; y: number; depth: number } | null = null;
     let trayDrink: Drink | null = null;
     let trayCan: Phaser.GameObjects.Image | null = null;
+
+    const setItems = (list: readonly HqItem[]) => {
+        const rackItem = list.find((item) => item.kind === "bike-rack" && item.variant === 1);
+        const machineItem = list.find((item) => item.kind === "vending-machine");
+        rack = rackItem ? { x: rackItem.x, y: rackItem.y, ...ITEM_SPECS["bike-rack"] } : null;
+        const moved = !machineItem || machine?.x !== machineItem.x || machine?.y !== machineItem.y;
+        machine = machineItem ? { x: machineItem.x, y: machineItem.y, ...ITEM_SPECS["vending-machine"] } : null;
+
+        for (const image of rackBikes.values()) image.destroy();
+        rackBikes.clear();
+        if (rack) {
+            const left = (rack.x + rack.w / 2) * TILE - (RACK_SIZE.w * ART) / 2;
+            const top = (rack.y + rack.h) * TILE - RACK_SIZE.h * ART;
+            const depth = (rack.y + rack.h) * TILE;
+            BIKES.forEach((bike, i) => {
+                const slot = RACK_SLOTS[bike];
+                const image = scene.add.image(left + (slot.x - BIKE_SIDE_HUB.x) * ART, top + (slot.y - BIKE_SIDE_HUB.y) * ART, `hq-ride-${bike}-side`)
+                    .setOrigin(0, 0).setDepth(depth + 1 + i);
+                rackBikes.set(bike, image);
+            });
+        }
+
+        tray = machine ? { x: (machine.x + 0.5) * TILE - 2, y: (machine.y + 1) * TILE - vendingPickupOffset(scene), depth: (machine.y + 1) * TILE + 1 } : null;
+        // A can waiting in a machine that moved or went is gone with it.
+        if (moved && trayDrink) {
+            trayDrink = null;
+            if (bridge) bridge.vendingTray = null;
+            trayCan?.destroy();
+            trayCan = null;
+        }
+    };
+    setItems(items);
     let nextDrink = Math.floor(Math.random() * DRINKS.length);
 
     const makeTag = (color: string) => scene.add.text(0, 0, "", {
@@ -107,18 +139,21 @@ export function addPropsOnMap(scene: Phaser.Scene, { font, bridge, selfId }: Opt
         return me ? bridge?.props?.[me] ?? null : null;
     };
     const ridden = (bike: Bike) => Object.values(bridge?.props ?? {}).some((prop) => prop.kind === "bike" && prop.bike === bike);
+    // False when it couldn't be sent (reconnecting).
     const setProp = (prop: PlayerProp | null) => {
-        bridge?.setProp?.(prop);
-        hintUntil = scene.time.now + HINT_MS;
+        const sent = !!bridge?.setProp?.(prop);
+        if (sent) hintUntil = scene.time.now + HINT_MS;
+        return sent;
     };
 
     const buy = () => {
-        if (!tray) return;
+        const at = tray;
+        if (!at) return;
         trayDrink = DRINKS[nextDrink++ % DRINKS.length]!;
         if (bridge) bridge.vendingTray = { drink: trayDrink, at: performance.now() };
         trayCan?.destroy();
-        trayCan = scene.add.image(tray.x, tray.y - 30, `hq-can-${trayDrink}`).setScale(0.6).setDepth(tray.depth).setAlpha(0);
-        scene.tweens.add({ targets: trayCan, y: tray.y, alpha: 1, duration: 260, ease: "Quad.easeIn", onComplete: clunk });
+        trayCan = scene.add.image(at.x, at.y - 30, `hq-can-${trayDrink}`).setScale(vendingPickupScale(scene)).setDepth(at.depth).setAlpha(0);
+        scene.tweens.add({ targets: trayCan, y: at.y, alpha: 1, duration: 260, ease: "Quad.easeIn", onComplete: clunk });
     };
 
     const throwCan = (from: Phaser.GameObjects.Image) => {
@@ -127,6 +162,7 @@ export function addPropsOnMap(scene: Phaser.Scene, { font, bridge, selfId }: Opt
     };
 
     const api: PropsOnMap = {
+        setItems,
         riding: (userId) => !!userId && bridge?.props?.[userId]?.kind === "bike",
         busy: () => mine()?.kind === "bike",
 
@@ -145,7 +181,8 @@ export function addPropsOnMap(scene: Phaser.Scene, { font, bridge, selfId }: Opt
                         note = { text: "Finish your drink first", until: scene.time.now + 2500 };
                         return true;
                     }
-                    setProp({ kind: "can", drink: trayDrink, sips: 0 });
+                    // Reconnecting: the can stays in the tray until it can really be taken.
+                    if (!setProp({ kind: "can", drink: trayDrink, sips: 0 })) return true;
                     trayDrink = null;
                     if (bridge) bridge.vendingTray = null;
                     trayCan?.destroy();

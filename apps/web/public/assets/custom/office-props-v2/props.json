@@ -1,0 +1,192 @@
+{
+  "frames": {
+    "hq-vending-machine": {
+      "frame": {
+        "x": 1,
+        "y": 1,
+        "w": 32,
+        "h": 84
+      },
+      "rotated": false,
+      "trimmed": false,
+      "sourceSize": {
+        "w": 32,
+        "h": 84
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 84
+      }
+    },
+    "hq-bookshelf-0": {
+      "frame": {
+        "x": 35,
+        "y": 1,
+        "w": 64,
+        "h": 92
+      },
+      "rotated": false,
+      "trimmed": false,
+      "sourceSize": {
+        "w": 64,
+        "h": 92
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 64,
+        "h": 92
+      }
+    },
+    "hq-bookshelf-1": {
+      "frame": {
+        "x": 101,
+        "y": 1,
+        "w": 64,
+        "h": 92
+      },
+      "rotated": false,
+      "trimmed": false,
+      "sourceSize": {
+        "w": 64,
+        "h": 92
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 64,
+        "h": 92
+      }
+    },
+    "hq-ride-orange-side": {
+      "frame": {
+        "x": 167,
+        "y": 1,
+        "w": 44,
+        "h": 32
+      },
+      "rotated": false,
+      "trimmed": false,
+      "sourceSize": {
+        "w": 44,
+        "h": 32
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 44,
+        "h": 32
+      }
+    },
+    "hq-ride-teal-side": {
+      "frame": {
+        "x": 1,
+        "y": 95,
+        "w": 44,
+        "h": 32
+      },
+      "rotated": false,
+      "trimmed": false,
+      "sourceSize": {
+        "w": 44,
+        "h": 32
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 44,
+        "h": 32
+      }
+    },
+    "hq-ride-orange-front": {
+      "frame": {
+        "x": 47,
+        "y": 95,
+        "w": 28,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "sourceSize": {
+        "w": 28,
+        "h": 40
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 28,
+        "h": 40
+      }
+    },
+    "hq-ride-teal-front": {
+      "frame": {
+        "x": 77,
+        "y": 95,
+        "w": 28,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "sourceSize": {
+        "w": 28,
+        "h": 40
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 28,
+        "h": 40
+      }
+    },
+    "hq-ride-orange-back": {
+      "frame": {
+        "x": 107,
+        "y": 95,
+        "w": 28,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "sourceSize": {
+        "w": 28,
+        "h": 40
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 28,
+        "h": 40
+      }
+    },
+    "hq-ride-teal-back": {
+      "frame": {
+        "x": 137,
+        "y": 95,
+        "w": 28,
+        "h": 40
+      },
+      "rotated": false,
+      "trimmed": false,
+      "sourceSize": {
+        "w": 28,
+        "h": 40
+      },
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 28,
+        "h": 40
+      }
+    }
+  },
+  "meta": {
+    "image": "props.png",
+    "size": {
+      "w": 256,
+      "h": 144
+    },
+    "scale": "1"
+  }
+}

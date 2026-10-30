@@ -13,9 +13,10 @@ type CoworkerNpcOptions = {
     block: (x: number, y: number) => void;
     // The scene's texture for a look: the same recoloured sheets players get.
     texture: (look: AvatarLook) => string;
+    busy?: () => boolean;
 };
 
-export function addCoworkerNpcs(scene: Phaser.Scene, { font, bridge, block, texture }: CoworkerNpcOptions): TalkNpc[] {
+export function addCoworkerNpcs(scene: Phaser.Scene, { font, bridge, block, texture, busy }: CoworkerNpcOptions): TalkNpc[] {
     return HQ_COWORKERS.flatMap(({ id, x, y, look }) => {
         const coworker = getCoworker(id);
         if (!coworker) return [];
@@ -32,6 +33,7 @@ export function addCoworkerNpcs(scene: Phaser.Scene, { font, bridge, block, text
             tagColor: coworker.color,
             talk: () => bridge?.openCoworker?.(id),
             state: () => (bridge?.coworkerState?.id === id ? bridge.coworkerState.state : undefined),
+            busy,
         })];
     });
 }

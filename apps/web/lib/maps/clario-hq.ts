@@ -136,6 +136,8 @@ export const HQ_WALL_DECOR: { kind: WallDecorKind; x: number; w: number; wallY: 
 ];
 
 export type RugStyle = "meeting" | "focus" | "lounge" | "round" | "library" | "game" | "stage" | "grey";
+// The rugs the map builder offers: a "rug" item's `variant` picks one of these styles.
+export const RUG_LOOKS: RugStyle[] = ["lounge", "meeting", "focus", "library", "game", "grey"];
 export const HQ_RUGS: { x: number; y: number; w: number; h: number; style: RugStyle }[] = [
   { x: 30, y: 5, w: 6, h: 6, style: "meeting" },
   { x: 15.5, y: 8.3, w: 4, h: 2.9, style: "focus" },
@@ -181,7 +183,7 @@ const cubicle = (x: number, y: number): HqItem[] => [
 
 // Open Desks' cubicles, three tiles wide between partitions (x is each one's left tile): a
 // potted tree by the right-hand post, Claude's chair facing you, and the white desk in front of
-// it (its laptop lid towards you) with a filing cabinet.
+// it (its screen facing Claude) with a filing cabinet.
 const OPEN_DESKS_CUBICLES = [3, 7, 11, 15];
 const openDesksCubicle = (x: number): HqItem[] => [
   { kind: "plant-tree", x: x + 2, y: 18 },
@@ -333,11 +335,11 @@ export const HQ_ITEMS: HqItem[] = [
   { kind: "plant-small", x: 53, y: 11 },
 
   // Demo Stage, the auditorium: two lecterns at the front, three blocks of theatre seats facing
-  // them, and aisles that join the openings on either side. A flip chart and a side table stand in
+  // them in rows with a walkway behind each, and aisles that join the openings on either side. A flip chart and a side table stand in
   // one front corner and the aquarium in the other; the tiles below the two doors stay clear.
   { kind: "podium", x: 51, y: 16 },
   { kind: "podium", x: 53, y: 16 },
-  ...[18, 19, 20, 21].flatMap((y) => row("theatre-seat", [47, 48, 49, 51, 52, 53, 55, 56, 57], y, "up")),
+  ...[18, 20, 22].flatMap((y) => row("theatre-seat", [47, 48, 49, 51, 52, 53, 55, 56, 57], y, "up")),
   { kind: "flip-chart", x: 46, y: 15 },
   { kind: "side-table", x: 47, y: 15, variant: 1 },
   { kind: "aquarium", x: 57, y: 15 },

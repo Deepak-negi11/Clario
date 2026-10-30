@@ -1,12 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { findPath, type PathGrid, type Tile } from "./path-finder";
 
-// Draws a grid from rows of text: '#' is blocked, anything else is open.
+// Draws a grid from rows of text: '#' is a wall, 'X' is furniture, anything else is open.
 function grid(rows: string[]): PathGrid {
   return {
     cols: rows[0]!.length,
     rows: rows.length,
-    isBlocked: (x, y) => rows[y]![x] === "#",
+    isBlocked: (x, y) => rows[y]![x] === "#" || rows[y]![x] === "X",
+    isWall: (x, y) => rows[y]![x] === "#",
   };
 }
 
@@ -89,6 +90,20 @@ describe("findPath", () => {
     const path = findPath(from, { x: 4, y: 3 }, map);
     expect(path.at(-1)!.y).toBe(1);
     expect(path.at(-1)!.x).toBe(4);
+  });
+
+  test("clicking furniture behind a wall walks round through the door to it", () => {
+    // The desk (X) is just the other side of the wall from you; the door is far to the right.
+    const map = grid([
+      "...............",
+      "#############..",
+      "..X............",
+    ]);
+    const from = { x: 2, y: 0 };
+    const path = findPath(from, { x: 2, y: 2 }, map);
+    expectWalkable(path, from, map);
+    expect(path.at(-1)!.y).toBe(2);
+    expect(Math.abs(path.at(-1)!.x - 2)).toBe(1);
   });
 
   test("clicking a closed room walks to the nearest spot outside it", () => {

@@ -1,10 +1,11 @@
 // Tile paths for click-to-walk (the 2D map, and the 3D view through the same scene): A* on the
 // 4-way grid. Every step costs 1 and a turn adds a tiny cost, so of all the shortest paths it
 // takes the one with the fewest turns (straight runs, not a staircase) and never a longer one.
-// When the goal can't be reached (a wall, a desk, a closed room), it walks to a reachable tile
-// near the click, trading closeness against walking: a tile one step nearer the click is worth
-// up to three more steps, so clicking a wall stops on your side of it instead of sending you
-// all the way round to the far side.
+// When the goal can't be reached it walks to a reachable tile near the click. Clicking a wall
+// trades closeness against walking (a tile one step nearer is worth up to three more steps), so
+// you stop on your side of it instead of being sent all the way round to the far side. Clicking
+// furniture, or a spot you can't get into, takes you to the nearest tile to it however far round
+// that is, since that's where you meant to go.
 
 export type Tile = { x: number; y: number };
 
@@ -12,10 +13,13 @@ export type PathGrid = {
   cols: number;
   rows: number;
   isBlocked: (x: number, y: number) => boolean;
+  // Walls among the blocked tiles (the rest is furniture). Without it every blocked tile is a wall.
+  isWall?: (x: number, y: number) => boolean;
 };
 
 const TURN = 0.001; // under 1 for any path with fewer than 1000 turns, so length always wins
-const CLOSER_IS_WORTH = 3; // steps of walking worth one tile nearer an unreachable click
+const CLOSER_IS_WORTH = 3; // steps of walking worth one tile nearer a clicked wall
+const NEAREST_FIRST = 10000; // anything else: nearness always wins, walking only breaks ties
 const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]] as const;
 const NO_DIR = 4; // the start, before any step
 
@@ -71,7 +75,7 @@ class Open {
 }
 
 // The tiles to step on, in order, not counting the start. Empty when there is nowhere better to go.
-export function findPath(start: Tile, goal: Tile, { cols, rows, isBlocked }: PathGrid): Tile[] {
+export function findPath(start: Tile, goal: Tile, { cols, rows, isBlocked, isWall = isBlocked }: PathGrid): Tile[] {
   const inside = (x: number, y: number) => x >= 0 && y >= 0 && x < cols && y < rows;
   const tiles = cols * rows;
   // A search state is a tile plus the direction you arrived from, so turns can be counted.
@@ -117,7 +121,8 @@ export function findPath(start: Tile, goal: Tile, { cols, rows, isBlocked }: Pat
   if (reached < 0) {
     // Unreachable: the whole reachable area has been searched. Take the tile that best trades
     // closeness to the click against the walk there.
-    const score = (tile: number) => CLOSER_IS_WORTH * h(tile % cols, Math.floor(tile / cols)) + bestG[tile]!;
+    const weight = inside(goal.x, goal.y) && isWall(goal.x, goal.y) ? CLOSER_IS_WORTH : NEAREST_FIRST;
+    const score = (tile: number) => weight * h(tile % cols, Math.floor(tile / cols)) + bestG[tile]!;
     let target = -1;
     for (let tile = 0; tile < tiles; tile++) {
       if (bestG[tile]! === Infinity) continue;

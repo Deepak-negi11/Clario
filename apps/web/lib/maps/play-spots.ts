@@ -1,11 +1,14 @@
 import type { ArcadeGameKind } from "../../components/games/arcade-kit";
-import { HQ_ITEMS, HQ_WALL_DECOR, ITEM_SPECS } from "./clario-hq";
+import { HQ_ITEMS, HQ_WALL_DECOR, ITEM_SPECS, type HqItem } from "./clario-hq";
 
-// The things you can play or watch on Clario HQ: the arcade machines, ping-pong and foosball
-// tables and the TVs. Each spot has the tiles it covers and what it opens. The 2D map
-// (phaser/scenes/play-spots.ts) and the 3D view both read this, so the same things work in both.
+// The things you can play or watch: the arcade machines, ping-pong and foosball tables and the
+// TVs, on Clario HQ or on a map someone built. Each spot has the tiles it covers and what it
+// opens. The 2D map (phaser/scenes/play-spots.ts) and the 3D view both read this, so the same
+// things work in both.
 
-export type PlayAction = { kind: "game"; game?: ArcadeGameKind } | { kind: "tv" };
+// A Game Room game, or Tetris on the arcade machine itself (components/games/tetris-overlay.tsx).
+export type SpotGame = ArcadeGameKind | "tetris";
+export type PlayAction = { kind: "game"; game?: SpotGame } | { kind: "tv" };
 
 export type PlaySpot = {
   x: number;
@@ -18,18 +21,25 @@ export type PlaySpot = {
   frontOnly?: boolean;
 };
 
-// Arcade machines take turns in three colours (clario-hq-builder.ts), and each colour has its own
-// game. The third opens the arcade on Pong, where you can switch games.
-const CABINET_GAMES: (ArcadeGameKind | undefined)[] = ["breakout", "snake", undefined];
-const GAME_NAMES: Record<ArcadeGameKind, string> = { pong: "Pong", breakout: "Breakout", snake: "Snake", sumo: "Chair Sumo" };
+// Arcade machines come in three colours (an item's variant, or else they take turns; see
+// clario-hq-builder.ts). Every one of them plays Tetris; the other games are a button away in it,
+// and at the game tables.
+const CABINET_GAMES: (SpotGame | undefined)[] = ["tetris", "tetris", "tetris"];
+const GAME_NAMES: Record<SpotGame, string> = { pong: "Pong", breakout: "Breakout", snake: "Snake", sumo: "Chair Sumo", tetris: "Tetris" };
 
 export function hqPlaySpots(): PlaySpot[] {
+  return playSpotsFor(HQ_ITEMS, HQ_WALL_DECOR);
+}
+
+// The spots among a map's items, and the TVs hung on its walls.
+export function playSpotsFor(items: readonly HqItem[], wallDecor: typeof HQ_WALL_DECOR = []): PlaySpot[] {
   const spots: PlaySpot[] = [];
   let cabinet = 0;
-  for (const item of HQ_ITEMS) {
+  for (const item of items) {
     const { w, h } = ITEM_SPECS[item.kind];
     if (item.kind === "arcade") {
-      const game = CABINET_GAMES[cabinet++ % CABINET_GAMES.length];
+      const game = CABINET_GAMES[(item.variant ?? cabinet) % CABINET_GAMES.length];
+      cabinet++;
       spots.push({ x: item.x, y: item.y, w, h, label: game ? `play ${GAME_NAMES[game]}` : "play arcade games", action: { kind: "game", game } });
     } else if (item.kind === "pingpong") {
       spots.push({ x: item.x, y: item.y, w, h, label: "play Pong", action: { kind: "game", game: "pong" } });
@@ -41,7 +51,7 @@ export function hqPlaySpots(): PlaySpot[] {
     }
   }
   // Screens hang on the south face of a wall, which is two rows tall from wallY.
-  for (const decor of HQ_WALL_DECOR) {
+  for (const decor of wallDecor) {
     if (decor.kind !== "tv") continue;
     const x = Math.floor(decor.x);
     spots.push({ x, y: decor.wallY, w: Math.ceil(decor.x + decor.w) - x, h: 2, label: "watch TV", action: { kind: "tv" }, frontOnly: true });

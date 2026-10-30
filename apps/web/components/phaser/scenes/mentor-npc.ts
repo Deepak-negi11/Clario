@@ -20,9 +20,10 @@ type MentorNpcOptions = {
     font: string;
     bridge?: SceneBridge;
     block: (x: number, y: number) => void;
+    busy?: () => boolean;
 };
 
-export function addMentorNpc(scene: Phaser.Scene, { tileX, tileY, font, bridge, block }: MentorNpcOptions): MentorNpc {
+export function addMentorNpc(scene: Phaser.Scene, { tileX, tileY, font, bridge, block, busy }: MentorNpcOptions): MentorNpc {
     // Talk panels (hers and the AI coworkers') turn the game keyboard off while someone types.
     if (bridge) {
         bridge.setKeyboardEnabled = (enabled) => {
@@ -46,5 +47,6 @@ export function addMentorNpc(scene: Phaser.Scene, { tileX, tileY, font, bridge, 
         tagColor: "#b8325e",
         talk: () => bridge?.openMentor?.(),
         state: () => bridge?.mentorState,
+        busy,
     });
 }

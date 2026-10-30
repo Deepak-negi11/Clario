@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { hqPlaySpots, spotFront, spotInReach, type PlaySpot } from "../../../lib/maps/play-spots";
+import { spotFront, spotInReach, type PlaySpot } from "../../../lib/maps/play-spots";
 import type { SceneBridge } from "../scene-bridge";
 
 // The arcade machines, game tables and TVs on the 2D map (lib/maps/play-spots.ts). Walk up and
@@ -9,9 +9,11 @@ import type { SceneBridge } from "../scene-bridge";
 const TILE = 32;
 
 // `use`: what the scene's E key calls (arena-scene.ts); true if a spot was in reach and opened.
-export type PlaySpots = { update: (playerTileX: number, playerTileY: number) => void; use: () => boolean };
+// `setSpots`: a new list, when the map is rebuilt (the map builder).
+export type PlaySpots = { update: (playerTileX: number, playerTileY: number) => void; use: () => boolean; setSpots: (spots: PlaySpot[]) => void };
 
 type PlaySpotsOptions = {
+    spots: PlaySpot[];
     font: string;
     bridge?: SceneBridge;
     // True while E would do something else first (someone to talk to, a bike to get off): the
@@ -19,8 +21,9 @@ type PlaySpotsOptions = {
     busy: () => boolean;
 };
 
-export function addPlaySpots(scene: Phaser.Scene, { font, bridge, busy }: PlaySpotsOptions): PlaySpots {
-    const spots = hqPlaySpots();
+export function addPlaySpots(scene: Phaser.Scene, { spots: first, font, bridge, busy }: PlaySpotsOptions): PlaySpots {
+    let spots: PlaySpot[] = [];
+    let zones: Phaser.GameObjects.Zone[] = [];
     let player = { x: -1, y: -1 };
     let inReach: PlaySpot | null = null;
 
@@ -31,16 +34,23 @@ export function addPlaySpots(scene: Phaser.Scene, { font, bridge, busy }: PlaySp
     // Furniture is drawn taller than the tiles it stands on, so its click area reaches a tile up.
     const lift = (spot: PlaySpot) => (spot.frontOnly ? 0 : 1);
 
-    for (const spot of spots) {
-        const zone = scene.add.zone(spot.x * TILE, (spot.y - lift(spot)) * TILE, spot.w * TILE, (spot.h + lift(spot)) * TILE)
-            .setOrigin(0, 0)
-            .setInteractive({ cursor: "pointer" });
-        zone.on("pointerdown", (_pointer: Phaser.Input.Pointer, _lx: number, _ly: number, event: Phaser.Types.Input.EventData) => {
-            event.stopPropagation();
-            if (spotInReach([spot], player.x, player.y)) use(spot);
-            else bridge?.walkTo?.(spotFront(spot).x, spotFront(spot).y);
+    const setSpots = (next: PlaySpot[]) => {
+        for (const zone of zones) zone.destroy();
+        spots = next;
+        inReach = null;
+        zones = spots.map((spot) => {
+            const zone = scene.add.zone(spot.x * TILE, (spot.y - lift(spot)) * TILE, spot.w * TILE, (spot.h + lift(spot)) * TILE)
+                .setOrigin(0, 0)
+                .setInteractive({ cursor: "pointer" });
+            zone.on("pointerdown", (_pointer: Phaser.Input.Pointer, _lx: number, _ly: number, event: Phaser.Types.Input.EventData) => {
+                event.stopPropagation();
+                if (spotInReach([spot], player.x, player.y)) use(spot);
+                else bridge?.walkTo?.(spotFront(spot).x, spotFront(spot).y);
+            });
+            return zone;
         });
-    }
+    };
+    setSpots(first);
 
     const tag = scene.add.text(0, 0, "", {
         fontFamily: font,
@@ -52,6 +62,7 @@ export function addPlaySpots(scene: Phaser.Scene, { font, bridge, busy }: PlaySp
     }).setOrigin(0.5, 1).setDepth(10000).setResolution(3).setVisible(false);
 
     return {
+        setSpots,
         use() {
             if (!inReach) return false;
             use(inReach);

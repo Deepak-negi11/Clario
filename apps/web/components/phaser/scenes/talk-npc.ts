@@ -28,6 +28,8 @@ export type TalkNpcOptions = {
     talk: () => void;
     // What their panel is doing, or undefined while it is closed.
     state: () => MentorState | undefined;
+    // True while E does something else first (getting off a bike): no "Press E" then.
+    busy?: () => boolean;
 };
 
 export function isTypingIn(target: EventTarget | null) {
@@ -36,7 +38,7 @@ export function isTypingIn(target: EventTarget | null) {
 }
 
 export function addTalkNpc(scene: Phaser.Scene, options: TalkNpcOptions): TalkNpc {
-    const { tileX, tileY, font, bridge, block, texture, name, role, tagColor, talk, state: stateOf } = options;
+    const { tileX, tileY, font, bridge, block, texture, name, role, tagColor, talk, state: stateOf, busy } = options;
     block(tileX, tileY);
 
     const x = tileX * TILE + TILE / 2;
@@ -79,7 +81,7 @@ export function addTalkNpc(scene: Phaser.Scene, options: TalkNpcOptions): TalkNp
                 : state === "listening" ? `${name} is listening`
                 : state === "thinking" ? `${name} is thinking…`
                 : state === "speaking" ? `${name} is speaking`
-                : near ? `Press E to talk to ${name}`
+                : near && !busy?.() ? `Press E to talk to ${name}`
                 : `${name} · ${role}`;
             if (tag.text !== label) tag.setText(label);
 

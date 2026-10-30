@@ -98,11 +98,12 @@ export function addClaudeNpcs(scene: Phaser.Scene, { font, block }: ClaudeNpcOpt
     const claudes = HQ_CLAUDE_SEATS.map(({ x: tileX, y: tileY }, index) => {
         block(tileX, tileY);
         const x = (tileX + 0.5) * TILE;
-        // On the chair, eyes and hands just above the laptop lid; the desk in the row below hides the rest.
-        const body = scene.add.image(x, tileY * TILE + 22, "claude-rest-open").setOrigin(0.5, 1).setDepth((tileY + 1) * TILE);
-        const sparkY = tileY * TILE - 10;
+        // Sitting up in the chair: eyes over the top of the desk's monitor and a hand either side of
+        // it on the keys; the desk in the row below hides the rest.
+        const body = scene.add.image(x, tileY * TILE + 18, "claude-rest-open").setOrigin(0.5, 1).setDepth((tileY + 1) * TILE);
+        const sparkY = tileY * TILE - 16;
         const spark = scene.add.image(x, sparkY, "claude-spark-0").setDepth((tileY + 1) * TILE + 1);
-        const tag = scene.add.text(x, tileY * TILE - 20, `Claude · ${TASKS[index % TASKS.length]}`, {
+        const tag = scene.add.text(x, tileY * TILE - 26, `Claude · ${TASKS[index % TASKS.length]}`, {
             fontFamily: font,
             fontSize: "12px",
             fontStyle: "600",

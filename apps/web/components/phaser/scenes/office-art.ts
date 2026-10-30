@@ -31,9 +31,7 @@ type Wood = { hi: number; top: number; grain: number; edge: number; dark: number
 const OAK: Wood = { hi: 0xf8e3bb, top: 0xedcb97, grain: 0xdfb781, edge: 0xc9965e, dark: 0xa77744, leg: 0x7a5530, line: 0x4f3420 };
 const WALNUT: Wood = { hi: 0xdcab80, top: 0xc99266, grain: 0xb77f54, edge: 0x9a663f, dark: 0x7d4f2f, leg: 0x3f434e, line: 0x2e1d12 };
 const CAFE_WOOD: Wood = { hi: 0xdba878, top: 0xc8936a, grain: 0xb88158, edge: 0xa06c46, dark: 0x83553a, leg: 0x5a3b26, line: 0x3a2416 };
-const PINE: Wood = { hi: 0xfcecc9, top: 0xf1d8a6, grain: 0xe3c38d, edge: 0xd3ab71, dark: 0xb08550, leg: 0x9a7244, line: 0x6a4a2a };
 const METAL = { hi: 0xd3d8df, base: 0x9aa2af, dark: 0x646b78, line: 0x3e434d };
-const FOOT = 0x3d2b1f;
 const LEAF = { back: 0x3f8a4a, front: 0x5aab55, light: 0x7cc56a, edge: 0x2b5a31 };
 
 const leafy = new Set([LEAF.back, LEAF.front, LEAF.light]);
@@ -46,66 +44,112 @@ function seeded(seed: number) {
   };
 }
 
-function pillow(s: PixelSprite, color: number, x: number, y: number) {
-  s.box(darken(color, 0.72), x, y, 7, 7, 2);
-  s.box(color, x + 1, y + 1, 5, 5, 1);
-  s.rect(darken(color, 0.88), x + 1, y + 5, 5, 1);
+// A colour part way from `a` to `b`.
+function mix(a: number, b: number, t: number) {
+  const ch = (shift: number) => Math.round(((a >> shift) & 255) * (1 - t) + ((b >> shift) & 255) * t);
+  return (ch(16) << 16) | (ch(8) << 8) | ch(0);
 }
 
-// Leather buttons: a dark dimple with the leather pulled in on either side.
+const LEG = { hi: 0x8a6440, base: 0x6b4a2f, dark: 0x4a3220 };
+
+// A throw pillow leaning on the back cushions: plump in the middle, pinched at the corners, with
+// a seam across and the light on its upper left.
+function pillow(s: PixelSprite, color: number, x: number, y: number) {
+  const edge = darken(color, 0.7);
+  s.box(edge, x, y, 8, 7, 2);
+  s.box(color, x + 1, y + 1, 6, 5, 1);
+  s.rect(mix(color, 0xffffff, 0.35), x + 2, y + 1, 3, 1);
+  s.set(mix(color, 0xffffff, 0.35), x + 1, y + 2);
+  s.rect(darken(color, 0.86), x + 2, y + 5, 5, 1);
+  s.set(darken(color, 0.8), x + 4, y + 3);
+  for (const [cx, cy] of [[x, y], [x + 7, y], [x, y + 6], [x + 7, y + 6]] as const) s.set(edge, cx, cy);
+}
+
+// Button tufting on leather: a row of dimples (rows offset make a diamond grid), each with a
+// sheen on the puff above it and a shadow below.
 function tufts(s: PixelSprite, u: Upholstery, x0: number, w: number, y: number, offset: number) {
   for (let x = x0 + 2 + offset; x < x0 + w - 2; x += 4) {
     s.set(u.deep, x, y);
-    s.set(u.shade, x - 1, y);
-    s.set(u.shade, x + 1, y);
-    s.set(u.hi, x, y - 1);
+    s.set(u.shade, x, y + 1);
+    s.set(mix(u.hi, 0xffffff, 0.3), x, y - 1);
   }
 }
 
-// A seat seen from the front, people on it facing down the screen: back cushions over a
-// backrest, lit seat cushions, and rolled arms that run down to the floor.
+// Tapered wooden feet, one under each end (and the middle of a long sofa).
+function feet(s: PixelSprite, xs: number[], y: number) {
+  for (const x of xs) {
+    s.rect(LEG.base, x, y, 2, 2);
+    s.set(LEG.hi, x, y);
+    s.set(LEG.dark, x + 1, y + 1);
+  }
+}
+
+// A seat seen from the front, people on it facing down the screen: a padded backrest with its
+// own cushions, deep seat cushions with soft rounded fronts, rolled arms, a skirt and wooden feet.
 function couchFront(u: Upholstery, opts: { w: number; seats: number; arm: number; tufted: boolean; pillows?: [number, number] }) {
   const { w: W, seats, arm, tufted, pillows } = opts;
   const s = new PixelSprite(W, 26);
   const L = 1, R = W - 2;
   const seatL = L + arm, span = R - arm - seatL + 1;
   const edges = Array.from({ length: seats + 1 }, (_, i) => seatL + Math.round((span * i) / seats));
+  const mid = mix(u.hi, u.base, 0.5);
+  const glow = mix(u.hi, 0xffffff, tufted ? 0.25 : 0.15);
 
-  s.box(u.shade, L + 2, 1, W - 6, 14, 3);
+  // The backrest frame behind the cushions, its top rounded and lit.
+  s.box(u.base, L + 1, 1, W - 4, 13, 4);
+  s.rect(u.hi, L + 4, 1, W - 10, 1);
+  s.rect(mid, L + 3, 2, W - 8, 1);
+  s.shade(u.shade, L + 1, 11, W - 4, 3);
+
+  // Back cushions, one a seat, plump and lit from the top left.
   for (let i = 0; i < seats; i++) {
     const x0 = edges[i]!, w = edges[i + 1]! - x0;
-    s.box(u.base, x0, 2, w, 11, 2);
-    s.rect(u.hi, x0 + 1, 3, w - 2, 2);
-    s.rect(u.shade, x0 + 1, 11, w - 2, 1);
+    s.box(mid, x0, 3, w - 1, 9, 2);
+    s.rect(u.hi, x0 + 1, 4, w - 4, 1);
+    s.rect(glow, x0 + 2, 4, Math.max(1, Math.floor(w / 3)), 1);
+    s.rect(u.base, x0 + 1, 9, w - 3, 1);
+    s.rect(u.shade, x0 + 1, 10, w - 3, 1);
     if (tufted) {
-      tufts(s, u, x0, w, 6, 0);
-      tufts(s, u, x0, w, 9, 2);
-    }
-    s.box(u.hi, x0, 13, w, 4, 1);
-    s.rect(u.base, x0, 17, w, 2);
-    s.rect(u.shade, x0, 19, w, 1);
-    if (tufted) tufts(s, u, x0, w, 15, 1);
-    if (i > 0) {
-      s.rect(u.deep, x0, 3, 1, 9);
-      s.rect(u.deep, x0, 13, 1, 7);
-    }
+      tufts(s, u, x0, w - 1, 6, 0);
+      tufts(s, u, x0, w - 1, 9, 2);
+    } else s.set(u.base, x0 + Math.floor(w / 2), 7);
   }
-  s.rect(u.shade, seatL, 20, span, 2);
-  s.rect(u.deep, seatL, 22, span, 1);
+  // Where the back meets the seat, a deep shadow.
+  s.rect(u.deep, seatL, 12, span, 1);
+
+  // Seat cushions: a lit top, a softly rounded front edge, the front face below, and a seam
+  // between cushions, over the shadowed deck so their rounded corners show no gaps.
+  s.rect(u.shade, seatL, 13, span, 8);
+  for (let i = 0; i < seats; i++) {
+    const x0 = edges[i]!, w = edges[i + 1]! - x0;
+    s.box(u.hi, x0, 13, w - 1, 5, 2);
+    s.rect(glow, x0 + 1, 13, w - 3, 1);
+    s.rect(mid, x0 + 2, 15, w - 5, 1);
+    s.box(u.base, x0, 17, w - 1, 3, 1);
+    s.rect(mix(u.base, u.hi, 0.35), x0 + 1, 17, w - 3, 1);
+    s.rect(u.shade, x0 + 1, 19, w - 3, 1);
+    if (i > 0) s.rect(u.deep, x0 - 1, 13, 1, 7);
+  }
   if (pillows && !tufted) {
     pillow(s, pillows[0], seatL + 1, 6);
-    if (seats > 1) pillow(s, pillows[1], seatL + span - 8, 6);
+    if (seats > 1) pillow(s, pillows[1], seatL + span - 9, 6);
   }
-  for (const x of [L, R - arm + 1]) {
-    s.box(u.base, x, 7, arm, 16, 2);
-    s.rect(u.hi, x + 1, 8, arm - 2, 3);
-    s.rect(u.shade, x + 1, 11, arm - 2, 1);
-    s.shade(u.shade, x, 19, arm, 4);
+
+  // Rolled arms: a round, lit top with the scroll at its front, the inner side in shadow.
+  for (const [x, inner] of [[L, L + arm - 1], [R - arm + 1, R - arm + 1]] as const) {
+    s.box(u.base, x, 7, arm, 15, 2);
+    s.box(u.hi, x, 6, arm, 4, 2);
+    s.rect(glow, x + 1, 6, arm - 3, 1);
+    s.rect(mid, x + 1, 9, arm - 2, 1);
+    s.ellipse(mid, x + arm / 2, 11, arm / 2 - 1.2, 1.2);
+    s.rect(u.shade, inner, 10, 1, 11);
+    s.shade(u.shade, x, 18, arm, 3);
   }
-  s.rect(u.deep, L + arm - 1, 11, 1, 11);
-  s.rect(u.deep, R - arm + 1, 11, 1, 11);
-  s.rect(FOOT, L + 1, 23, 2, 1);
-  s.rect(FOOT, R - 2, 23, 2, 1);
+
+  // The skirt, a shadow under it, and the feet.
+  s.rect(u.shade, L + 1, 20, W - 4, 1);
+  s.rect(u.deep, L + 1, 21, W - 4, 1);
+  feet(s, W > 30 ? [L + 1, Math.floor(W / 2) - 1, R - 2] : [L + 1, R - 2], 22);
   s.outline(u.line);
   return s;
 }
@@ -114,59 +158,73 @@ function couchFront(u: Upholstery, opts: { w: number; seats: number; arm: number
 // drawn in front of them. clario-hq-builder.ts places the two halves.
 const COUCH_BACK_SPLIT = 8;
 
-// The same seat seen from behind, people on it facing up the screen.
+// The same seat seen from behind, people on it facing up the screen: the seat cushions and the
+// arms' tops beyond the backrest, then the back of the backrest, upholstered and buttoned.
 function couchBack(u: Upholstery, opts: { w: number; seats: number; arm: number; tufted: boolean }) {
   const { w: W, seats, arm, tufted } = opts;
   const s = new PixelSprite(W, 24);
   const L = 1, R = W - 2;
   const seatL = L + arm, span = R - arm - seatL + 1;
   const edges = Array.from({ length: seats + 1 }, (_, i) => seatL + Math.round((span * i) / seats));
+  const mid = mix(u.hi, u.base, 0.5);
+  const glow = mix(u.hi, 0xffffff, tufted ? 0.25 : 0.15);
 
   s.rect(u.shade, seatL, 2, span, 7);
   for (let i = 0; i < seats; i++) {
     const x0 = edges[i]!, w = edges[i + 1]! - x0;
-    s.box(u.hi, x0, 3, w, 5, 1);
-    s.rect(u.base, x0 + 1, 6, w - 2, 2);
-    if (i > 0) s.rect(u.deep, x0, 3, 1, 5);
+    s.box(u.hi, x0, 3, w - 1, 5, 2);
+    s.rect(glow, x0 + 1, 3, w - 3, 1);
+    s.rect(mid, x0 + 1, 6, w - 3, 1);
+    if (i > 0) s.rect(u.deep, x0 - 1, 3, 1, 5);
   }
   for (const x of [L, R - arm + 1]) {
-    s.box(u.base, x, 2, arm, 10, 1);
-    s.rect(u.hi, x + 1, 2, arm - 2, 3);
+    s.box(u.base, x, 1, arm, 10, 2);
+    s.box(u.hi, x, 1, arm, 3, 1);
+    s.rect(glow, x + 1, 1, arm - 3, 1);
   }
+
   const B = COUCH_BACK_SPLIT;
-  s.box(u.base, L, B, W - 2, 13, 2);
-  s.shade(u.hi, L, B, W - 2, 3);
+  // The back of the backrest: a rounded, lit top roll, then the panel, darker toward the floor.
+  s.box(u.base, L, B, W - 2, 13, 3);
+  s.shade(u.hi, L, B, W - 2, 2);
+  s.shade(glow, L + 3, B, W - 8, 1);
+  s.shade(mid, L, B + 2, W - 2, 1);
   s.shade(u.shade, L, B + 3, W - 2, 1);
-  s.shade(u.shade, L, B + 4, arm, 7);
-  s.shade(u.shade, R - arm + 1, B + 4, arm, 7);
-  for (const x of edges.slice(1, -1)) s.shade(u.shade, x, B + 5, 1, 5);
-  if (tufted) for (let i = 0; i < seats; i++) tufts(s, u, edges[i]!, edges[i + 1]! - edges[i]!, B + 7, 1);
+  s.shade(mix(u.base, u.shade, 0.5), L, B + 8, W - 2, 2);
   s.shade(u.shade, L, B + 10, W - 2, 2);
   s.shade(u.deep, L, B + 12, W - 2, 1);
-  s.rect(FOOT, L + 1, 21, 2, 1);
-  s.rect(FOOT, R - 2, 21, 2, 1);
+  for (const x of [L + arm - 1, R - arm + 1]) s.shade(u.shade, x, B + 4, 1, 7);
+  if (tufted) for (let i = 0; i < seats; i++) tufts(s, u, edges[i]!, edges[i + 1]! - edges[i]!, B + 6, 1);
+  feet(s, W > 30 ? [L + 1, Math.floor(W / 2) - 1, R - 2] : [L + 1, R - 2], B + 13);
   s.outline(u.line);
   return s;
 }
 
-// An armchair seen from its left side, facing left: the backrest on the right, the far arm
-// behind the seat and the near arm in front of it. Mirrored, it faces right.
+// An armchair seen from its left side, facing left: the backrest on the right, the seat cushion
+// in the middle, and the near arm (rolled at its front) along the bottom. Mirrored, it faces right.
 function armchairSide(u: Upholstery, tufted: boolean) {
   const s = new PixelSprite(18, 24);
-  s.box(u.shade, 2, 4, 11, 6, 2);
-  s.rect(u.base, 3, 4, 9, 2);
-  s.box(u.hi, 2, 9, 11, 5, 1);
-  s.rect(u.base, 2, 12, 10, 2);
+  const mid = mix(u.hi, u.base, 0.5);
+  const glow = mix(u.hi, 0xffffff, tufted ? 0.25 : 0.15);
+  // The backrest, seen edge on: its front lit, its back in shadow, the top rounded.
   s.box(u.base, 11, 1, 6, 19, 2);
-  s.rect(u.hi, 12, 1, 4, 2);
-  s.rect(u.hi, 11, 3, 1, 14);
+  s.rect(u.hi, 12, 1, 3, 1);
+  s.rect(mid, 11, 3, 1, 14);
   s.rect(u.shade, 15, 3, 1, 15);
-  if (tufted) for (const y of [6, 10, 14]) { s.set(u.deep, 13, y); s.set(u.hi, 13, y - 1); }
-  s.box(u.base, 1, 13, 14, 7, 2);
-  s.rect(u.hi, 2, 13, 12, 2);
-  s.rect(u.shade, 2, 18, 12, 1);
-  s.rect(FOOT, 2, 20, 2, 2);
-  s.rect(FOOT, 13, 20, 2, 2);
+  if (tufted) for (const y of [5, 9, 13]) { s.set(u.deep, 13, y); s.set(glow, 13, y - 1); s.set(u.shade, 12, y + 1); }
+  // The seat cushion, its top lit and its front edge rounded.
+  s.box(u.hi, 2, 9, 11, 5, 2);
+  s.rect(glow, 3, 9, 7, 1);
+  s.rect(mid, 3, 12, 9, 1);
+  // The near arm: a round, lit top with its scroll at the front, the side panel below.
+  s.box(u.base, 1, 13, 15, 7, 2);
+  s.box(u.hi, 1, 12, 15, 3, 1);
+  s.rect(glow, 3, 12, 10, 1);
+  s.ellipse(mid, 3, 15.5, 1.6, 1.6);
+  s.set(u.shade, 3, 15);
+  s.rect(u.shade, 2, 18, 13, 1);
+  s.rect(u.deep, 2, 19, 13, 1);
+  feet(s, [2, 13], 20);
   s.outline(u.line);
   return s;
 }
@@ -184,87 +242,7 @@ function beanbag(u: Upholstery) {
   return s;
 }
 
-// Meeting chair: a padded shell on four metal legs.
-function meetChair(u: Upholstery, view: "down" | "up" | "side") {
-  const s = new PixelSprite(16, 21);
-  const legs = (top: number) => {
-    s.rect(METAL.dark, 3, top, 1, 6);
-    s.rect(METAL.dark, 12, top, 1, 6);
-    s.rect(METAL.base, 5, top, 1, 4);
-    s.rect(METAL.base, 10, top, 1, 4);
-  };
-  if (view === "down") {
-    s.box(u.base, 3, 1, 10, 9, 2);
-    s.rect(u.hi, 4, 2, 8, 2);
-    s.rect(u.shade, 4, 8, 8, 1);
-    s.box(u.hi, 2, 9, 12, 4, 1);
-    s.rect(u.base, 2, 13, 12, 1);
-    s.rect(u.shade, 2, 14, 12, 1);
-    legs(15);
-  } else if (view === "up") {
-    s.box(u.shade, 2, 7, 12, 5, 1);
-    s.box(u.base, 3, 1, 10, 12, 2);
-    s.rect(u.hi, 4, 1, 8, 2);
-    s.box(u.shade, 5, 4, 6, 6, 1);
-    s.rect(u.deep, 3, 12, 10, 1);
-    legs(13);
-  } else {
-    s.box(u.hi, 2, 9, 11, 4, 1);
-    s.rect(u.base, 2, 12, 11, 1);
-    s.rect(u.shade, 2, 13, 11, 1);
-    s.box(u.base, 10, 1, 4, 13, 1);
-    s.rect(u.hi, 10, 1, 4, 2);
-    s.rect(u.shade, 13, 3, 1, 9);
-    s.rect(METAL.dark, 3, 14, 1, 6);
-    s.rect(METAL.dark, 12, 14, 1, 6);
-    s.rect(METAL.base, 4, 14, 1, 4);
-    s.rect(METAL.base, 11, 14, 1, 4);
-  }
-  s.outline(u.line);
-  return s;
-}
-
-// Wooden cafe chair with a spindle back.
-function cafeChair(view: "down" | "up" | "side") {
-  const w = PINE;
-  const s = new PixelSprite(14, 21);
-  if (view === "down") {
-    s.box(w.edge, 2, 0, 10, 10, 1);
-    s.rect(w.hi, 3, 1, 8, 2);
-    for (const x of [4, 6, 8]) s.rect(w.top, x, 3, 1, 6);
-    s.rect(w.dark, 3, 3, 1, 6);
-    s.rect(w.dark, 10, 3, 1, 6);
-    s.box(w.top, 1, 9, 12, 4, 1);
-    s.rect(w.hi, 2, 9, 10, 1);
-    s.rect(w.edge, 1, 13, 12, 2);
-    s.rect(w.leg, 2, 15, 2, 5);
-    s.rect(w.leg, 10, 15, 2, 5);
-    s.rect(w.dark, 5, 15, 1, 3);
-    s.rect(w.dark, 8, 15, 1, 3);
-  } else if (view === "up") {
-    s.rect(w.top, 1, 8, 12, 3);
-    s.box(w.edge, 2, 0, 10, 13, 1);
-    s.rect(w.hi, 3, 1, 8, 2);
-    for (const x of [4, 6, 8]) s.rect(w.top, x, 3, 1, 8);
-    s.rect(w.dark, 3, 3, 1, 9);
-    s.rect(w.dark, 10, 3, 1, 9);
-    s.rect(w.leg, 2, 13, 2, 7);
-    s.rect(w.leg, 10, 13, 2, 7);
-  } else {
-    s.box(w.top, 1, 9, 11, 3, 1);
-    s.rect(w.hi, 1, 9, 10, 1);
-    s.rect(w.edge, 1, 12, 11, 2);
-    s.box(w.edge, 9, 0, 3, 13, 1);
-    s.rect(w.hi, 9, 0, 3, 1);
-    s.rect(w.top, 9, 2, 1, 8);
-    s.rect(w.leg, 2, 14, 1, 6);
-    s.rect(w.leg, 10, 14, 1, 6);
-    s.rect(w.dark, 3, 14, 1, 4);
-    s.rect(w.dark, 9, 14, 1, 4);
-  }
-  s.outline(w.line);
-  return s;
-}
+// Chairs are drawn in chair-art.ts.
 
 // Wood grain: short darker streaks across a top, seeded so it never changes.
 function grain(s: PixelSprite, wood: Wood, x0: number, y0: number, w: number, h: number, seed: number) {
@@ -561,52 +539,86 @@ function flipChart() {
   return s;
 }
 
-// Metal filing cabinet with three drawers, blue or grey.
+// Metal filing cabinet with three drawers, blue or grey: a lit top, recessed handles and label
+// slots, a shaded side and a dark plinth.
 function filingCabinet(grey: boolean) {
   const c = grey
-    ? { hi: 0xe4e8ee, top: 0xccd2db, face: 0xb3bac6, dark: 0x8b93a2, line: 0x4f5664 }
-    : { hi: 0x8dbaf3, top: 0x629be6, face: 0x4a80d2, dark: 0x3463ad, line: 0x1d3a70 };
+    ? { hi: 0xeef1f5, top: 0xd5dae2, face: 0xbfc5cf, side: 0x9ea5b1, dark: 0x868d9a, line: 0x4f5664 }
+    : { hi: 0x9cc4f5, top: 0x6fa3e8, face: 0x4d84d4, side: 0x3a6bb8, dark: 0x2f5aa0, line: 0x1d3a70 };
   const s = new PixelSprite(16, 28);
-  s.box(c.face, 1, 2, 14, 23, 1);
-  s.rect(c.top, 1, 2, 14, 3);
-  s.rect(c.hi, 2, 2, 12, 1);
-  s.rect(c.dark, 13, 5, 2, 20);
-  for (const y of [5, 12, 19]) {
-    s.rect(c.dark, 2, y, 11, 1);
-    s.rect(0xf3f5f8, 5, y + 2, 5, 2);
-    s.rect(0xd9dee6, 5, y + 3, 5, 1);
-    s.rect(c.hi, 6, y + 5, 3, 1);
+  s.box(c.face, 1, 3, 14, 22, 1);
+  s.rect(c.side, 12, 4, 3, 21);
+  s.box(c.top, 1, 1, 14, 4, 1);
+  s.rect(c.hi, 2, 1, 12, 1);
+  for (const y of [6, 12, 18]) {
+    s.rect(c.dark, 2, y + 5, 10, 1);
+    s.rect(0xf3f5f8, 4, y + 1, 5, 2);
+    s.rect(0xd9dee6, 4, y + 2, 5, 1);
+    s.rect(0x2f333c, 5, y + 3, 3, 1);
+    s.rect(METAL.hi, 5, y + 4, 3, 1);
+    s.rect(c.hi, 2, y, 1, 4);
   }
-  s.rect(0x2f333c, 2, 25, 2, 1);
-  s.rect(0x2f333c, 12, 25, 2, 1);
+  s.rect(0x2f333c, 2, 25, 12, 1);
   s.outline(c.line);
   return s;
 }
 
-// White cubicle desk: a drawer pedestal on the right, an open laptop and a notepad. Variant 0
-// suits a chair below it (the screen faces you), variant 1 a chair above it (the lid faces you).
+// White cubicle desk: a deep top with a lit front edge, a modesty panel, a drawer pedestal on the
+// right and a monitor. Variant 0 suits a chair below it (the screen faces you), variant 1 a chair
+// above it (you see the back of the monitor).
 function whiteDesk(variant: number) {
+  const d = { top: 0xf7f8fb, hi: 0xffffff, edge: 0xdde2ea, lip: 0xc3cad5, side: 0xe6e9ef, sideShade: 0xcdd3dc, panel: 0xb7bfcb, panelDark: 0x9aa3b0 };
   const s = new PixelSprite(32, 30);
-  s.rect(0x8a919e, 2, 20, 2, 8);
-  s.rect(0x6c7282, 3, 20, 1, 8);
-  s.box(0xdfe3ea, 21, 18, 9, 10, 1);
-  s.rect(0xc8ced8, 21, 22, 9, 1);
-  s.rect(0xc8ced8, 21, 25, 9, 1);
-  s.rect(0x8a919e, 24, 20, 3, 1);
-  s.rect(0x8a919e, 24, 23, 3, 1);
-  s.box(0x9aa2af, 0, 9, 32, 11, 1);
-  s.box(0xf6f7fa, 0, 9, 32, 8, 1);
-  s.rect(0xffffff, 1, 10, 30, 1);
-  s.rect(0x6f7686, 1, 18, 30, 1);
+  s.rect(d.side, 1, 18, 3, 10);
+  s.rect(d.sideShade, 3, 18, 1, 10);
+  s.rect(d.panel, 4, 18, 16, 6);
+  s.rect(d.panelDark, 4, 23, 16, 1);
+  s.rect(d.side, 20, 18, 11, 10);
+  s.rect(d.sideShade, 29, 18, 2, 10);
+  for (const y of [19, 22, 25]) {
+    s.rect(d.lip, 21, y + 2, 8, 1);
+    s.rect(METAL.base, 23, y, 4, 1);
+    s.set(METAL.hi, 23, y);
+  }
+  s.rect(d.panelDark, 20, 27, 11, 1);
+  s.box(d.edge, 0, 8, 32, 11, 1);
+  s.rect(d.top, 1, 8, 30, 8);
+  s.rect(d.hi, 1, 8, 30, 1);
+  s.rect(d.edge, 1, 15, 30, 1);
+  s.rect(d.lip, 1, 17, 30, 1);
+  s.rect(d.panelDark, 1, 18, 30, 1);
   if (variant === 1) {
-    s.rect(0xb9c0cb, 5, 5, 11, 2);
-    s.rect(0xc5cbd5, 6, 6, 9, 7);
-    s.rect(0xdde2e9, 6, 6, 9, 1);
-    s.rect(0xf3f5f8, 10, 9, 1, 2);
-  } else laptop(s, 10, 6);
-  s.rect(0xfdf6c9, 19, 12, 5, 4);
-  s.rect(0xe8d98a, 20, 13, 3, 1);
-  mug(s, 26, 11, 0x3a6ee8);
+    // The back of a monitor on its stand, a desk lamp and a notepad.
+    s.rect(METAL.dark, 9, 9, 2, 3);
+    s.rect(METAL.base, 7, 11, 6, 1);
+    s.box(0x3d424d, 3, 1, 14, 9, 1);
+    s.rect(0x4d5260, 4, 1, 12, 1);
+    for (const x of [6, 8, 10, 12, 14]) s.rect(0x343844, x, 3, 1, 3);
+    s.rect(0x2c3039, 3, 9, 14, 1);
+    s.rect(0xfdf6c9, 19, 11, 5, 3);
+    s.rect(0xe8d98a, 20, 12, 3, 1);
+    s.rect(0x2f333c, 26, 12, 3, 1);
+    s.rect(0x2f333c, 27, 6, 1, 6);
+    s.rect(0x3a6ee8, 26, 4, 4, 2);
+    s.rect(0x6f98f0, 26, 4, 4, 1);
+  } else {
+    // A monitor facing you, a keyboard, a mouse and a mug.
+    s.rect(METAL.dark, 9, 9, 2, 2);
+    s.rect(METAL.base, 7, 10, 6, 1);
+    s.box(0x2a2e38, 3, 0, 14, 10, 1);
+    s.rect(0x3f7fae, 4, 1, 12, 7);
+    s.rect(0x6fb5e0, 4, 1, 12, 5);
+    s.rect(0xbce4f6, 4, 1, 12, 1);
+    s.rect(0xe4f3fa, 5, 3, 5, 1);
+    s.rect(0xe4f3fa, 5, 5, 7, 1);
+    s.rect(0x3a6ee8, 12, 3, 3, 2);
+    s.rect(0xc9cfd8, 4, 12, 12, 3);
+    s.rect(0xe6e9ef, 4, 12, 12, 1);
+    for (let x = 5; x < 15; x += 2) s.set(0xaab2be, x, 13);
+    s.rect(0x4d5260, 18, 12, 2, 3);
+    s.set(0x8a919e, 18, 12);
+    mug(s, 24, 10, 0x3a6ee8);
+  }
   s.outline(0x4f5664);
   return s;
 }
@@ -648,6 +660,9 @@ function pieces(): Bake[] {
     const sofa = { w: 48, seats: 3, arm: 6, tufted };
     out.push({ key: `hq-sofa-${fabric}-down`, sprite: couchFront(u, { ...sofa, pillows: PILLOWS[fabric] }) });
     backView(`hq-sofa-${fabric}-up`, couchBack(u, sofa));
+    const loveseat = { w: 34, seats: 2, arm: 5, tufted };
+    out.push({ key: `hq-loveseat-${fabric}-down`, sprite: couchFront(u, { ...loveseat, pillows: PILLOWS[fabric] }) });
+    backView(`hq-loveseat-${fabric}-up`, couchBack(u, loveseat));
     const chair = { w: 20, seats: 1, arm: 5, tufted };
     out.push({ key: `hq-armchair-${fabric}-down`, sprite: couchFront(u, chair) });
     backView(`hq-armchair-${fabric}-up`, couchBack(u, chair));
@@ -655,17 +670,7 @@ function pieces(): Bake[] {
     out.push({ key: `hq-armchair-${fabric}-left`, sprite: side });
     out.push({ key: `hq-armchair-${fabric}-right`, sprite: side, mirror: true });
     out.push({ key: `hq-beanbag-${fabric}`, sprite: beanbag(u) });
-    out.push({ key: `hq-meet-chair-${fabric}-down`, sprite: meetChair(u, "down") });
-    out.push({ key: `hq-meet-chair-${fabric}-up`, sprite: meetChair(u, "up") });
-    const meetSide = meetChair(u, "side");
-    out.push({ key: `hq-meet-chair-${fabric}-left`, sprite: meetSide });
-    out.push({ key: `hq-meet-chair-${fabric}-right`, sprite: meetSide, mirror: true });
   }
-  out.push({ key: "hq-cafe-chair-down", sprite: cafeChair("down") });
-  out.push({ key: "hq-cafe-chair-up", sprite: cafeChair("up") });
-  const cafeSide = cafeChair("side");
-  out.push({ key: "hq-cafe-chair-left", sprite: cafeSide });
-  out.push({ key: "hq-cafe-chair-right", sprite: cafeSide, mirror: true });
 
   out.push({ key: "hq-meeting-table", sprite: meetingTable(6) });
   out.push({ key: "hq-meeting-table-sm", sprite: meetingTable(4) });

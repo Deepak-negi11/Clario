@@ -1,7 +1,6 @@
 import type Phaser from "phaser";
-import { BIKES, DRINKS, FABRICS, type Bike, type Dir, type Drink } from "@repo/shared";
-import { PixelSprite, darken, type Upholstery } from "./lounge-art";
-import { UPHOLSTERY } from "./office-art";
+import { BIKES, DRINKS, type Bike, type Drink } from "@repo/shared";
+import { PixelSprite, darken } from "./lounge-art";
 
 // Furniture for the auditorium, the study and the conference room, and the corridor pieces
 // around them, drawn pixel by pixel in the same style as office-art.ts: one art pixel is 2x2
@@ -9,7 +8,6 @@ import { UPHOLSTERY } from "./office-art";
 // Texture keys are what clario-hq-builder.ts places (`hq-<kind>...`).
 
 const METAL = { hi: 0xd3d8df, base: 0x9aa2af, dark: 0x646b78, line: 0x3e434d };
-const CASTOR = 0x2f333c;
 const OAK = { hi: 0xf3d9a8, top: 0xe2b97c, edge: 0xc4955a, dark: 0x9b6e3c, line: 0x5a3c1f };
 const CHARCOAL = { hi: 0x5d6270, top: 0x454a57, edge: 0x373b47, dark: 0x2c2f39, line: 0x17191f };
 const BRASS = 0xc9a24a;
@@ -26,83 +24,7 @@ function ring(s: PixelSprite, color: number, cx: number, cy: number, r: number, 
   }
 }
 
-// The chrome lift and five-star base under an office chair, with castors.
-function chairBase(s: PixelSprite, top: number) {
-  s.rect(METAL.base, 7, top, 2, 3);
-  s.rect(METAL.hi, 7, top, 1, 3);
-  s.rect(METAL.dark, 2, top + 3, 12, 1);
-  s.rect(METAL.base, 4, top + 2, 8, 1);
-  for (const x of [1, 7, 13]) s.rect(CASTOR, x, top + 4, 2, 2);
-}
-
-// High-backed leather office chair for the conference table, seen from each side of it.
-function execChair(u: Upholstery, view: "down" | "up" | "side") {
-  const s = new PixelSprite(16, 24);
-  if (view === "down") {
-    s.box(u.base, 2, 0, 12, 13, 3);
-    s.rect(u.hi, 4, 1, 8, 1);
-    for (const [x, y] of [[5, 4], [8, 4], [11, 4], [6, 7], [10, 7], [5, 10], [8, 10], [11, 10]] as const) s.set(u.deep, x, y);
-    s.rect(u.shade, 2, 11, 12, 1);
-    s.box(u.shade, 0, 10, 3, 7, 1);
-    s.box(u.shade, 13, 10, 3, 7, 1);
-    s.rect(u.hi, 0, 10, 3, 1);
-    s.rect(u.hi, 13, 10, 3, 1);
-    s.box(u.hi, 3, 12, 10, 5, 1);
-    s.rect(u.base, 3, 15, 10, 1);
-    s.rect(u.shade, 4, 16, 8, 1);
-    chairBase(s, 17);
-  } else if (view === "up") {
-    // As tall as a meeting chair's back, so the head of whoever sits in it still shows.
-    s.box(u.shade, 0, 10, 3, 5, 1);
-    s.box(u.shade, 13, 10, 3, 5, 1);
-    s.box(u.base, 2, 3, 12, 12, 3);
-    s.rect(u.hi, 4, 3, 8, 1);
-    s.box(u.shade, 4, 6, 8, 7, 2);
-    s.rect(u.deep, 4, 14, 8, 1);
-    chairBase(s, 15);
-  } else {
-    // Facing left; the right-facing copy is mirrored.
-    s.box(u.base, 10, 0, 5, 15, 2);
-    s.rect(u.hi, 10, 0, 5, 1);
-    s.rect(u.shade, 14, 2, 1, 12);
-    s.box(u.hi, 2, 11, 11, 4, 1);
-    s.rect(u.base, 2, 14, 11, 1);
-    s.rect(u.shade, 3, 9, 8, 2);
-    s.rect(u.hi, 3, 9, 8, 1);
-    s.rect(u.deep, 4, 11, 1, 1);
-    chairBase(s, 15);
-  }
-  s.outline(u.line);
-  return s;
-}
-
-// Lecture-hall seat: an oak seat and slatted back in a grey steel frame.
-function theatreSeat(view: "down" | "up") {
-  const s = new PixelSprite(16, 18);
-  if (view === "up") {
-    s.box(METAL.base, 1, 1, 14, 12, 1);
-    s.rect(METAL.hi, 2, 1, 12, 1);
-    s.rect(OAK.top, 3, 3, 10, 8);
-    s.rect(OAK.hi, 3, 3, 10, 1);
-    for (const x of [5, 8, 11]) s.rect(OAK.edge, x, 4, 1, 7);
-    s.rect(OAK.dark, 3, 10, 10, 1);
-    s.rect(METAL.dark, 1, 12, 14, 1);
-  } else {
-    s.box(OAK.top, 3, 1, 10, 8, 1);
-    s.rect(OAK.hi, 4, 1, 8, 1);
-    for (const x of [5, 8, 11]) s.rect(OAK.edge, x, 2, 1, 6);
-    s.rect(METAL.base, 1, 4, 2, 10);
-    s.rect(METAL.base, 13, 4, 2, 10);
-    s.rect(METAL.hi, 1, 4, 2, 1);
-    s.rect(METAL.hi, 13, 4, 2, 1);
-    s.rect(OAK.hi, 3, 9, 10, 3);
-    s.rect(OAK.edge, 3, 12, 10, 1);
-  }
-  s.rect(METAL.dark, 2, 13, 2, 4);
-  s.rect(METAL.dark, 12, 13, 2, 4);
-  s.outline(METAL.line);
-  return s;
-}
+// The conference chair and the auditorium seat are drawn in chair-art.ts with the other chairs.
 
 // Tall two-door wardrobe in dark charcoal wood.
 function wardrobe() {
@@ -345,18 +267,7 @@ function trafficCone() {
   return s;
 }
 
-const SIDE_DIRS: Dir[] = ["left", "right"];
-
 export function makeReferenceTextures(scene: Phaser.Scene) {
-  for (const fabric of FABRICS) {
-    const u = UPHOLSTERY[fabric];
-    execChair(u, "down").bake(scene, `hq-exec-chair-${fabric}-down`);
-    execChair(u, "up").bake(scene, `hq-exec-chair-${fabric}-up`);
-    const side = execChair(u, "side");
-    for (const dir of SIDE_DIRS) side.bake(scene, `hq-exec-chair-${fabric}-${dir}`, { mirror: dir === "right" });
-  }
-  theatreSeat("down").bake(scene, "hq-theatre-seat-down");
-  theatreSeat("up").bake(scene, "hq-theatre-seat-up");
   wardrobe().bake(scene, "hq-wardrobe");
   globe().bake(scene, "hq-globe");
   coatRack().bake(scene, "hq-coat-rack");

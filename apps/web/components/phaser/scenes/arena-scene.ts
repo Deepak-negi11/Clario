@@ -1,6 +1,7 @@
 import Phaser from "phaser";
-import { customRoomAt, getChatRoomAtPosition, getMapTemplate, type ChatRoomZone, type CustomMap, type MapTemplateId } from "@repo/shared";
-import { HQ_FLOORS, HQ_MENTOR } from "../../../lib/maps/clario-hq";
+import { customRoomAt, getChatRoomAtPosition, getMapTemplate, isClarioHq, type ChatRoomZone, type CustomMap, type MapTemplateId } from "@repo/shared";
+import { HQ_FLOORS, HQ_ITEMS, HQ_MENTOR } from "../../../lib/maps/clario-hq";
+import { hqPlaySpots, playSpotsFor } from "../../../lib/maps/play-spots";
 import { CAMPUS_ITEMS, CLASSIC_OFFICE_ITEMS } from "../../../lib/maps/classic-campus";
 import { findPath } from "../../../lib/maps/path-finder";
 import type { MinimapFloor, SceneBridge } from "../scene-bridge";
@@ -20,10 +21,12 @@ import { addMentorNpc, preloadMentorNpc, type MentorNpc } from "./mentor-npc";
 import { addCoworkerNpcs } from "./coworker-npcs";
 import { addClaudeNpcs, type ClaudeNpcs } from "./claude-npcs";
 import { addPlaySpots, type PlaySpots } from "./play-spots";
-import { addPropsOnMap, RIDE_STEP_MS, type Holder, type PropsOnMap } from "./props-on-map";
+import { addPropsOnMap, rideableRack, RIDE_STEP_MS, type Holder, type PropsOnMap } from "./props-on-map";
 import { isTypingIn } from "./talk-npc";
 import type { TalkNpc } from "./talk-npc";
 import { addErrandMarker } from "./errand-marker";
+import { makeSeatingTextures, preloadSeatingArt } from "./seating-art";
+import { preloadOfficePropsArt } from "./office-props-art";
 
 // Chairs and tables drawn in code (see makeFurnitureTextures) instead of loaded from image files.
 // They keep the original keys and sizes, so every map layout stays exactly the same.
@@ -124,6 +127,8 @@ export class ArenaScene extends Phaser.Scene{
 
     preload(){
         preloadMentorNpc(this);
+        preloadSeatingArt(this);
+        preloadOfficePropsArt(this);
 
         this.load.spritesheet("adam","/assets/adam-run.png",{
             frameWidth:16,
@@ -216,6 +221,7 @@ export class ArenaScene extends Phaser.Scene{
         this.makeTextures();
         this.makeFurnitureTextures();
         makeLoungeTextures(this);
+        makeSeatingTextures(this);
         this.makeClaudePetTextures();
         if (!this.anims.exists("claude-pet-walk")) {
             this.anims.create({
@@ -235,7 +241,7 @@ export class ArenaScene extends Phaser.Scene{
 
 
         this.add.tileSprite(0, 0, worldWidth, worldHeight, "grass").setOrigin(0, 0).setDepth(-1010);
-        if (mapTemplate === "clario-hq") {
+        if (isClarioHq(mapTemplate)) {
             makeHqTextures(this);
             buildClarioHq(this, this.mapApi());
             this.minimapFloors = HQ_FLOORS.map(({ x, y, w, h, kind }) => ({ x, y, w, h, color: HQ_FLOOR_COLORS[kind] }));
@@ -635,33 +641,44 @@ export class ArenaScene extends Phaser.Scene{
 
         // Maya, the Practice Session mentor, waits in Focus Room 2 of Clario HQ, and the AI
         // coworkers at their spots around the office.
-        if (mapTemplate === "clario-hq") {
+        const hq = isClarioHq(mapTemplate);
+        if (hq) {
             const block = (x: number, y: number) => this.blocked.add(x + "," + y);
-            this.mentor = addMentorNpc(this, { tileX: HQ_MENTOR.x, tileY: HQ_MENTOR.y, font: this.labelFont, bridge, block });
-            this.coworkers = addCoworkerNpcs(this, { font: this.labelFont, bridge, block, texture: (look) => this.lookTexture(look) });
+            // Riding a bike, E gets you off first, so nobody's tag offers to talk.
+            const busy = () => !!this.props?.busy();
+            this.mentor = addMentorNpc(this, { tileX: HQ_MENTOR.x, tileY: HQ_MENTOR.y, font: this.labelFont, bridge, block, busy });
+            this.coworkers = addCoworkerNpcs(this, { font: this.labelFont, bridge, block, texture: (look) => this.lookTexture(look), busy });
             // Claude at work in every Open Desks cubicle.
             this.claudes = addClaudeNpcs(this, { font: this.labelFont, block });
+        }
+        // Games, TVs, bikes and drinks work on Clario HQ and on maps built in the map builder
+        // (buildCustom hands them the new items when the owner changes the map).
+        if (hq || mapTemplate === "custom-office") {
+            const items = hq ? HQ_ITEMS : rideableRack(this.customMap?.items ?? []);
             // The Game Room machines and tables, and the TVs.
             this.playSpots = addPlaySpots(this, {
+                spots: hq ? hqPlaySpots() : playSpotsFor(items),
                 font: this.labelFont,
                 bridge,
                 busy: () => !!this.props?.busy() || [this.mentor, ...this.coworkers].some((npc) => npc?.near()),
             });
             // The bikes in their rack and the vending machine's drinks.
-            this.props = addPropsOnMap(this, { font: this.labelFont, bridge, selfId: () => this.registry.get("selfId") as string | null });
+            this.props = addPropsOnMap(this, { items, font: this.labelFont, bridge, selfId: () => this.registry.get("selfId") as string | null });
 
             // E uses the one thing in reach, in this order: get off your bike, talk to whoever is
             // next to you, a game or TV, then the bike rack, the vending machine or a sip of your
-            // drink. Q throws a drink away. Neither works while you type in a panel.
+            // drink. Q throws a drink away. Neither works while you type in a panel, with Ctrl, Cmd
+            // or Alt held (browser shortcuts), or as the key repeats while held down.
+            const ignored = (event: KeyboardEvent) => event.repeat || event.ctrlKey || event.metaKey || event.altKey || isTypingIn(event.target);
             this.input.keyboard?.on("keydown-E", (event: KeyboardEvent) => {
-                if (isTypingIn(event.target)) return;
+                if (ignored(event)) return;
                 const npc = [this.mentor, ...this.coworkers].find((each) => each?.near());
                 const used = !!this.props?.getOff() || (npc ? (npc.talk(), true) : false) || !!this.playSpots?.use() || !!this.props?.use();
                 // Otherwise the "e" would land in the panel or overlay that just opened.
                 if (used) event.preventDefault();
             });
             this.input.keyboard?.on("keydown-Q", (event: KeyboardEvent) => {
-                if (!isTypingIn(event.target) && this.props?.drop()) event.preventDefault();
+                if (!ignored(event) && this.props?.drop()) event.preventDefault();
             });
         }
     }
@@ -1112,8 +1129,15 @@ export class ArenaScene extends Phaser.Scene{
         // Everyone's bike or drink, drawn over their sprites now that those are in place.
         if (this.props) {
             const selfId = this.registry.get("selfId") as string | null;
-            const people: Holder[] = Object.entries(this.otherSprites).map(([id, sprite]) => ({ id, sprite, facing: this.otherFacing[id] ?? "down" }));
-            if (selfId) people.push({ id: selfId, sprite: this.player, facing: this.facing });
+            // Someone sitting faces the way their chair does, not the way they last walked.
+            const seatDir = (x: number, y: number, moving: boolean, id: string | null) =>
+                moving || this.props?.riding(id) ? undefined : this.chairMap[x + "," + y];
+            const people: Holder[] = Object.entries(this.otherSprites).map(([id, sprite]) => {
+                const at = others[id];
+                const facing = (at && seatDir(at.x, at.y, this.tweens.isTweening(sprite), id)) ?? this.otherFacing[id] ?? "down";
+                return { id, sprite, facing };
+            });
+            if (selfId) people.push({ id: selfId, sprite: this.player, facing: seatDir(this.tileX, this.tileY, this.isMoving, selfId) ?? this.facing });
             this.props.update({ x: this.tileX, y: this.tileY }, people);
         }
     }
@@ -1197,6 +1221,7 @@ export class ArenaScene extends Phaser.Scene{
             cols: this.maxTileX + 1,
             rows: this.maxTileY + 1,
             isBlocked: (x, y) => this.blocked.has(x + "," + y),
+            isWall: (x, y) => this.wallCells.has(x + "," + y),
         });
     }
 
@@ -1639,6 +1664,9 @@ export class ArenaScene extends Phaser.Scene{
         buildCustomMap(this, map, this.mapApi());
         this.customObjects = this.children.list.filter((object) => !before.has(object));
         this.customMap = map;
+        const items = rideableRack(map.items);
+        this.playSpots?.setSpots(playSpotsFor(items));
+        this.props?.setItems(items);
         this.minimapFloors = customMinimapFloors(map);
         const bridge = this.bridge?.current;
         if (bridge?.map) bridge.map = { ...bridge.map, walls: [...this.wallCells], blocked: [...this.blocked], floors: this.minimapFloors };

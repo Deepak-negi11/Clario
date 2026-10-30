@@ -1,14 +1,17 @@
 import Phaser from "phaser";
 import {
   HQ_FLOORS, HQ_ITEMS, HQ_PATH, HQ_RUGS, HQ_TALL_WALLS, HQ_THIN_WALLS, HQ_TREES, HQ_WALL_DECOR,
-  ITEM_SPECS, hqWallCells,
+  ITEM_SPECS, RUG_LOOKS, hqWallCells,
   type Dir, type Fabric, type HqItem, type ItemKind, type RugStyle, type ThinWallStyle, type WallStyle,
 } from "../../../lib/maps/clario-hq";
 import { FLOOR_COLORS } from "../../../lib/maps/floor-colors";
 import { drawFloorPattern, PATTERNED_FLOORS } from "../../../lib/maps/floor-patterns";
+import { makeChairTextures } from "./chair-art";
 import { makeOfficeTextures } from "./office-art";
 import { drawPartitions } from "./open-desks-art";
 import { makeReferenceTextures } from "./reference-art";
+import { makeSeatingTextures } from "./seating-art";
+import { makeOfficePropTextures } from "./office-props-art";
 
 // Draws the Clario HQ map: tall walls with windows, patterned floors, rugs and
 // furniture, all painted in code. Layout comes from lib/maps/clario-hq.ts. Seats, tables,
@@ -50,6 +53,10 @@ export function makeHqTextures(scene: Phaser.Scene) {
   makeFurniture(scene);
   makeOfficeTextures(scene);
   makeReferenceTextures(scene);
+  makeChairTextures(scene);
+  makeSeatingTextures(scene);
+  makeOfficePropTextures(scene);
+  makeRugTextures(scene);
 }
 
 function makeFloors(scene: Phaser.Scene) {
@@ -608,61 +615,78 @@ const RUGS: Record<RugStyle, { border: number; fill: number; line: number; accen
 };
 
 function drawRugs(scene: Phaser.Scene) {
-  for (const rug of HQ_RUGS) {
-    const g = scene.add.graphics().setDepth(-996);
-    const x = rug.x * TILE, y = rug.y * TILE, w = rug.w * TILE, h = rug.h * TILE;
-    const c = RUGS[rug.style];
-    // Soft shadow under the rug's edge.
-    g.fillStyle(0x1b2130, 0.1);
-    if (rug.style === "stage") {
-      // A low wooden platform: boards on top, a darker front edge and a shadow on the floor.
-      g.fillStyle(0x1b2130, 0.18); g.fillRect(x + 4, y + h, w - 4, 8);
-      g.fillStyle(c.border, 1); g.fillRect(x, y, w, h);
-      g.fillStyle(c.fill, 1); g.fillRect(x + 2, y + 2, w - 4, h - 12);
-      g.fillStyle(c.line, 1);
-      for (let by = y + 10; by < y + h - 12; by += 10) g.fillRect(x + 2, by, w - 4, 1);
-      g.fillStyle(c.accent, 1); g.fillRect(x + 2, y + h - 10, w - 4, 8);
-      continue;
-    }
-    if (rug.style === "grey") {
-      // A plain woven rug: a dark edge, an inner line and a zigzag weave.
-      g.fillRoundedRect(x, y + 3, w, h, 4);
-      g.fillStyle(c.border, 1); g.fillRoundedRect(x, y, w, h, 4);
-      g.fillStyle(c.fill, 1); g.fillRect(x + 3, y + 3, w - 6, h - 6);
-      g.fillStyle(c.line, 1);
-      g.fillRect(x + 7, y + 7, w - 14, 2); g.fillRect(x + 7, y + h - 9, w - 14, 2);
-      g.fillRect(x + 7, y + 7, 2, h - 14); g.fillRect(x + w - 9, y + 7, 2, h - 14);
-      g.fillStyle(c.accent, 1);
-      for (let sy = y + 13; sy < y + h - 13; sy += 2) {
-        for (let sx = x + 16; sx < x + w - 14; sx += 12) g.fillRect(sx + ((sy >> 2) & 1) * 2, sy, 2, 2);
-      }
-      continue;
-    }
-    if (rug.style === "round") {
-      g.fillEllipse(x + w / 2, y + h / 2 + 3, w, h);
-      g.fillStyle(c.border, 1); g.fillEllipse(x + w / 2, y + h / 2, w, h);
-      g.fillStyle(c.fill, 1); g.fillEllipse(x + w / 2, y + h / 2, w - 12, h - 12);
-      g.lineStyle(2, c.line, 1); g.strokeEllipse(x + w / 2, y + h / 2, w - 28, h - 26);
-      g.lineStyle(2, c.accent, 1); g.strokeEllipse(x + w / 2, y + h / 2, w - 52, h - 48);
-      g.fillStyle(c.line, 1); g.fillEllipse(x + w / 2, y + h / 2, w * 0.28, h * 0.26);
-      continue;
-    }
-    g.fillRoundedRect(x, y + 3, w, h, 6);
-    g.fillStyle(c.border, 1); g.fillRoundedRect(x, y, w, h, 6);
-    g.fillStyle(c.fill, 1); g.fillRect(x + 6, y + 6, w - 12, h - 12);
-    g.lineStyle(2, c.line, 1); g.strokeRect(x + 11, y + 11, w - 22, h - 22);
-    // Fringe along the short ends.
-    g.fillStyle(c.line, 1);
-    for (let fy = y + 4; fy < y + h - 4; fy += 4) { g.fillRect(x - 3, fy, 3, 2); g.fillRect(x + w, fy, 3, 2); }
+  for (const rug of HQ_RUGS) paintRug(scene.add.graphics().setDepth(-996), rug.style, rug.x * TILE, rug.y * TILE, rug.w * TILE, rug.h * TILE);
+}
 
-    // A repeating diamond motif across the middle.
+// The rugs the map builder offers (RUG_LOOKS), baked for a 4 x 3 rug (catalog.ts). A rug's
+// fringe and shadow reach RUG_MARGIN past its edges.
+const RUG_MARGIN = 4;
+
+function makeRugTextures(scene: Phaser.Scene) {
+  const { w, h } = ITEM_SPECS.rug;
+  const bake = (key: string, style: RugStyle) => {
+    const g = scene.make.graphics({}, false);
+    paintRug(g, style, RUG_MARGIN, 0, w * TILE, h * TILE);
+    g.generateTexture(key, w * TILE + RUG_MARGIN * 2, h * TILE + RUG_MARGIN);
+    g.destroy();
+  };
+  RUG_LOOKS.forEach((style, i) => bake(`hq-rug-${i}`, style));
+  bake("hq-rug-round", "round");
+}
+
+// One rug, its top-left corner at (x, y), in pixels.
+function paintRug(g: Phaser.GameObjects.Graphics, style: RugStyle, x: number, y: number, w: number, h: number) {
+  const c = RUGS[style];
+  // Soft shadow under the rug's edge.
+  g.fillStyle(0x1b2130, 0.1);
+  if (style === "stage") {
+    // A low wooden platform: boards on top, a darker front edge and a shadow on the floor.
+    g.fillStyle(0x1b2130, 0.18); g.fillRect(x + 4, y + h, w - 4, 8);
+    g.fillStyle(c.border, 1); g.fillRect(x, y, w, h);
+    g.fillStyle(c.fill, 1); g.fillRect(x + 2, y + 2, w - 4, h - 12);
+    g.fillStyle(c.line, 1);
+    for (let by = y + 10; by < y + h - 12; by += 10) g.fillRect(x + 2, by, w - 4, 1);
+    g.fillStyle(c.accent, 1); g.fillRect(x + 2, y + h - 10, w - 4, 8);
+    return;
+  }
+  if (style === "grey") {
+    // A plain woven rug: a dark edge, an inner line and a zigzag weave.
+    g.fillRoundedRect(x, y + 3, w, h, 4);
+    g.fillStyle(c.border, 1); g.fillRoundedRect(x, y, w, h, 4);
+    g.fillStyle(c.fill, 1); g.fillRect(x + 3, y + 3, w - 6, h - 6);
+    g.fillStyle(c.line, 1);
+    g.fillRect(x + 7, y + 7, w - 14, 2); g.fillRect(x + 7, y + h - 9, w - 14, 2);
+    g.fillRect(x + 7, y + 7, 2, h - 14); g.fillRect(x + w - 9, y + 7, 2, h - 14);
     g.fillStyle(c.accent, 1);
-    const step = 24;
-    for (let mx = x + 22; mx < x + w - 18; mx += step) {
-      for (let my = y + 22; my < y + h - 18; my += step) {
-        g.fillTriangle(mx, my - 5, mx + 5, my, mx, my + 5);
-        g.fillTriangle(mx, my - 5, mx - 5, my, mx, my + 5);
-      }
+    for (let sy = y + 13; sy < y + h - 13; sy += 2) {
+      for (let sx = x + 16; sx < x + w - 14; sx += 12) g.fillRect(sx + ((sy >> 2) & 1) * 2, sy, 2, 2);
+    }
+    return;
+  }
+  if (style === "round") {
+    g.fillEllipse(x + w / 2, y + h / 2 + 3, w, h);
+    g.fillStyle(c.border, 1); g.fillEllipse(x + w / 2, y + h / 2, w, h);
+    g.fillStyle(c.fill, 1); g.fillEllipse(x + w / 2, y + h / 2, w - 12, h - 12);
+    g.lineStyle(2, c.line, 1); g.strokeEllipse(x + w / 2, y + h / 2, w - 28, h - 26);
+    g.lineStyle(2, c.accent, 1); g.strokeEllipse(x + w / 2, y + h / 2, w - 52, h - 48);
+    g.fillStyle(c.line, 1); g.fillEllipse(x + w / 2, y + h / 2, w * 0.28, h * 0.26);
+    return;
+  }
+  g.fillRoundedRect(x, y + 3, w, h, 6);
+  g.fillStyle(c.border, 1); g.fillRoundedRect(x, y, w, h, 6);
+  g.fillStyle(c.fill, 1); g.fillRect(x + 6, y + 6, w - 12, h - 12);
+  g.lineStyle(2, c.line, 1); g.strokeRect(x + 11, y + 11, w - 22, h - 22);
+  // Fringe along the short ends.
+  g.fillStyle(c.line, 1);
+  for (let fy = y + 4; fy < y + h - 4; fy += 4) { g.fillRect(x - 3, fy, 3, 2); g.fillRect(x + w, fy, 3, 2); }
+
+  // A repeating diamond motif across the middle.
+  g.fillStyle(c.accent, 1);
+  const step = 24;
+  for (let mx = x + 22; mx < x + w - 18; mx += step) {
+    for (let my = y + 22; my < y + h - 18; my += step) {
+      g.fillTriangle(mx, my - 5, mx + 5, my, mx, my + 5);
+      g.fillTriangle(mx, my - 5, mx - 5, my, mx, my + 5);
     }
   }
 }
@@ -953,6 +977,12 @@ export function placeItems(scene: Phaser.Scene, api: HqSceneApi, items: readonly
     const cx = (item.x + spec.w / 2) * TILE;
     const bottom = (item.y + spec.h) * TILE;
     if (item.kind === "arcade") arcadeIndex++;
+    // Rugs lie on the floor under everything; flowers just under whoever walks over them.
+    if (spec.under) {
+      const rug = item.kind === "rug" || item.kind === "rug-round";
+      scene.add.image(cx, bottom + (rug ? RUG_MARGIN : 0), key).setOrigin(0.5, 1).setDepth(rug ? -996 : item.y * TILE);
+      continue;
+    }
     const image = scene.add.image(cx, bottom, key).setOrigin(0.5, 1);
     image.setDepth(bottom);
     api.shadow(cx, bottom - 3, Math.min(image.displayWidth, spec.w * TILE) * 0.9);
@@ -961,10 +991,21 @@ export function placeItems(scene: Phaser.Scene, api: HqSceneApi, items: readonly
 }
 
 const TREES = ["tree-green", "tree-lime", "tree-teal", "tree-teal2"];
+const FLOWERS = ["flower-red", "flower-yellow", "flower-blue"];
 
 function textureFor(item: HqItem, arcadeIndex: number) {
   switch (item.kind) {
-    case "arcade": return `hq-arcade-${arcadeIndex % 3}`;
+    // An arcade machine's colour is its own when it has one, else the machines take turns.
+    case "arcade": return `hq-arcade-${(item.variant ?? arcadeIndex) % 3}`;
+    case "rug": return `hq-rug-${(item.variant ?? 0) % RUG_LOOKS.length}`;
+    case "rug-round": return "hq-rug-round";
+    case "flower": return FLOWERS[(item.variant ?? 0) % FLOWERS.length]!;
+    case "rock": return item.variant === 1 ? "rock-med" : "rock-small";
+    case "pond": return "campus-pond";
+    // These are the Classic Office's and Coworking Campus's own sprites (arena-scene.ts loads them).
+    case "plant-fern":
+    case "plant-tall":
+    case "bush-small": return item.kind;
     case "tree": return TREES[(item.x * 7 + item.y * 3) % TREES.length]!;
     case "bush": return "bush-ball";
     // Pieces drawn in more than one look; `variant` on the item picks one.
@@ -988,7 +1029,9 @@ function placeSeat(scene: Phaser.Scene, api: HqSceneApi, item: HqItem, fabric: F
   const bottom = (item.y + 1) * TILE + 6;
   const depth = dir === "up" ? (item.y + 1) * TILE + 8 : item.y * TILE - 2;
   const { key, lift } = seatLook(item.kind, fabric, dir);
-  api.shadow(cx, (item.y + 1) * TILE + 3, spec.w * TILE * (spec.w > 1 ? 0.9 : 0.7));
+  // A soft shadow: a wide faint one, and a darker one under the seat itself.
+  api.shadow(cx, (item.y + 1) * TILE + 3, spec.w * TILE * (spec.w > 1 ? 0.9 : 0.8));
+  api.shadow(cx, (item.y + 1) * TILE + 2, spec.w * TILE * (spec.w > 1 ? 0.7 : 0.5));
   const image = scene.add.image(cx, bottom, key).setOrigin(0.5, 1).setDepth(depth);
   // A couch seen from behind comes in two parts: the backrest in front of whoever sits on it,
   // and the seat behind them.
@@ -1002,9 +1045,10 @@ function placeSeat(scene: Phaser.Scene, api: HqSceneApi, item: HqItem, fabric: F
 function seatLook(kind: ItemKind, fabric: Fabric, dir: Dir): { key: string; lift?: number } {
   const facing = dir === "up" ? "up" : "down";
   switch (kind) {
-    case "task-chair": return { key: `ref-task-dark-${dir}`, lift: dir === "up" ? 10 : 8 };
+    case "task-chair": return { key: `hq-task-chair-${dir}`, lift: dir === "up" ? 10 : 8 };
     case "meet-chair": return { key: `hq-meet-chair-${fabric}-${dir}` };
     case "sofa": return { key: `hq-sofa-${fabric}-${facing}`, lift: dir === "up" ? 12 : 10 };
+    case "loveseat": return { key: `hq-loveseat-${fabric}-${facing}`, lift: dir === "up" ? 12 : 10 };
     case "armchair": return { key: `hq-armchair-${fabric}-${dir}`, lift: 10 };
     case "beanbag": return { key: `hq-beanbag-${fabric}`, lift: 4 };
     case "cafe-chair": return { key: `hq-cafe-chair-${dir}` };
