@@ -1,16 +1,27 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { Gamepad2 } from "lucide-react";
+import type { PlayClientMessage } from "@repo/shared";
 import type { SceneBridge } from "../phaser/scene-bridge";
-import { TvOverlay, type SharedTv } from "../tv/tv-overlay";
+import { TvOverlay } from "../tv/tv-overlay";
+import { TvRemote } from "../tv/tv-remote";
+import { createTvStore, type TvStore } from "../tv/tv-store";
 import { getArcadeGame, isArcadeGameKind, type ArcadeGameKind } from "./arcade-games";
 import { ArcadeOverlay, type JoinedGame } from "./arcade-overlay";
 import type { PlayLink } from "./play-link";
+import { TetrisOverlay } from "./tetris-overlay";
 
-type Open = { kind: "game"; game: ArcadeGameKind; joined?: JoinedGame } | { kind: "tv" } | null;
-type Invite = { fromUserId: string; game: ArcadeGameKind; at: number };
-type TvNow = { videoId: string; position: number; byUserId: string; receivedAt: number };
+// Tetris opens on its own cabinet; `joined` when you accepted someone's invite to play it online,
+// and `joinedAt` that invite's time, so each one you accept opens a new table (even from the same host).
+type Open =
+  | { kind: "game"; game: ArcadeGameKind; joined?: JoinedGame; joinedAt?: number }
+  | { kind: "tetris"; joined?: { hostId: string; hostName: string }; joinedAt?: number }
+  | { kind: "tv" }
+  | null;
+type Invite = { fromUserId: string; game: ArcadeGameKind | "tetris"; at: number };
+type TvPayload = Extract<PlayClientMessage, { type: "tv" }>["payload"];
+type TvNow = { videoId: string; position: number; byUserId: string; receivedAt: number; paused: boolean; title?: string };
 
 const INVITE_SHOWN_MS = 60_000;
 const focusRing = "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#12151c]";
@@ -18,12 +29,46 @@ const focusRing = "focus-visible:outline focus-visible:outline-2 focus-visible:o
 // Opens the Game Room when the player uses an arcade machine or the ping-pong table, and the TV in
 // the Lounge. The game keyboard is off while either is open. With `link` (the space's socket),
 // people can invite each other to play, and the TV is shared by everyone in the space.
+// The TV's channel lives in a store on the bridge (bridge.tv): on the 2D map the TV opens big; in
+// the 3D office, where the video plays on the TV itself, it opens the TV's remote instead.
 export function ArcadeOnMap({ bridgeRef, link }: { bridgeRef: RefObject<SceneBridge>; link?: PlayLink }) {
   const [open, setOpen] = useState<Open>(null);
+  const [remote, setRemote] = useState(false);
   const [invites, setInvites] = useState<Invite[]>([]);
   const [tv, setTv] = useState<TvNow | null>(null);
   const linkRef = useRef(link);
   linkRef.current = link;
+
+  // Remote and overlay buttons go to the space when there is one; otherwise the TV is just yours.
+  const storeRef = useRef<TvStore | null>(null);
+  if (!storeRef.current) {
+    const tvSend = (payload: TvPayload) => {
+      const out = linkRef.current;
+      if (!out) return false;
+      out.send({ type: "tv", payload });
+      return true;
+    };
+    const local = (update: (current: TvNow | null) => TvNow | null) => setTv((current) => update(current));
+    storeRef.current = createTvStore({
+      play: (video) => {
+        if (tvSend({ action: "play", videoId: video.id, start: video.start ?? 0, ...(video.title ? { title: video.title.slice(0, 200) } : {}) })) return;
+        local(() => ({ videoId: video.id, position: video.start ?? 0, byUserId: "", receivedAt: Date.now(), paused: false, title: video.title }));
+      },
+      pause: () => {
+        if (tvSend({ action: "pause" })) return;
+        local((current) => (current && !current.paused ? { ...current, position: current.position + (Date.now() - current.receivedAt) / 1000, receivedAt: Date.now(), paused: true } : current));
+      },
+      resume: () => {
+        if (tvSend({ action: "resume" })) return;
+        local((current) => (current?.paused ? { ...current, receivedAt: Date.now(), paused: false } : current));
+      },
+      stop: () => {
+        if (tvSend({ action: "stop" })) return;
+        local(() => null);
+      },
+    });
+  }
+  const store = storeRef.current;
 
   const show = useCallback(
     (next: Exclude<Open, null>) => {
@@ -36,13 +81,22 @@ export function ArcadeOnMap({ bridgeRef, link }: { bridgeRef: RefObject<SceneBri
 
   useEffect(() => {
     const bridge = bridgeRef.current;
-    bridge.openGame = (game = "pong") => show({ kind: "game", game: isArcadeGameKind(game) ? game : "pong" });
-    bridge.openTv = () => show({ kind: "tv" });
+    // The arcade machines play Tetris on the cabinet; everything else opens the Game Room.
+    bridge.openGame = (game = "pong") => show(game === "tetris" ? { kind: "tetris" } : { kind: "game", game: isArcadeGameKind(game) ? game : "pong" });
+    // In the 3D office the TV is on its screen: pick up the remote instead of opening it big.
+    bridge.openTv = () => {
+      if (store.onScreen) {
+        linkRef.current?.send({ type: "tv", payload: { action: "sync" } });
+        setRemote(true);
+      } else show({ kind: "tv" });
+    };
+    bridge.tv = store;
     return () => {
       bridge.openGame = undefined;
       bridge.openTv = undefined;
+      bridge.tv = undefined;
     };
-  }, [bridgeRef, show]);
+  }, [bridgeRef, show, store]);
 
   const close = useCallback(() => {
     bridgeRef.current.setKeyboardEnabled?.(true);
@@ -56,7 +110,7 @@ export function ArcadeOnMap({ bridgeRef, link }: { bridgeRef: RefObject<SceneBri
     return subscribe((message) => {
       if (message.type === "play-invite") {
         const { fromUserId, game } = message.payload;
-        if (!isArcadeGameKind(game)) return;
+        if (!isArcadeGameKind(game) && game !== "tetris") return;
         setInvites((current) => [...current.filter((invite) => invite.fromUserId !== fromUserId), { fromUserId, game, at: Date.now() }]);
       } else if (message.type === "play-leave") {
         setInvites((current) => current.filter((invite) => invite.fromUserId !== message.payload.fromUserId));
@@ -66,8 +120,8 @@ export function ArcadeOnMap({ bridgeRef, link }: { bridgeRef: RefObject<SceneBri
         setTv((current) => {
           if (!state) return null;
           // Same video on the same timeline (a sync): keep it, so the player doesn't reload.
-          if (current && current.videoId === state.videoId && current.byUserId === state.byUserId) {
-            const expected = current.position + (receivedAt - current.receivedAt) / 1000;
+          if (current && current.videoId === state.videoId && current.byUserId === state.byUserId && current.paused === state.paused) {
+            const expected = current.paused ? current.position : current.position + (receivedAt - current.receivedAt) / 1000;
             if (Math.abs(expected - state.position) < 3) return current;
           }
           return { ...state, receivedAt };
@@ -102,19 +156,20 @@ export function ArcadeOnMap({ bridgeRef, link }: { bridgeRef: RefObject<SceneBri
     setInvites((current) => current.filter((item) => item.fromUserId !== invite.fromUserId));
     link?.send({ type: "play-answer", payload: { targetUserId: invite.fromUserId, accept } });
     if (accept) {
-      show({ kind: "game", game: invite.game, joined: { hostId: invite.fromUserId, hostName: nameOf(invite.fromUserId), game: invite.game } });
+      const host = { hostId: invite.fromUserId, hostName: nameOf(invite.fromUserId) };
+      show(
+        invite.game === "tetris"
+          ? { kind: "tetris", joined: host, joinedAt: invite.at }
+          : { kind: "game", game: invite.game, joined: { ...host, game: invite.game }, joinedAt: invite.at },
+      );
     }
   };
 
-  const tvByName = tv ? nameOf(tv.byUserId) : "";
-  const sharedNow = useMemo(() => (tv ? { videoId: tv.videoId, position: tv.position, receivedAt: tv.receivedAt, byName: tvByName } : null), [tv, tvByName]);
-  const sharedTv: SharedTv | undefined = send
-    ? {
-        now: sharedNow,
-        play: (video) => send({ type: "tv", payload: { action: "play", videoId: video.id, start: video.start ?? 0 } }),
-        stop: () => send({ type: "tv", payload: { action: "stop" } }),
-      }
-    : undefined;
+  // Keep the store's channel in step with what's on (and who put it on, by name).
+  const tvByName = tv ? (tv.byUserId ? nameOf(tv.byUserId) : "you") : "";
+  useEffect(() => {
+    store.setChannel(tv ? { videoId: tv.videoId, position: tv.position, paused: tv.paused, receivedAt: tv.receivedAt, byName: tvByName, title: tv.title } : null);
+  }, [store, tv, tvByName]);
 
   const cards = invites.length > 0 ? <InviteCards invites={invites} nameOf={nameOf} onAnswer={answer} /> : null;
 
@@ -122,7 +177,7 @@ export function ArcadeOnMap({ bridgeRef, link }: { bridgeRef: RefObject<SceneBri
     <>
       {open?.kind === "game" && (
         <ArcadeOverlay
-          key={`${open.game}-${open.joined?.hostId ?? "solo"}`}
+          key={`${open.game}-${open.joinedAt ?? "solo"}`}
           initialGame={open.game}
           joined={open.joined}
           link={link}
@@ -130,7 +185,28 @@ export function ArcadeOnMap({ bridgeRef, link }: { bridgeRef: RefObject<SceneBri
           onDismiss={close}
         />
       )}
-      {open?.kind === "tv" && <TvOverlay shared={sharedTv} banner={cards} onDismiss={close} />}
+      {open?.kind === "tetris" && (
+        <TetrisOverlay
+          key={open.joinedAt ?? "solo"}
+          link={link}
+          joined={open.joined}
+          banner={cards}
+          onDismiss={close}
+          onMoreGames={() => show({ kind: "game", game: "pong" })}
+        />
+      )}
+      {open?.kind === "tv" && <TvOverlay store={store} shared={!!send} banner={cards} onDismiss={close} />}
+      {remote && (
+        <TvRemote
+          store={store}
+          shared={!!send}
+          onClose={() => setRemote(false)}
+          onWatchBig={() => {
+            setRemote(false);
+            show({ kind: "tv" });
+          }}
+        />
+      )}
       {/* With nothing open, invites pop up over the map. */}
       {!open && cards && (
         <div className="pointer-events-auto fixed bottom-4 left-1/2 z-[80] w-[min(26rem,calc(100vw-2rem))] -translate-x-1/2">{cards}</div>
@@ -159,7 +235,7 @@ function InviteCards({
             <Gamepad2 size={16} aria-hidden="true" />
           </span>
           <p className="min-w-0 flex-1 text-[13px] leading-snug">
-            <strong className="font-semibold">{nameOf(invite.fromUserId)}</strong> wants to play {getArcadeGame(invite.game).title} with you.
+            <strong className="font-semibold">{nameOf(invite.fromUserId)}</strong> wants to play {invite.game === "tetris" ? "Tetris" : getArcadeGame(invite.game).title} with you.
           </p>
           <div className="flex shrink-0 gap-1.5">
             <button

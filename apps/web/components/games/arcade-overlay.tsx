@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { Bot, Globe, Monitor, X } from "lucide-react";
-import { SEATS } from "./arcade-kit";
+import { LEVELS, SEATS, type Level } from "./arcade-kit";
 import { ArcadeCabinet, type CabinetMode } from "./arcade-cabinet";
 import { ARCADE_GAMES, getArcadeGame, type ArcadeGameKind, type ArcadeGameSpec } from "./arcade-games";
 import { OverlayDialog } from "./overlay-dialog";
@@ -24,6 +24,19 @@ function defaults(spec: ArcadeGameSpec): { count: number; who: Who } {
   return { count: spec.soloSeats, who: spec.computer ? "computer" : "device" };
 }
 
+// How well the computer plays, remembered between visits.
+const LEVEL_KEY = "arcade:level";
+const LEVEL_NAMES: Record<Level, string> = { easy: "Easy", medium: "Medium", hard: "Hard" };
+
+function storedLevel(): Level {
+  try {
+    const value = localStorage.getItem(LEVEL_KEY);
+    return LEVELS.find((level) => level === value) ?? "medium";
+  } catch {
+    return "medium";
+  }
+}
+
 export function ArcadeOverlay({
   initialGame = "pong",
   onDismiss,
@@ -43,6 +56,7 @@ export function ArcadeOverlay({
   const [kind, setKind] = useState<ArcadeGameKind>(joined?.game ?? initialGame);
   const spec = getArcadeGame(kind);
   const [count, setCount] = useState(() => defaults(spec).count);
+  const [level, setLevel] = useState<Level>(storedLevel);
   const [who, setWho] = useState<Who>(() => (joined ? "online" : defaults(spec).who));
   // Hosting: who's joined and who's been asked. Joined: the host and the seating it sent.
   const [guests, setGuests] = useState<PlayPeer[]>([]);
@@ -205,7 +219,7 @@ export function ArcadeOverlay({
         ? { kind: "solo", seats: 1 }
         : who === "device"
           ? { kind: "local", seats: count }
-          : { kind: "solo", seats: spec.computer ? count : 1 };
+          : { kind: "solo", seats: spec.computer ? count : 1, level };
 
   const atTable = guests.length > 0 || invited.length > 0 || !!hostId;
   const room = spec.players.max - 1 - guests.length - invited.length;
@@ -285,6 +299,28 @@ export function ArcadeOverlay({
                   <Globe size={14} aria-hidden="true" /> Online
                 </button>
               )}
+            </div>
+          )}
+          {who === "computer" && spec.levels?.includes(count) && (
+            <div role="group" aria-label="How well the computer plays" className="flex gap-1 rounded-xl bg-[#f1f2f4] p-1">
+              {LEVELS.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  aria-pressed={level === option}
+                  onClick={() => {
+                    setLevel(option);
+                    try {
+                      localStorage.setItem(LEVEL_KEY, option);
+                    } catch {
+                      // Private mode: the level just isn't remembered.
+                    }
+                  }}
+                  className={segment}
+                >
+                  {LEVEL_NAMES[option]}
+                </button>
+              ))}
             </div>
           )}
           {notice && (

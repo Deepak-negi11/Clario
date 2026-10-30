@@ -3,6 +3,11 @@
 // draws on a 240 x 160 canvas that CSS scales up with crisp pixels. Each game paints the real thing
 // (a tournament table, a cork board, office carpet, a rug) in the colours those things have.
 
+import type { BreakoutView } from "./breakout";
+import type { PongView } from "./pong";
+import type { SnakeView } from "./snake";
+import type { SumoView } from "./sumo";
+
 export const SCREEN_W = 240;
 export const SCREEN_H = 160;
 
@@ -24,8 +29,16 @@ export type ArcadeInput = {
 
 export type GamePhase = "ready" | "playing" | "over" | "won";
 
-export const SOUNDS = ["start", "hit", "wall", "score", "lose", "brick", "eat", "win", "power", "dash", "bump", "fall", "tick"] as const;
+export const SOUNDS = [
+  "start", "hit", "wall", "score", "lose", "brick", "eat", "win", "power", "dash", "bump", "fall", "tick",
+  // Table tennis: bat, table, net, floor, a smash, and a few people clapping.
+  "bat", "table", "net", "floor", "smash", "clap",
+] as const;
 export type Sound = (typeof SOUNDS)[number];
+
+// How well the computer plays, in games that offer a choice.
+export const LEVELS = ["easy", "medium", "hard"] as const;
+export type Level = (typeof LEVELS)[number];
 
 // Up to four players. Each seat has a colour that follows the player through every game: the
 // rubber on their bat, their ruler, their snake, their chair.
@@ -43,6 +56,7 @@ export type GameOptions = {
   sound: (sound: Sound) => void;
   // One entry per player (1 to 4): what to call them and whether the computer plays that seat.
   seats: Seat[];
+  level?: Level;
 };
 
 // One chip on the score line. `seat` colours it, `out` greys it, `badge` adds a small tag ("serve").
@@ -64,7 +78,29 @@ export type GameInstance = {
   // Online play: the host runs the game and sends snapshots; guests only draw them.
   snapshot(): unknown;
   restore(snapshot: unknown): void;
+  // The state a 3D stage draws, for games that have one. Reading it changes nothing.
+  view?(): GameView;
 };
+
+export type GameView = PongView | BreakoutView | SnakeView | SumoView;
+
+// A game drawn in 3D (pong-3d.ts) instead of on the pixel canvas. It makes its own canvas, which
+// the cabinet puts over the pixel one. `pick` turns a point on that canvas into screen pixels on
+// the play field, so the mouse and fingers steer just as they do on the flat game.
+export type GameStage = {
+  canvas: HTMLCanvasElement;
+  // Where the opening card sits over this stage: low (the default) or in the middle.
+  card?: "middle" | "low";
+  // Settles once the stage's models have loaded (it draws simpler stand-ins until then). The cabinet
+  // and the menu still wait for it, so nobody sees the swap.
+  ready?: Promise<void>;
+  render(view: GameView, dt: number, time: number): void;
+  pick(clientX: number, clientY: number): { x: number; y: number } | null;
+  resize(width: number, height: number): void;
+  dispose(): void;
+};
+// `onLost` fires if the browser takes the GPU back (the cabinet goes back to the flat view).
+export type GameStageFactory = (options: { reducedMotion: boolean; onLost?: () => void }) => GameStage;
 
 export function emptyInput(): ArcadeInput {
   return { held: { up: false, down: false, left: false, right: false }, presses: [], pointer: null };

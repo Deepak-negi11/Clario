@@ -41,8 +41,8 @@ const MUG = { cup: "#f2f0eb", shade: "#d6d2c9", rim: "#9d978c", coffee: "#4a2c1d
 const rand = seeded(41);
 const FLECKS = Array.from({ length: 480 }, () => ({ x: Math.floor(rand() * W), y: Math.floor(rand() * H), c: Math.floor(rand() * 3) }));
 
-type Cell = { x: number; y: number };
-type ItemKind = "mug" | "donut" | "espresso" | "bean";
+export type Cell = { x: number; y: number };
+export type ItemKind = "mug" | "donut" | "espresso" | "bean";
 type Item = { kind: ItemKind; cell: Cell; life: number };
 type Snake = {
   body: Cell[];
@@ -81,6 +81,21 @@ const SOLO_START = { cells: [7, 6, 5, 4].map((x) => ({ x, y: 11 })), heading: "r
 const key = (cell: Cell) => cell.y * COLS + cell.x;
 const inside = (cell: Cell) => cell.x >= 0 && cell.y >= 0 && cell.x < COLS && cell.y < ROWS;
 
+// What the 3D floor (snake-3d.ts) draws, read without changing anything. Cells, like the rest of
+// this file. `clock` is how far each snake is towards its next step (0 to 1), or null when this
+// copy only shows another player's game (online guests don't run the clock).
+export type SnakeView = {
+  kind: "snake";
+  phase: GamePhase;
+  solo: boolean;
+  clock: readonly (number | null)[];
+  snakes: readonly { body: readonly Cell[]; heading: Direction; dead: boolean; boost: boolean }[];
+  items: readonly { kind: ItemKind; cell: Cell; ending: boolean }[];
+};
+
+// The floor's measurements, furniture and colours, for the 3D floor to match the flat one.
+export const SNAKE_LAYOUT = { cell: CELL, cols: COLS, rows: ROWS, obstacles: OBSTACLES, skins: SKINS, mug: MUG } as const;
+
 export function createSnake({ reducedMotion, sound, seats }: GameOptions): GameInstance {
   const count = Math.max(1, seats.length);
   const solo = count === 1;
@@ -98,6 +113,8 @@ export function createSnake({ reducedMotion, sound, seats }: GameOptions): GameI
   }));
   let items: Item[] = [];
   let treatClock = 0;
+  // Set once this copy starts showing snapshots from another player's game.
+  let remote = false;
   let message: { text: string; time: number } | null = null;
   const sounds = createSoundLog(sound);
   const sparks = createParticles(!reducedMotion);
@@ -354,6 +371,14 @@ export function createSnake({ reducedMotion, sound, seats }: GameOptions): GameI
           ]
         : snakes.map((snake, index): HudItem => ({ label: seats[index]!.name, value: String(snake.points), seat: index, out: snake.dead, badge: snake.boost > 0 ? "fast" : undefined })),
     hint: () => message?.text ?? null,
+    view: (): SnakeView => ({
+      kind: "snake",
+      phase,
+      solo,
+      clock: snakes.map((snake) => (remote ? null : snake.dead ? 1 : Math.min(1, snake.clock))),
+      snakes: snakes.map((snake) => ({ body: snake.body, heading: snake.heading, dead: snake.dead, boost: snake.boost > 0 })),
+      items: items.map((item) => ({ kind: item.kind, cell: item.cell, ending: item.life < 2 })),
+    }),
     headline: () => {
       if (solo) return "Game over";
       const left = survivors();
@@ -376,6 +401,7 @@ export function createSnake({ reducedMotion, sound, seats }: GameOptions): GameI
       fx: sounds.drain(),
     }),
     restore(snapshot) {
+      remote = true;
       const data = read.record(snapshot);
       phase = read.phase(data.p, phase);
       const kinds: Record<string, ItemKind> = { m: "mug", d: "donut", e: "espresso", b: "bean" };

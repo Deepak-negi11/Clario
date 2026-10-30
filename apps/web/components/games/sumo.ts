@@ -63,6 +63,20 @@ type Chair = {
   touch: { at: number; x: number; y: number; moved: boolean } | null;
 };
 
+// What the 3D room (sumo-3d.ts) draws, read without changing anything. Screen pixels, like the
+// rest of this file. `countdown` is the seconds left before a round starts.
+export type SumoView = {
+  kind: "sumo";
+  phase: GamePhase;
+  chairs: readonly { x: number; y: number; facing: number; out: boolean; dashing: boolean; falling: number }[];
+  rug: number;
+  countdown: number;
+  wins: readonly number[];
+};
+
+// The room's measurements and colours, for the 3D room to match the flat one.
+export const SUMO_LAYOUT = { cx: CX, cy: CY, rug: RUG, minRug: MIN_RUG, chair: CHAIR, countdownStep: 0.8, floor: FLOOR, rugColors: RUG_COLORS } as const;
+
 export function createSumo({ reducedMotion, sound, seats }: GameOptions): GameInstance {
   const count = Math.max(2, seats.length);
   const names = Array.from({ length: count }, (_, index) => seats[index]?.name ?? `Computer ${index}`);
@@ -366,6 +380,14 @@ export function createSumo({ reducedMotion, sound, seats }: GameOptions): GameIn
       return bots[winner] && bots.some((bot) => !bot) ? "Game over" : winsLine(names[winner]!);
     },
     result: () => names.map((name, index) => `${name} ${wins[index]}`).join(", ") + " rounds.",
+    view: (): SumoView => ({
+      kind: "sumo",
+      phase,
+      chairs: chairs.map((chair) => ({ x: chair.x, y: chair.y, facing: chair.facing, out: chair.out, dashing: chair.dashing > 0, falling: chair.falling })),
+      rug,
+      countdown: phase === "playing" ? countdown : 0,
+      wins,
+    }),
 
     snapshot: () => ({
       p: phase,

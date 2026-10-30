@@ -68,7 +68,7 @@ const RULERS = [
 ] as const;
 const WOOD_RULER = { face: "#e2c08a", tick: "#8c6b40", edge: "#b8925c", clear: false };
 
-type DropKind = "wide" | "multi" | "slow" | "catch" | "life";
+export type DropKind = "wide" | "multi" | "slow" | "catch" | "life";
 const DROP_KINDS: DropKind[] = ["wide", "multi", "slow", "catch", "wide", "multi", "slow", "catch", "life"];
 const DROP_LABEL: Record<DropKind, string> = {
   wide: "Stapler: longer ruler",
@@ -90,6 +90,36 @@ type Fall = { x: number; y: number; vy: number; life: number; fill: string; w: n
 function noteHits(kind: string) {
   return kind === "C" ? 3 : kind === kind.toUpperCase() ? 2 : 1;
 }
+
+// What the 3D board (breakout-3d.ts) draws, read without changing anything. Screen pixels, like
+// the rest of this file: notes and balls by their top-left corner, rulers by their left end.
+export type BreakoutView = {
+  kind: "breakout";
+  phase: GamePhase;
+  // One ruler: playing alone you get the wooden one.
+  solo: boolean;
+  notes: readonly { x: number; y: number; kind: string; hits: number }[];
+  rulers: readonly { x: number; width: number; catching: boolean }[];
+  balls: readonly { x: number; y: number; held: number | null }[];
+  drops: readonly { kind: DropKind; x: number; y: number }[];
+  lives: number;
+  level: number;
+};
+
+// The board's measurements and colours, for the 3D board to match the flat one.
+export const BREAKOUT_LAYOUT = {
+  frame: FRAME,
+  noteW: NOTE_W,
+  noteH: NOTE_H,
+  rulerY: RULER_Y,
+  rulerH: RULER_H,
+  ball: BALL,
+  board: BOARD,
+  noteStyles: NOTE_STYLES,
+  card: CARD,
+  rulers: RULERS,
+  woodRuler: WOOD_RULER,
+} as const;
 
 export function createBreakout({ reducedMotion, sound, seats }: GameOptions): GameInstance {
   const count = Math.max(1, seats.length);
@@ -428,6 +458,17 @@ export function createBreakout({ reducedMotion, sound, seats }: GameOptions): Ga
       return null;
     },
     headline: () => "Game over",
+    view: (): BreakoutView => ({
+      kind: "breakout",
+      phase,
+      solo: count === 1,
+      notes,
+      rulers: rulerX.map((x, seat) => ({ x, width: width(seat), catching: catchFor[seat]! > 0 })),
+      balls,
+      drops,
+      lives,
+      level,
+    }),
     result: () => `Board ${level + 1}, ${score.toLocaleString("en-US")} points.`,
 
     snapshot: () => ({
