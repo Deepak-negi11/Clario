@@ -1,6 +1,6 @@
 import Phaser from "phaser";
-import { customRoomAt, getChatRoomAtPosition, getMapTemplate, isClarioHq, type ChatRoomZone, type CustomMap, type MapTemplateId } from "@repo/shared";
-import { HQ_FLOORS, HQ_ITEMS, HQ_MENTOR } from "../../../lib/maps/clario-hq";
+import { customRoomAt, getChatRoomAtPosition, getMapTemplate, isClarioHq, type ChatRoomZone, type CoworkerId, type CustomMap, type MapTemplateId } from "@repo/shared";
+import { HQ_COWORKERS, HQ_FLOORS, HQ_ITEMS, HQ_MENTOR } from "../../../lib/maps/clario-hq";
 import { hqPlaySpots, playSpotsFor } from "../../../lib/maps/play-spots";
 import { CAMPUS_ITEMS, CLASSIC_OFFICE_ITEMS } from "../../../lib/maps/classic-campus";
 import { findPath } from "../../../lib/maps/path-finder";
@@ -18,12 +18,13 @@ import { FRAME_COUNT, FRAME_HEIGHT, FRAME_WIDTH, lookKey, recolorSheet, sheetUrl
 const WALK_START = { right: 0, up: 6, left: 12, down: 18 } as const;
 type WalkDir = keyof typeof WALK_START;
 import { addMentorNpc, preloadMentorNpc, type MentorNpc } from "./mentor-npc";
-import { addCoworkerNpcs } from "./coworker-npcs";
+import { addCoworkerNpcs, type CoworkerNpc } from "./coworker-npcs";
+import { chooseCoworkerSpots, roomByName, tileInRoom } from "../../../lib/maps/coworker-spots";
+import { coworkerPlaces, type CoworkerPlaces } from "../../../lib/companions/coworker-places";
 import { addClaudeNpcs, type ClaudeNpcs } from "./claude-npcs";
 import { addPlaySpots, type PlaySpots } from "./play-spots";
 import { addPropsOnMap, rideableRack, RIDE_STEP_MS, type Holder, type PropsOnMap } from "./props-on-map";
 import { isTypingIn } from "./talk-npc";
-import type { TalkNpc } from "./talk-npc";
 import { addErrandMarker } from "./errand-marker";
 import { makeSeatingTextures, preloadSeatingArt } from "./seating-art";
 import { preloadOfficePropsArt } from "./office-props-art";
@@ -114,7 +115,7 @@ export class ArenaScene extends Phaser.Scene{
 
     private player!: Phaser.GameObjects.Sprite
     private mentor?: MentorNpc;
-    private coworkers: TalkNpc[] = [];
+    private coworkers: CoworkerNpc[] = [];
     private claudes?: ClaudeNpcs;
     private playSpots?: PlaySpots;
     private props?: PropsOnMap;
@@ -624,6 +625,7 @@ export class ArenaScene extends Phaser.Scene{
                 if (mapTemplate !== "custom-office" || !map) return;
                 this.buildCustom(map);
                 this.buildRoomSigns();
+                this.placeCoworkers();
             };
             this.registry.events.on("changedata-customMap", onCustomMap);
             this.events.once(Phaser.Scenes.Events.DESTROY, () => {
@@ -640,16 +642,25 @@ export class ArenaScene extends Phaser.Scene{
         }
 
         // Maya, the Practice Session mentor, waits in Focus Room 2 of Clario HQ, and the AI
-        // coworkers at their spots around the office.
+        // coworkers stand somewhere on every map (placeCoworkers).
         const hq = isClarioHq(mapTemplate);
         if (hq) {
             const block = (x: number, y: number) => this.blocked.add(x + "," + y);
             // Riding a bike, E gets you off first, so nobody's tag offers to talk.
             const busy = () => !!this.props?.busy();
             this.mentor = addMentorNpc(this, { tileX: HQ_MENTOR.x, tileY: HQ_MENTOR.y, font: this.labelFont, bridge, block, busy });
-            this.coworkers = addCoworkerNpcs(this, { font: this.labelFont, bridge, block, texture: (look) => this.lookTexture(look), busy });
             // Claude at work in every Open Desks cubicle.
             this.claudes = addClaudeNpcs(this, { font: this.labelFont, block });
+        }
+        // A built map places them once it has loaded (onCustomMap).
+        if (mapTemplate !== "custom-office" || this.customMap) this.placeCoworkers();
+        if (bridge) {
+            bridge.coworkerPlace = () => this.coworkerPlace();
+            bridge.coworkerGoTo = (id, room) => this.sendCoworker(id, room);
+            this.events.once(Phaser.Scenes.Events.DESTROY, () => {
+                bridge.coworkerPlace = undefined;
+                bridge.coworkerGoTo = undefined;
+            });
         }
         // Games, TVs, bikes and drinks work on Clario HQ and on maps built in the map builder
         // (buildCustom hands them the new items when the owner changes the map).
@@ -664,23 +675,97 @@ export class ArenaScene extends Phaser.Scene{
             });
             // The bikes in their rack and the vending machine's drinks.
             this.props = addPropsOnMap(this, { items, font: this.labelFont, bridge, selfId: () => this.registry.get("selfId") as string | null });
-
-            // E uses the one thing in reach, in this order: get off your bike, talk to whoever is
-            // next to you, a game or TV, then the bike rack, the vending machine or a sip of your
-            // drink. Q throws a drink away. Neither works while you type in a panel, with Ctrl, Cmd
-            // or Alt held (browser shortcuts), or as the key repeats while held down.
-            const ignored = (event: KeyboardEvent) => event.repeat || event.ctrlKey || event.metaKey || event.altKey || isTypingIn(event.target);
-            this.input.keyboard?.on("keydown-E", (event: KeyboardEvent) => {
-                if (ignored(event)) return;
-                const npc = [this.mentor, ...this.coworkers].find((each) => each?.near());
-                const used = !!this.props?.getOff() || (npc ? (npc.talk(), true) : false) || !!this.playSpots?.use() || !!this.props?.use();
-                // Otherwise the "e" would land in the panel or overlay that just opened.
-                if (used) event.preventDefault();
-            });
-            this.input.keyboard?.on("keydown-Q", (event: KeyboardEvent) => {
-                if (!ignored(event) && this.props?.drop()) event.preventDefault();
-            });
         }
+
+        // E uses the one thing in reach, in this order: get off your bike, talk to whoever is next
+        // to you, a game or TV, then the bike rack, the vending machine or a sip of your drink. Q
+        // throws a drink away. Neither works while you type in a panel, with Ctrl, Cmd or Alt held
+        // (browser shortcuts), or as the key repeats while held down. Every map has someone to
+        // talk to; games, bikes and drinks are on Clario HQ and built maps.
+        const ignored = (event: KeyboardEvent) => event.repeat || event.ctrlKey || event.metaKey || event.altKey || isTypingIn(event.target);
+        this.input.keyboard?.on("keydown-E", (event: KeyboardEvent) => {
+            if (ignored(event)) return;
+            const npc = [this.mentor, ...this.coworkers].find((each) => each?.near());
+            const used = !!this.props?.getOff() || (npc ? (npc.talk(), true) : false) || !!this.playSpots?.use() || !!this.props?.use();
+            // Otherwise the "e" would land in the panel or overlay that just opened.
+            if (used) event.preventDefault();
+        });
+        this.input.keyboard?.on("keydown-Q", (event: KeyboardEvent) => {
+            if (!ignored(event) && this.props?.drop()) event.preventDefault();
+        });
+    }
+
+    // The map's rooms, by name and bounds: a built map's own, or its template's.
+    private mapRooms() {
+        return this.customMap?.rooms ?? getMapTemplate(this.mapTemplateId).chatRooms;
+    }
+
+    // A tile someone can stand on: on the map, not a wall, furniture or a chair.
+    private isFreeTile(x: number, y: number) {
+        const key = x + "," + y;
+        return x >= 0 && y >= 0 && x <= this.maxTileX && y <= this.maxTileY && !this.blocked.has(key) && !this.wallCells.has(key) && !this.chairMap[key];
+    }
+
+    // Puts the AI coworkers at their spots, again whenever a built map is redrawn: Clario HQ's
+    // own, or chosen by role on any other map (lib/maps/coworker-spots.ts), away from Maya and
+    // where people arrive. The 3D view stands them in the same places (coworkerPlaces).
+    private placeCoworkers() {
+        for (const npc of this.coworkers) npc.destroy();
+        const spots: CoworkerPlaces = isClarioHq(this.mapTemplateId)
+            ? Object.fromEntries(HQ_COWORKERS.map(({ id, x, y }) => [id, { x, y }]))
+            : chooseCoworkerSpots({
+                rooms: this.mapRooms(),
+                isFree: (x, y) => this.isFreeTile(x, y),
+                spawn: this.customMap?.spawn ?? getMapTemplate(this.mapTemplateId).spawn,
+                avoid: [{ x: this.tileX, y: this.tileY }],
+            });
+        coworkerPlaces.reset(spots);
+        this.coworkers = addCoworkerNpcs(this, {
+            spots,
+            font: this.labelFont,
+            bridge: this.bridge?.current,
+            block: (x, y) => this.blocked.add(x + "," + y),
+            unblock: (x, y) => this.blocked.delete(x + "," + y),
+            texture: (look) => this.lookTexture(look),
+            busy: () => !!this.props?.busy(),
+        });
+    }
+
+    // Where you are, for the coworkers to talk about: the map, your room, its rooms, who's here.
+    private coworkerPlace() {
+        const here = { x: this.tileX, y: this.tileY };
+        const room = this.customMap ? customRoomAt(this.customMap, here) : getChatRoomAtPosition(this.mapTemplateId, here);
+        return {
+            map: this.customMap ? "your team's own office (built in the map builder)" : getMapTemplate(this.mapTemplateId).name,
+            room: room?.name ?? null,
+            rooms: this.mapRooms().map(({ name }) => name),
+            peopleOnline: 1 + Object.keys(this.otherRef?.current ?? {}).length,
+        };
+    }
+
+    // Walks a coworker to a free tile in the room with that name; false if there's no such room,
+    // no room to stand in it, or no way there.
+    private sendCoworker(id: CoworkerId, roomName: string) {
+        const npc = this.coworkers.find((each) => each.id === id);
+        const room = roomByName(this.mapRooms(), roomName);
+        if (!npc || !room) return false;
+        const from = npc.tile();
+        const fromKey = from.x + "," + from.y;
+        const taken = new Set([this.tileX + "," + this.tileY, ...this.coworkers.filter((each) => each !== npc).map((each) => each.tile().x + "," + each.tile().y)]);
+        // Already in that room: they stay put.
+        const { x, y, width, height } = room.bounds;
+        if (from.x >= x && from.y >= y && from.x < x + width && from.y < y + height) return true;
+        const goal = tileInRoom(room.bounds, (tx, ty) => this.isFreeTile(tx, ty), taken);
+        if (!goal) return false;
+        // Their own tile is blocked while they stand on it; the path starts there.
+        this.blocked.delete(fromKey);
+        const path = this.findPath(from.x, from.y, goal.x, goal.y);
+        this.blocked.add(fromKey);
+        const last = path.at(-1);
+        if (!last || last.x !== goal.x || last.y !== goal.y) return false;
+        npc.walkTo(path);
+        coworkerPlaces.move(id, goal);
+        return true;
     }
 
     private buildCoworkingCampus() {

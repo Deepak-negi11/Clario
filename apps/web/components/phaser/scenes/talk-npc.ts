@@ -11,9 +11,22 @@ const TILE = 32;
 // Frames in the character sheets: right 0-5, up 6-11, left 12-17, down 18-23.
 const FACING_FRAME = { right: 0, up: 6, left: 12, down: 18 } as const;
 
+// How fast they walk when sent somewhere, in tiles a second (a little slower than you).
+const WALK_SPEED = 4;
+
+type Tile = { x: number; y: number };
+
 // `near`: the player is next to them. The scene's E key calls `talk` on the one that is near
-// (arena-scene.ts decides between people, games and props).
-export type TalkNpc = { update: (playerTileX: number, playerTileY: number) => void; near: () => boolean; talk: () => void };
+// (arena-scene.ts decides between people, games and props). `walkTo` sends them along a path
+// (from the scene's path finder) to a new spot, where they then stand; `destroy` removes them.
+export type TalkNpc = {
+    update: (playerTileX: number, playerTileY: number) => void;
+    near: () => boolean;
+    talk: () => void;
+    tile: () => Tile;
+    walkTo: (path: Tile[]) => void;
+    destroy: () => void;
+};
 
 export type TalkNpcOptions = {
     tileX: number;
@@ -21,6 +34,8 @@ export type TalkNpcOptions = {
     font: string;
     bridge?: SceneBridge;
     block: (x: number, y: number) => void;
+    // Frees their tile when they walk off it (only needed for those who walk).
+    unblock?: (x: number, y: number) => void;
     texture: string;
     name: string;
     role: string;
@@ -38,15 +53,17 @@ export function isTypingIn(target: EventTarget | null) {
 }
 
 export function addTalkNpc(scene: Phaser.Scene, options: TalkNpcOptions): TalkNpc {
-    const { tileX, tileY, font, bridge, block, texture, name, role, tagColor, talk, state: stateOf, busy } = options;
+    const { font, bridge, block, unblock, texture, name, role, tagColor, talk, state: stateOf, busy } = options;
+    let tileX = options.tileX;
+    let tileY = options.tileY;
     block(tileX, tileY);
 
-    const x = tileX * TILE + TILE / 2;
-    const y = tileY * TILE + TILE / 2;
-    const feet = y + TILE; // the sprite is 64 px tall once scaled, centred on the tile
+    let x = tileX * TILE + TILE / 2;
+    let y = tileY * TILE + TILE / 2;
+    const feet = () => y + TILE; // the sprite is 64 px tall once scaled, centred on the tile
 
-    scene.add.ellipse(x, feet - 6, 26, 10, 0x000000, 0.25).setDepth(feet - 2);
-    const sprite = scene.add.sprite(x, y, texture, FACING_FRAME.down).setScale(2).setDepth(feet);
+    const shadow = scene.add.ellipse(x, feet() - 6, 26, 10, 0x000000, 0.25).setDepth(feet() - 2);
+    const sprite = scene.add.sprite(x, y, texture, FACING_FRAME.down).setScale(2).setDepth(feet());
 
     // Sits higher than player name tags so the two don't overlap when the player stands beside them.
     const tag = scene.add.text(x, y - 50, "", {
@@ -59,6 +76,14 @@ export function addTalkNpc(scene: Phaser.Scene, options: TalkNpcOptions): TalkNp
     }).setOrigin(0.5, 1).setDepth(10000).setResolution(3);
 
     let near = false;
+    // Tiles still to walk, and which way they are going.
+    let path: Tile[] = [];
+    let heading: keyof typeof FACING_FRAME = "down";
+    const place = () => {
+        shadow.setPosition(x, feet() - 6).setDepth(feet() - 2);
+        sprite.setPosition(x, y).setDepth(feet());
+        tag.setPosition(x, y - 50);
+    };
 
     sprite.setInteractive({ cursor: "pointer" });
     sprite.on("pointerdown", (_pointer: Phaser.Input.Pointer, _lx: number, _ly: number, event: Phaser.Types.Input.EventData) => {
@@ -67,10 +92,55 @@ export function addTalkNpc(scene: Phaser.Scene, options: TalkNpcOptions): TalkNp
         else bridge?.walkTo?.(tileX, tileY + 1);
     });
 
+    // One step of the walk: towards the next tile, standing there once it is reached.
+    const step = () => {
+        const next = path[0]!;
+        const goalX = next.x * TILE + TILE / 2;
+        const goalY = next.y * TILE + TILE / 2;
+        const distance = Math.hypot(goalX - x, goalY - y);
+        const move = Math.min(distance, (WALK_SPEED * TILE * scene.game.loop.delta) / 1000);
+        if (distance > 0) {
+            heading = Math.abs(goalX - x) > Math.abs(goalY - y) ? (goalX > x ? "right" : "left") : goalY > y ? "down" : "up";
+            x += ((goalX - x) / distance) * move;
+            y += ((goalY - y) / distance) * move;
+        }
+        if (distance - move < 0.5) {
+            x = goalX;
+            y = goalY;
+            tileX = next.x;
+            tileY = next.y;
+            path.shift();
+            if (!path.length) block(tileX, tileY);
+        }
+        place();
+        // The walk cycle: the six frames of the way they face.
+        sprite.setFrame(FACING_FRAME[heading] + (Math.floor(scene.time.now / 110) % 6));
+    };
+
     return {
         near: () => near,
         talk,
+        tile: () => ({ x: tileX, y: tileY }),
+        walkTo(route) {
+            if (!route.length) return;
+            if (!path.length) unblock?.(tileX, tileY);
+            path = route;
+        },
+        destroy() {
+            if (!path.length) unblock?.(tileX, tileY);
+            path = [];
+            shadow.destroy();
+            sprite.destroy();
+            tag.destroy();
+        },
         update(playerTileX, playerTileY) {
+            if (path.length) {
+                near = false;
+                step();
+                const label = `${name} · ${role}`;
+                if (tag.text !== label) tag.setText(label);
+                return;
+            }
             const dx = playerTileX - tileX;
             const dy = playerTileY - tileY;
             near = Math.max(Math.abs(dx), Math.abs(dy)) <= 1;

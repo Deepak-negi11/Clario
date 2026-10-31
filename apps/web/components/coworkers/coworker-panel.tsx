@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useId, useReducer, useRef, useState } from "react";
-import { ArrowLeft, ArrowUp, Briefcase, CheckCircle2, Mic, Square, Trash2, Volume2, VolumeX, X } from "lucide-react";
+import { ArrowLeft, ArrowUp, Briefcase, CheckCircle2, Copy, Footprints, GitBranch, Mic, Settings2, Square, Trash2, Volume2, VolumeX, X } from "lucide-react";
 import {
+  AI_PROVIDER_INFO,
   COWORKER_HISTORY_LIMIT,
   MAX_COWORKER_MESSAGE,
   MISSIONS,
@@ -16,22 +17,38 @@ import {
   type CoworkerAction,
   type CoworkerChatResponse,
   type CoworkerId,
+  type CoworkerPlace,
   type MentorState,
 } from "@repo/shared";
+import { AI_CHANGED_EVENT, aiRequestParts, readStoredAi, type StoredAi } from "../../lib/ai/ai-settings";
 import { isSpeechRecognitionSupported, listen, type ListenSession } from "../../lib/speech/recognition";
 import { isSpeechSynthesisSupported, speak, warmUpVoices } from "../../lib/speech/synthesis";
 import { readRuns, readShowXp } from "../../lib/missions/progress";
-import { answerCompanion, useCompanions } from "../../lib/companions/store";
+import { answerCompanion, companions, useCompanions } from "../../lib/companions/store";
+import { AiSettingsDialog } from "../ai-settings/ai-settings-dialog";
 import { CompanionBar } from "../companions/companion-bar";
 import { MissionChat } from "../missions/mission-chat";
 
-// Talk to an AI coworker (Arjun, Priya, Rahul) at their desk, by typing or talking; they answer
-// in character, out loud when you talk. When they ask for help with their task, the reply gets a
-// button that opens their Workplace Quest mission right here (missions/mission-chat.tsx).
-// Same flow as Maya's panel (practice-session.tsx). Render it only in the browser: it reads
-// storage and speech support when it mounts.
+// Talk to an AI coworker (Arjun, Priya, Rahul), by typing or talking; they answer in character,
+// out loud when you talk. They explain what's going on in the office and help with code (paste a
+// public GitHub link and they read it; longer help shows under the reply). They walk or play with
+// you in the 3D view (lib/companions; the AI's "follow / play / stop" actions go there too), go to
+// a room when the scene can (onGoTo), and "leave" closes the chat once they've said bye. When they
+// ask for help with their task, the reply gets a button that opens their Workplace Quest mission
+// here. Visitors can plug in their own AI key (ai-settings/). Same flow as Maya's panel
+// (practice-session.tsx). Render it only in the browser: it reads storage and speech support when
+// it mounts.
 
-type ChatItem = { id: string; role: "user" | "coworker"; text: string; source?: CoworkerChatResponse["source"]; action?: CoworkerAction };
+type ChatItem = {
+  id: string;
+  role: "user" | "coworker";
+  text: string;
+  details?: string;
+  source?: CoworkerChatResponse["source"];
+  action?: CoworkerAction;
+  repo?: string;
+  moved?: string; // "heading to the Kitchen", when the scene moved them
+};
 type Settings = { speakReplies: boolean };
 
 const SETTINGS_KEY = "coworkers:settings";
@@ -40,7 +57,9 @@ const MAX_STORED = 40;
 const GREETING_ID = "greeting";
 // The learner's speech. Each coworker answers in their own voice (coworkers.ts).
 const LISTEN_LANG = "en-IN";
-const SUGGESTIONS = ["Hi! I just joined the team.", "What are you working on?", "Anything I can help with?"];
+const SUGGESTIONS = ["What's going on in this office?", "Anything I can help with?", "Can you help me with some code?", "Follow me"];
+// After "leave" or "go to a room" they finish talking, then the panel closes.
+const CLOSE_AFTER_MOVE_MS = 1200;
 
 function readStored<T>(storage: Storage, key: string, fallback: T): T {
   try {
@@ -67,9 +86,14 @@ type CoworkerPanelProps = {
   coworkerId: CoworkerId;
   onClose?: () => void;
   onStateChange?: (state: MentorState) => void;
+  // Where the player is on the map (rooms, people), for "what's going on here?". Without it they
+  // still chat, just without knowing the map.
+  getPlace?: () => Omit<CoworkerPlace, "canWalk" | "canGoTo"> | undefined;
+  // Walks them to a room; false when it can't. Without it, "go to a room" isn't offered.
+  onGoTo?: (room: string) => boolean;
 };
 
-export function CoworkerPanel({ coworkerId, onClose, onStateChange }: CoworkerPanelProps) {
+export function CoworkerPanel({ coworkerId, onClose, onStateChange, getPlace, onGoTo }: CoworkerPanelProps) {
   const coworker = getCoworker(coworkerId)!;
   const mission = coworkerMission(coworker);
   const { name, role } = mission.coworker;
@@ -92,11 +116,30 @@ export function CoworkerPanel({ coworkerId, onClose, onStateChange }: CoworkerPa
   const [view, setView] = useState<"chat" | "mission">("chat");
   const [missionDone, setMissionDone] = useState(() => !!readRuns()[mission.id]?.completed);
   const [showXp] = useState(readShowXp);
+  // The visitor's own AI key, if they added one (ai-settings/); null means the site's AI.
+  const [ai, setAi] = useState<StoredAi | null>(readStoredAi);
+  const [aiOpen, setAiOpen] = useState(false);
+  const leaveTimerRef = useRef<number | null>(null);
+  const leaveAfterSpeechRef = useRef(false);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    const reload = () => setAi(readStoredAi());
+    window.addEventListener(AI_CHANGED_EVENT, reload);
+    return () => {
+      window.removeEventListener(AI_CHANGED_EVENT, reload);
+      if (leaveTimerRef.current) window.clearTimeout(leaveTimerRef.current);
+    };
+  }, []);
 
   const inputId = useId();
   const sectionRef = useRef<HTMLElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const backRef = useRef<HTMLButtonElement | null>(null);
   const messagesRef = useRef(messages);
   const settingsRef = useRef(settings);
@@ -162,14 +205,22 @@ export function CoworkerPanel({ coworkerId, onClose, onStateChange }: CoworkerPa
   }, [stopListening, stopSpeaking]);
 
   // Reading aloud uses the browser's own voice, so it costs no AI tokens either way.
+  // After "leave" or "go to a room": close once they've finished saying so.
+  const closeSoon = useCallback(() => {
+    leaveAfterSpeechRef.current = false;
+    if (leaveTimerRef.current) window.clearTimeout(leaveTimerRef.current);
+    leaveTimerRef.current = window.setTimeout(() => onCloseRef.current?.(), CLOSE_AFTER_MOVE_MS);
+  }, []);
+
   const startSpeech = useCallback((id: string, text: string) => {
     setSpeakingId(id);
     cancelSpeechRef.current = speak(text, coworker.voice, () => {
       cancelSpeechRef.current = null;
       setSpeakingId(null);
       dispatch({ type: "SPEECH_END" });
+      if (leaveAfterSpeechRef.current) closeSoon();
     });
-  }, [coworker]);
+  }, [coworker, closeSoon]);
 
   // Walking up to them: they say hello out loud the first time (voice on, nothing said yet this tab).
   useEffect(() => {
@@ -223,10 +274,24 @@ export function CoworkerPanel({ coworkerId, onClose, onStateChange }: CoworkerPa
     }
 
     // Their greeting goes first, so a reply to it ("yes, I was there") makes sense to the AI.
+    // Only what they said goes back, not the longer help under it.
     const history = [{ role: "coworker" as const, text: coworker.greeting }, ...messagesRef.current]
       .slice(-COWORKER_HISTORY_LIMIT)
       .map(({ role, text }) => ({ role, text }));
     setMessages((previous) => [...previous, { id: newId(), role: "user", text: message }]);
+
+    // What they can do right now: walk with you only while the 3D view is open, go to a room only
+    // where the scene can take them.
+    const where = getPlace?.();
+    const place: CoworkerPlace = {
+      map: where?.map ?? "",
+      room: where?.room ?? null,
+      rooms: where?.rooms ?? [],
+      ...(where?.peopleOnline !== undefined ? { peopleOnline: where.peopleOnline } : {}),
+      canWalk: companions.get().open,
+      canGoTo: !!onGoTo && !!where?.rooms.length,
+    };
+    const { headers, choice } = aiRequestParts(ai);
 
     const controller = new AbortController();
     requestRef.current = controller;
@@ -234,8 +299,8 @@ export function CoworkerPanel({ coworkerId, onClose, onStateChange }: CoworkerPa
     try {
       const response = await fetch("/api/coworkers/chat", {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ coworkerId: coworker.id, message, history }),
+        headers: { "content-type": "application/json", ...headers },
+        body: JSON.stringify({ coworkerId: coworker.id, message, history, place, ...(choice ? { ai: choice } : {}) }),
         signal: controller.signal,
       });
       const body = (await response.json()) as CoworkerChatResponse & { error?: string };
@@ -247,21 +312,37 @@ export function CoworkerPanel({ coworkerId, onClose, onStateChange }: CoworkerPa
       answer = body;
     } catch {
       if (controller.signal.aborted) return; // the panel was closed
-      answer = coworkerChatResponse(
-        coworker,
-        savedCoworkerReply(coworker, message),
-        "saved",
-        `Can't reach the server right now, so ${first} answers with a saved line.`,
-      );
+      answer = coworkerChatResponse(coworker, savedCoworkerReply(coworker, message, place), "saved", {
+        notice: `Can't reach the server right now, so ${first} answers with a saved line.`,
+      });
     } finally {
       if (requestRef.current === controller) requestRef.current = null;
     }
 
+    // Do what they agreed to. Walking and playing go to the 3D view's companions.
+    const action = answer.action;
+    let moved: string | undefined;
+    let closeAfter = false;
+    if (action?.type === "follow" || action?.type === "play") companions.set(coworker.id, action.type);
+    if (action?.type === "stop" || action?.type === "leave") companions.set(coworker.id, null);
+    if (action?.type === "leave") closeAfter = true;
+    if (action?.type === "go-to" && onGoTo?.(action.room)) {
+      moved = `${first} is heading to ${action.room}`;
+      closeAfter = true;
+    }
+
     setNotice(answer.notice ?? null);
     const replyId = newId();
-    setMessages((previous) => [...previous, { id: replyId, role: "coworker", text: answer.reply, source: answer.source, action: answer.action }]);
+    setMessages((previous) => [
+      ...previous,
+      { id: replyId, role: "coworker", text: answer.reply, details: answer.details, source: answer.source, action, repo: answer.repo, moved },
+    ]);
     say(replyId, answer.reply, mode === "voice");
-  }, [coworker, first, say, stopListening, stopSpeaking]);
+    if (closeAfter) {
+      if (cancelSpeechRef.current) leaveAfterSpeechRef.current = true; // close once they've said it
+      else closeSoon();
+    }
+  }, [ai, closeSoon, coworker, first, getPlace, onGoTo, say, stopListening, stopSpeaking]);
 
   function toggleMic() {
     if (state === "listening") {
@@ -355,7 +436,7 @@ export function CoworkerPanel({ coworkerId, onClose, onStateChange }: CoworkerPa
     <section
       ref={sectionRef}
       aria-label={`Chat with ${name}`}
-      className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-black/5 bg-white/95 text-[#12151c] shadow-[0_18px_44px_-18px_rgba(18,21,28,0.45)] backdrop-blur-md"
+      className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-black/5 bg-white/95 text-[#12151c] shadow-[0_18px_44px_-18px_rgba(18,21,28,0.45)] backdrop-blur-md"
     >
       <header className="flex items-center justify-between gap-2 border-b border-[#eceef1] px-4 py-3">
         <div className="min-w-0">
@@ -363,6 +444,9 @@ export function CoworkerPanel({ coworkerId, onClose, onStateChange }: CoworkerPa
           <p className="truncate text-[11px] text-[#5c6371]">{role} · Larkspur Labs</p>
         </div>
         <div className="flex items-center gap-1">
+          <IconButton label="AI settings" pressed={aiOpen} onClick={() => setAiOpen(true)}>
+            <Settings2 size={15} aria-hidden="true" />
+          </IconButton>
           {canSpeak && (
             <IconButton
               label={settings.speakReplies ? `Mute ${first}'s voice` : `Turn ${first}'s voice on`}
@@ -417,6 +501,14 @@ export function CoworkerPanel({ coworkerId, onClose, onStateChange }: CoworkerPa
               <p className={`mt-0.5 text-[13px] leading-snug ${state === "listening" && heard ? "italic text-[#12151c]" : "text-[#3b414c]"}`}>
                 {status}
               </p>
+              <button
+                type="button"
+                onClick={() => setAiOpen(true)}
+                title="Change which AI powers the coworkers"
+                className="-ml-1 mt-1 max-w-full cursor-pointer truncate rounded-md px-1 py-0.5 text-left text-[10px] font-semibold text-[#5c6371] transition hover:bg-[#eceef1] hover:text-[#12151c] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#12151c]"
+              >
+                {ai ? `AI: your ${AI_PROVIDER_INFO[ai.provider].label} key · ${ai.model}` : "AI: the site's free AI · use your own key"}
+              </button>
             </div>
           </div>
 
@@ -465,6 +557,19 @@ export function CoworkerPanel({ coworkerId, onClose, onStateChange }: CoworkerPa
                       ? () => (playing ? stopReading() : readAloud(message.id, message.text))
                       : undefined}
                   />
+                  {message.repo && (
+                    <p className="flex max-w-[88%] items-center gap-1 self-start px-1 text-[10px] text-[#6b7280]">
+                      <GitBranch size={11} aria-hidden="true" />
+                      Read {message.repo} on GitHub
+                    </p>
+                  )}
+                  {message.details && <Details text={message.details} />}
+                  {message.moved && (
+                    <p role="status" className="flex items-center gap-1.5 self-start px-1 text-[11px] font-semibold text-[#17663d]">
+                      <Footprints size={12} aria-hidden="true" />
+                      {message.moved}
+                    </p>
+                  )}
                   {offersMission(message.action) && (
                     <button
                       type="button"
@@ -517,15 +622,22 @@ export function CoworkerPanel({ coworkerId, onClose, onStateChange }: CoworkerPa
             <label htmlFor={inputId} className="sr-only">
               Your message to {first}
             </label>
-            <input
+            {/* A textarea so pasted code keeps its lines: Enter sends, Shift+Enter starts a new line. */}
+            <textarea
               id={inputId}
               ref={inputRef}
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+                event.preventDefault();
+                void send(draft, "text");
+              }}
               placeholder={`Message ${first}…`}
               maxLength={MAX_COWORKER_MESSAGE}
               autoComplete="off"
-              className="min-w-0 flex-1 rounded-xl border border-[#e6e7ea] bg-[#f7f8fa] px-3 py-2 text-[13px] text-[#12151c] outline-none transition placeholder:text-[#6b7280] focus:border-[#12151c]/30 focus:bg-white"
+              rows={Math.min(5, Math.max(1, draft.split("\n").length))}
+              className="max-h-32 min-w-0 flex-1 resize-none rounded-xl border border-[#e6e7ea] bg-[#f7f8fa] px-3 py-2 text-[13px] leading-5 text-[#12151c] outline-none transition placeholder:text-[#6b7280] focus:border-[#12151c]/30 focus:bg-white"
             />
             <button
               type="submit"
@@ -538,7 +650,72 @@ export function CoworkerPanel({ coworkerId, onClose, onStateChange }: CoworkerPa
           </form>
         </>
       )}
+      {aiOpen && (
+        <AiSettingsDialog
+          onClose={() => {
+            setAiOpen(false);
+            inputRef.current?.focus();
+          }}
+        />
+      )}
     </section>
+  );
+}
+
+// Longer help under a reply (steps, code): shown, never spoken. Code in ``` fences gets its own
+// block with a copy button; `inline code` is marked up. Plain React text, so nothing in it runs.
+function Details({ text }: { text: string }) {
+  const parts = text.split(/```[^\n]*\n?/);
+  return (
+    <div className="max-w-[92%] self-start rounded-xl border border-[#e6e7ea] bg-white px-3 py-2 text-[12px] leading-5 text-[#2b303b]">
+      {parts.map((part, index) =>
+        index % 2 === 1 ? (
+          <CodeBlock key={index} code={part.replace(/\n$/, "")} />
+        ) : (
+          part.trim() && (
+            <p key={index} className="whitespace-pre-wrap break-words">
+              {part.trim().split(/(`[^`\n]+`)/).map((piece, pieceIndex) =>
+                piece.startsWith("`") && piece.endsWith("`") && piece.length > 2 ? (
+                  <code key={pieceIndex} className="rounded bg-[#f1f3f6] px-1 font-mono text-[11px]">
+                    {piece.slice(1, -1)}
+                  </code>
+                ) : (
+                  piece
+                ),
+              )}
+            </p>
+          )
+        ),
+      )}
+    </div>
+  );
+}
+
+function CodeBlock({ code }: { code: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="my-1.5 overflow-hidden rounded-lg bg-[#12151c]">
+      <div className="flex items-center justify-between border-b border-white/10 px-2.5 py-1">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.06em] text-white/50">Code</span>
+        <button
+          type="button"
+          onClick={() => {
+            void navigator.clipboard?.writeText(code).then(() => {
+              setCopied(true);
+              window.setTimeout(() => setCopied(false), 1500);
+            });
+          }}
+          aria-label={copied ? "Copied" : "Copy code"}
+          className="flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-semibold text-white/80 transition hover:bg-white/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
+        >
+          <Copy size={10} aria-hidden="true" />
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+      <pre className="overflow-x-auto p-2.5 font-mono text-[11px] leading-[1.5] text-[#e6e7ea]">
+        <code>{code}</code>
+      </pre>
+    </div>
   );
 }
 

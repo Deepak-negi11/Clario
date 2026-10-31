@@ -37,12 +37,25 @@ export function CoworkerOnMap({ bridgeRef }: { bridgeRef: RefObject<SceneBridge>
     [bridgeRef, openId],
   );
   const close = useCallback(() => setOpenId(null), []);
+  // Read when a message is sent, so they always see the scene's latest.
+  const getPlace = useCallback(() => bridgeRef.current.coworkerPlace?.(), [bridgeRef]);
+  const goTo = useCallback(
+    (room: string) => (openId ? (bridgeRef.current.coworkerGoTo?.(openId, room) ?? false) : false),
+    [bridgeRef, openId],
+  );
 
   if (!openId) return null;
 
   return (
     <div className="pointer-events-auto absolute bottom-3 right-3 top-3 z-[66] w-[min(23rem,calc(100vw-6rem))]">
-      <CoworkerPanel key={openId} coworkerId={openId} onClose={close} onStateChange={showState} />
+      <CoworkerPanel
+        key={openId}
+        coworkerId={openId}
+        onClose={close}
+        onStateChange={showState}
+        getPlace={getPlace}
+        onGoTo={bridgeRef.current.coworkerGoTo ? goTo : undefined}
+      />
     </div>
   );
 }

@@ -40,6 +40,11 @@ export type SceneBridge = {
   // when the player talks to one; the talk panel sets coworkerState (undefined while closed).
   openCoworker?: (id: CoworkerId) => void;
   coworkerState?: { id: CoworkerId; state: MentorState };
+  // Optional, filled by the scene. coworkerPlace: where the player is (map name, the room they're
+  // in, the map's room names, people in the space), so coworkers can say what's going on.
+  // coworkerGoTo: walks a coworker to a room by name; false when this view can't.
+  coworkerPlace?: () => { map: string; room: string | null; rooms: string[]; peopleOnline?: number };
+  coworkerGoTo?: (id: CoworkerId, room: string) => boolean;
   // Game Room and Lounge (components/games/arcade-on-map.tsx): the scene calls openGame when the
   // player uses an arcade machine or the ping-pong table, openTv at the Lounge TV. The overlay
   // turns the game keyboard off while it is open.

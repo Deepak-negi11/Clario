@@ -8,7 +8,7 @@ import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.j
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { Crosshair, LoaderCircle, Map as MapIcon, UserRoundPen, X } from "lucide-react";
 import {
-  coworkerMission, customSeats, getCoworker, RIDE_STEP_MS, type AvatarLook, type CustomMap, type PlayerProp,
+  coworkerMission, customSeats, getCoworker, RIDE_STEP_MS, type AvatarLook, type CoworkerId, type CustomMap, type PlayerProp,
 } from "@repo/shared";
 import { companions, type TalkerId } from "../../lib/companions/store";
 import { lookKey, originalLook } from "../../lib/avatar/recolor";
@@ -22,6 +22,7 @@ import { buildOffice, clearOffice, disposeScene, loadModels, seatMap, textSprite
 import { loadPeople, makePerson, type Doing, type Keyboard, type PeopleKit, type Person } from "./people";
 import { applyProp, disposeObject, dropCan, emptyProps, makeCan, stepFalling, type Falling, type PropState } from "./props-3d";
 import { createTalkerMover, makeTalker, type Talker } from "./talkers";
+import { coworkerPlaces } from "../../lib/companions/coworker-places";
 import { makeWorld } from "./world";
 import type { SceneBridge, SceneMapInfo } from "../phaser/scene-bridge";
 import { attachTvScreen } from "../tv/tv-screen-3d";
@@ -788,6 +789,39 @@ export function Office3D({
       return walkable.blocked;
     };
     let roomLabels: THREE.Sprite[] = [];
+    // Whether a built map is showing (its AI coworkers come from coworkerPlaces, not Clario HQ's).
+    let builtMap = false;
+    const addTalker = ({ id, x, y, look, name, color }: (typeof TALKERS)[number]) => {
+      if (!people) return;
+      const person = makePerson(people, id, look.top, { look });
+      const group = new THREE.Group();
+      group.add(person.root);
+      const label = textSprite(name, { color: "#ffffff", background: color });
+      label.scale.multiplyScalar(0.36);
+      label.position.y = 1.95;
+      label.renderOrder = 20;
+      group.add(label);
+      const talker = makeTalker(id, { x, y }, person, group, label);
+      group.userData.talker = talker;
+      scene.add(group);
+      talkers.push(talker);
+    };
+    // The AI coworkers stand where the 2D map has them (lib/companions/coworker-places.ts): on a
+    // built map they appear once it has placed them, and one sent to another room walks there.
+    const syncCoworkers = () => {
+      const places = coworkerPlaces.get();
+      for (const [id, tile] of Object.entries(places) as [CoworkerId, { x: number; y: number }][]) {
+        const talker = talkers.find((each) => each.id === id);
+        if (!talker) {
+          const known = TALKERS.find((each) => each.id === id);
+          if (builtMap && known) addTalker({ ...known, ...tile });
+          continue;
+        }
+        if (talker.home.x === tile.x && talker.home.y === tile.y) continue;
+        talker.home = { ...tile };
+        talker.plannedFor = null;
+      }
+    };
     // Clario HQ's two rideable bikes in their rack, cans falling after being thrown away, and the
     // can waiting in the vending machine's tray.
     const rackBikes = new Map<string, THREE.Object3D>();
@@ -840,30 +874,22 @@ export function Office3D({
       const onPath = (x: number, z: number) => x > HQ_PATH.x - 0.2 && x < HQ_PATH.x + HQ_PATH.w + 0.2 && z > HQ_PATH.y - 0.6;
       const inBuilding = (x: number, z: number) => x > 1.6 && x < HQ_COLS - 2.6 && z > 1.6 && z < HQ_PATH.y + 0.4;
       world.furnish(office, cols, rows, map ? outside : (x, z) => !inBuilding(x, z) && !onPath(x, z));
-      // Background coworkers sit at Clario HQ's desks, and Maya and the AI coworkers stand in its
-      // rooms, so only Clario HQ has them.
+      // Background coworkers sit at Clario HQ's desks and Maya stands in its Focus Room, so only
+      // Clario HQ has them; the AI coworkers are on every map, where the 2D map put them.
       for (const { person, group } of [...coworkers.splice(0), ...talkers.splice(0)]) {
         scene.remove(group);
         person.dispose();
       }
       // They start again at their spots, so nobody is still walking with you.
       companions.setOpen(false);
-      if (map || !people) return;
+      builtMap = !!map;
+      if (!people) return;
       companions.setOpen(true);
-      for (const { id, x, y, look, name, color } of TALKERS) {
-        const person = makePerson(people, id, look.top, { look });
-        const group = new THREE.Group();
-        group.add(person.root);
-        const label = textSprite(name, { color: "#ffffff", background: color });
-        label.scale.multiplyScalar(0.36);
-        label.position.y = 1.95;
-        label.renderOrder = 20;
-        group.add(label);
-        const talker = makeTalker(id, { x, y }, person, group, label);
-        group.userData.talker = talker;
-        scene.add(group);
-        talkers.push(talker);
+      if (map) {
+        syncCoworkers();
+        return;
       }
+      for (const talker of TALKERS) addTalker(talker);
       for (const { id, x, y, talking } of COWORKERS) {
         const seat = seats.get(`${x},${y}`);
         if (!seat) continue;
@@ -973,6 +999,7 @@ export function Office3D({
       }
       // Maya and the AI coworkers face the room and turn to you when you come up to them, or walk
       // and play with you when asked.
+      syncCoworkers();
       moveTalkers(talkers, {
         dt, time: clock.elapsedTime, self, others: Object.values(othersRef.current ?? {}), blocked: blockedTiles(), cols, rows, seats,
       });
