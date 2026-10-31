@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { MotionConfig, motion, type Variants } from "motion/react";
 import { ArrowRight, UsersRound } from "lucide-react";
@@ -8,13 +8,16 @@ import { ARCADE_GAMES, type ArcadeGameKind } from "../../components/games/arcade
 import { ArcadeOverlay } from "../../components/games/arcade-overlay";
 import { GamePreview } from "../../components/games/game-preview";
 import { TetrisOverlay } from "../../components/games/tetris-overlay";
+import { TetrisPreview } from "../../components/games/tetris-preview";
 
 // The Game Room without the map: the same games the office opens, reachable from classic mode and
 // handy for testing. Two people can share this device; online play needs the space (the map), where
 // everyone's connected. The Lounge TV lives in the office itself.
 
+// Five games: one row on wide screens; three, two or one a row on smaller ones, with the last row
+// centred (widths leave room for the gap-3 gaps between them).
 const card =
-  "group flex w-full cursor-pointer touch-manipulation flex-col gap-3 rounded-2xl border border-black/[0.06] bg-white p-2.5 text-left shadow-[0_1px_2px_rgba(18,21,28,0.06)] transition-shadow hover:shadow-[0_14px_30px_-18px_rgba(18,21,28,0.45)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#12151c] motion-reduce:transition-none";
+  "group flex w-full cursor-pointer touch-manipulation flex-col gap-3 sm:w-[calc((100%_-_0.75rem)/2)] lg:w-[calc((100%_-_1.5rem)/3)] xl:w-[calc((100%_-_3rem)/5)] rounded-2xl border border-black/[0.06] bg-white p-2.5 text-left shadow-[0_1px_2px_rgba(18,21,28,0.06)] transition-shadow hover:shadow-[0_14px_30px_-18px_rgba(18,21,28,0.45)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#12151c] motion-reduce:transition-none";
 const pixelFont = "font-[family-name:var(--font-pixel)]";
 
 // The cards come in one after another, lift a little under the pointer and press in when tapped.
@@ -41,7 +44,7 @@ export default function ArcadePage() {
   return (
     <MotionConfig reducedMotion="user">
       <main className="min-h-dvh bg-[#f6f6f4] px-4 py-6 text-[#12151c]">
-        <motion.div className="mx-auto flex w-full max-w-5xl flex-col gap-6" initial="hidden" animate="shown" variants={list}>
+        <motion.div className="mx-auto flex w-full max-w-7xl flex-col gap-6" initial="hidden" animate="shown" variants={list}>
           <nav className="flex items-center justify-between text-xs text-[#5c6371]">
             <Link href="/spaces" className="rounded underline-offset-2 hover:text-[#12151c] hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#12151c]">
               Back to spaces
@@ -59,60 +62,32 @@ export default function ArcadePage() {
             </p>
           </motion.header>
 
-          <motion.button
-            type="button"
-            className="group flex w-full cursor-pointer touch-manipulation items-center gap-4 rounded-2xl bg-[#0d0b18] p-3 text-left text-white shadow-[0_14px_30px_-18px_rgba(18,21,28,0.6)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#12151c] sm:p-4"
-            variants={item}
-            whileHover={lift}
-            whileTap={press}
-            onClick={() => setOpen("tetris")}
-          >
-            <span aria-hidden="true" className="relative grid h-20 w-36 shrink-0 grid-cols-9 grid-rows-5 gap-px overflow-hidden rounded-xl bg-[#07050d] p-1.5 ring-1 ring-white/10">
-              {TETRIS_BLOCKS.map(([x, y, color]) => (
-                <span key={`${x}-${y}`} className="rounded-[2px]" style={{ gridColumn: x + 1, gridRow: y + 1, background: color, boxShadow: "inset 2px 2px 0 rgba(255,255,255,0.35), inset -2px -2px 0 rgba(0,0,0,0.3)" }} />
-              ))}
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className={`${pixelFont} block text-xl text-[#ffe066]`}>Tetris</span>
-              <span className="mt-0.5 block text-[13px] leading-snug text-[#c9cde0]">
-                On a real 3D arcade cabinet, the one in the office&apos;s Game Room. Hold, next pieces, T-spins and levels.
-              </span>
-            </span>
-            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#ffe066] text-[#1a1430] transition group-hover:bg-[#fff0a0] motion-reduce:transition-none">
-              <ArrowRight size={16} aria-hidden="true" />
-              <span className="sr-only">Play</span>
-            </span>
-          </motion.button>
-
-          <motion.section aria-label="Games" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" variants={list}>
+          <motion.section aria-label="Games" className="flex flex-wrap justify-center gap-3" variants={list}>
             {ARCADE_GAMES.map((game) => (
-              <motion.button
+              <GameCard
                 key={game.kind}
-                type="button"
-                className={card}
-                variants={item}
-                whileHover={lift}
-                whileTap={press}
-                onClick={() => setOpen(game.kind)}
-              >
-                <span className="overflow-hidden rounded-xl ring-1 ring-black/10">
-                  <GamePreview spec={game} />
-                </span>
-                <span className="flex items-end justify-between gap-3 px-1.5 pb-1">
-                  <span className="min-w-0">
-                    <span className={`${pixelFont} block text-xl`}>{game.title}</span>
-                    <span className="mt-0.5 block text-[13px] leading-snug text-[#4b5260]">{game.blurb}</span>
-                    <span className="mt-1.5 flex items-center gap-1 text-[12px] text-[#5c6371]">
-                      <UsersRound size={13} aria-hidden="true" className="shrink-0" /> {game.together}
-                    </span>
-                  </span>
-                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#12151c] text-white transition group-hover:bg-black motion-reduce:transition-none">
-                    <ArrowRight size={16} aria-hidden="true" />
-                    <span className="sr-only">Play</span>
-                  </span>
-                </span>
-              </motion.button>
+                preview={<GamePreview spec={game} />}
+                title={game.title}
+                blurb={game.blurb}
+                together={game.together}
+                onOpen={() => setOpen(game.kind)}
+              />
             ))}
+            <GameCard
+              preview={
+                <span className="relative grid aspect-[3/2] w-full grid-cols-9 grid-rows-5 gap-px bg-[#07050d] p-2">
+                  {TETRIS_BLOCKS.map(([x, y, color]) => (
+                    <span key={`${x}-${y}`} className="rounded-[2px]" style={{ gridColumn: x + 1, gridRow: y + 1, background: color, boxShadow: "inset 2px 2px 0 rgba(255,255,255,0.35), inset -2px -2px 0 rgba(0,0,0,0.3)" }} />
+                  ))}
+                  {/* The cabinet in 3D, over the blocks once it's ready. */}
+                  <TetrisPreview />
+                </span>
+              }
+              title="Tetris"
+              blurb="On a real arcade cabinet. Hold, next pieces, T-spins and levels."
+              together="1 player, vs the computer, or 2 players"
+              onOpen={() => setOpen("tetris")}
+            />
           </motion.section>
         </motion.div>
 
@@ -120,5 +95,27 @@ export default function ArcadePage() {
         {open && open !== "tetris" && <ArcadeOverlay key={open} initialGame={open} onDismiss={close} />}
       </main>
     </MotionConfig>
+  );
+}
+
+// One game on the menu: its 3D still, its name, what it is, who plays, and a play arrow.
+function GameCard({ preview, title, blurb, together, onOpen }: { preview: ReactNode; title: string; blurb: string; together: string; onOpen: () => void }) {
+  return (
+    <motion.button type="button" className={card} variants={item} whileHover={lift} whileTap={press} onClick={onOpen}>
+      <span className="overflow-hidden rounded-xl ring-1 ring-black/10">{preview}</span>
+      <span className="flex items-end justify-between gap-3 px-1.5 pb-1">
+        <span className="min-w-0">
+          <span className={`${pixelFont} block text-xl`}>{title}</span>
+          <span className="mt-0.5 block text-[13px] leading-snug text-[#4b5260]">{blurb}</span>
+          <span className="mt-1.5 flex items-center gap-1 text-[12px] text-[#5c6371]">
+            <UsersRound size={13} aria-hidden="true" className="shrink-0" /> {together}
+          </span>
+        </span>
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#12151c] text-white transition group-hover:bg-black motion-reduce:transition-none">
+          <ArrowRight size={16} aria-hidden="true" />
+          <span className="sr-only">Play</span>
+        </span>
+      </span>
+    </motion.button>
   );
 }

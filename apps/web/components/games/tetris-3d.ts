@@ -8,9 +8,10 @@
 //
 // The game itself is painted by tetris-screen.ts onto a canvas; this uses that canvas as the
 // monitor, with the blocks standing in front of it in 3D (tetris-blocks-3d.ts). In versus the
-// machine to the right slides up alongside and shows the other player's screen. On opening the camera glides in from across the room to the machine, and moves up to
-// the screen while a game is on; with reduced motion it cuts instead, and doesn't jolt or follow
-// the pointer.
+// machine to the right slides up level with yours, lights a Tetris marquee and shows the other
+// player's screen, and the camera frames the pair. On opening the camera glides in from across the
+// room to the machine, and moves up to the screen while a game is on; with reduced motion it cuts
+// instead, and doesn't jolt or follow the pointer.
 
 import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
@@ -61,7 +62,7 @@ const BUTTONS: { id: CabinetButton; x: number; z: number; color: string; label: 
   { id: "cw", x: 0.115, z: -0.042, color: "#2f6fe0", label: "TURN ↻", size: 0.016 },
   { id: "hold", x: 0.175, z: -0.042, color: "#f0c419", label: "HOLD", size: 0.016 },
   { id: "drop", x: 0.09, z: 0.05, color: "#e2332e", label: "DROP", size: 0.019 },
-  { id: "start", x: -0.02, z: -0.085, color: "#f4f4f0", label: "START", size: 0.011 },
+  { id: "start", x: -0.02, z: -0.085, color: "#dcdad2", label: "START", size: 0.011 },
 ];
 
 // What one player's hands are doing, for the joystick and buttons.
@@ -69,7 +70,8 @@ export type CabinetControls = { stick: { x: number; down: boolean }; pressed: Re
 // One frame: `playing` brings the camera up close (otherwise it stands back to show the machine);
 // `versus` puts the second player at the machine to the right; `narrow` (phones) keeps the camera
 // on your own screen even then. players[0] is at the middle machine, players[1] at the right one.
-export type CabinetFrame = { playing: boolean; versus: boolean; narrow: boolean; players: { game: Tetris; controls: CabinetControls }[] };
+// `showcase` is for the arcade menu's still (tetris-preview.tsx): your machine three-quarters on.
+export type CabinetFrame = { playing: boolean; versus: boolean; narrow: boolean; showcase?: boolean; players: { game: Tetris; controls: CabinetControls }[] };
 
 export type TetrisCabinet = {
   canvas: HTMLCanvasElement;
@@ -506,7 +508,8 @@ function buildCabinet(look: CabinetLook, shared: { laminate: THREE.Material; mol
     housing.position.set(spec.x, 0.004, spec.z);
     const plunger = new THREE.Mesh(
       new THREE.CylinderGeometry(spec.size, spec.size, 0.012, 32),
-      new THREE.MeshPhysicalMaterial({ color: spec.color, roughness: 0.25, clearcoat: 0.8, clearcoatRoughness: 0.15 }),
+      // A satin clear coat: a tight one makes a hot spot under the lamp that blooms (the white START most of all).
+      new THREE.MeshPhysicalMaterial({ color: spec.color, roughness: 0.35, clearcoat: 0.6, clearcoatRoughness: 0.32 }),
     );
     plunger.position.set(spec.x, 0.011, spec.z);
     plunger.userData.rest = 0.011;
@@ -558,7 +561,8 @@ function buildCabinet(look: CabinetLook, shared: { laminate: THREE.Material; mol
     position.setZ(i, 0.012 * (1 - x * x * 0.8) * (1 - y * y * 0.8));
   }
   tubeGeometry.computeVertexNormals();
-  const screenMaterial = new THREE.MeshStandardMaterial({ color: "#000000", emissive: "#ffffff", emissiveMap: look.screen, emissiveIntensity: 1.25, roughness: 0.5, metalness: 0 });
+  // Matte, so lamps above don't leave a bright haze across the top of the well.
+  const screenMaterial = new THREE.MeshStandardMaterial({ color: "#000000", emissive: "#ffffff", emissiveMap: look.screen, emissiveIntensity: 1.25, roughness: 0.85, metalness: 0, envMapIntensity: 0.2 });
   const tube = new THREE.Mesh(tubeGeometry, screenMaterial);
   tube.position.set(0, TUBE_Y, -TUBE_DEPTH + 0.004);
   monitor.add(tube);
@@ -653,7 +657,8 @@ export function createTetrisCabinet({ screens, reducedMotion, onLost }: { screen
 
   const shared = {
     laminate: mat("#101014", 0.55),
-    molding: mat("#8e97ad", 0.38, { metalness: 0.85 }),
+    // Satin, not mirror chrome: polished edges catch the spot as hard white streaks.
+    molding: mat("#7d8599", 0.55, { metalness: 0.7 }),
     steel: mat("#7c8494", 0.38, { metalness: 0.85 }),
     chrome: mat("#e4e8f0", 0.12, { metalness: 1 }),
     black: mat("#0b0b0e", 0.5),
@@ -673,7 +678,9 @@ export function createTetrisCabinet({ screens, reducedMotion, onLost }: { screen
   const main = buildCabinet(textures(["#2a2fd6", "#4a1a8f", 3], "TETRIS", screenTexture), shared);
   scene.add(main.group);
   const wellBlocks = createWellBlocks(main.tube, { width: TUBE_W, height: TUBE_H, bulge: 0.012 }, reducedMotion);
-  // Neighbours, turned in a little.
+  // Neighbours, turned in a little and a step back, and dimmer than yours so the eye goes to it.
+  const NEIGHBOUR_SCREEN = 0.5;
+  const NEIGHBOUR_MARQUEE = 0.65;
   const neighbours = [
     { x: -0.98, turn: 0.22, side: ["#b0162d", "#4a0b2a", 9] as [string, string, number], title: "BLOCKS", seed: 4 },
     { x: 0.98, turn: -0.22, side: ["#0f8f6a", "#0b3b4a", 17] as [string, string, number], title: "STACKS", seed: 8 },
@@ -682,24 +689,31 @@ export function createTetrisCabinet({ screens, reducedMotion, onLost }: { screen
     const parts = buildCabinet(textures(spec.side, spec.title, attractScreen(font, spec.seed)), shared);
     parts.group.position.set(spec.x, 0, -0.08);
     parts.group.rotation.y = spec.turn;
-    parts.screenMaterial.emissiveIntensity = 0.7;
-    parts.marqueeMaterial.emissiveIntensity = 0.9;
+    parts.screenMaterial.emissiveIntensity = NEIGHBOUR_SCREEN;
+    parts.marqueeMaterial.emissiveIntensity = NEIGHBOUR_MARQUEE;
     scene.add(parts.group);
     return parts;
   })[1]!;
-  // In versus the right machine stands square beside yours and shows the other player's game.
+  // In versus the right machine stands square and level beside yours (the same distance from the
+  // camera, so both screens come out the same size), says Tetris on top, and shows the other
+  // player's game. Its own screen and marquee come back when versus ends.
   const rivalAttract = rival.screenMaterial.emissiveMap;
-  const rivalSpot = { apart: { x: 0.98, turn: -0.22 }, versus: { x: 0.74, turn: 0 } };
+  const rivalMarquee = rival.marqueeMaterial.map;
+  const rivalSpot = { apart: { x: 0.98, z: -0.08, turn: -0.22 }, versus: { x: W + 0.04, z: 0, turn: 0 } };
   let versusOn = false;
   function setVersus(on: boolean) {
     versusOn = on;
     const spot = on ? rivalSpot.versus : rivalSpot.apart;
-    rival.group.position.x = spot.x;
+    rival.group.position.set(spot.x, 0, spot.z);
     rival.group.rotation.y = spot.turn;
     rival.group.updateMatrixWorld(true);
     rival.screenMaterial.emissiveMap = on ? rivalTexture : rivalAttract;
-    rival.screenMaterial.emissiveIntensity = on ? 1.2 : 0.7;
+    rival.screenMaterial.emissiveIntensity = on ? 1.25 : NEIGHBOUR_SCREEN;
     rival.screenMaterial.needsUpdate = true;
+    const marquee = on ? main.marqueeMaterial.map : rivalMarquee;
+    rival.marqueeMaterial.map = rival.marqueeMaterial.emissiveMap = marquee;
+    rival.marqueeMaterial.emissiveIntensity = on ? 1.1 : NEIGHBOUR_MARQUEE;
+    rival.marqueeMaterial.needsUpdate = true;
     frame();
   }
 
@@ -731,19 +745,19 @@ export function createTetrisCabinet({ screens, reducedMotion, onLost }: { screen
   // Below the tube, so it lights the control panel without a glare spot on the glass.
   screenLight.position.copy(main.tubeCentre).addScaledVector(main.tubeNormal, 0.35);
   screenLight.position.y -= 0.35;
-  // Tucked under the marquee's overhang, out of sight.
-  const marqueeLight = new THREE.PointLight("#c9b8ff", 0.3, 1.2, 1.8);
-  marqueeLight.position.set(0, 1.6, 0.2);
+  // (No lamp under the marquee: it sat a hand's width from the top of the well and turned the
+  // falling piece white.)
   const rimLeft = new THREE.PointLight("#ff3fa4", 3, 4, 1.5);
   rimLeft.position.set(-1.5, 1.8, -0.5);
   const rimRight = new THREE.PointLight("#2de2e6", 3, 4, 1.5);
   rimRight.position.set(1.5, 1.8, -0.5);
-  scene.add(screenLight, marqueeLight, rimLeft, rimRight);
+  scene.add(screenLight, rimLeft, rimRight);
 
   const camera = new THREE.PerspectiveCamera(32, 1.6, 0.05, 30);
   const composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
-  const bloom = new UnrealBloomPass(new THREE.Vector2(512, 320), 0.4, 0.4, 0.9);
+  // Only what's brighter than white glows: the tubes and marquees, not lit plastic or metal edges.
+  const bloom = new UnrealBloomPass(new THREE.Vector2(512, 320), 0.32, 0.4, 1.0);
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
 
@@ -757,12 +771,24 @@ export function createTetrisCabinet({ screens, reducedMotion, onLost }: { screen
   let narrow = false;
   const wide = { position: new THREE.Vector3(1.1, 1.6, 3.6), target: new THREE.Vector3(0, 1.0, 0) };
   const machine = { position: new THREE.Vector3(), target: new THREE.Vector3() };
+  const pair = { position: new THREE.Vector3(), target: new THREE.Vector3() };
   const close = { position: new THREE.Vector3(), target: new THREE.Vector3() };
+  const raised = { position: new THREE.Vector3(), target: new THREE.Vector3() };
   const both = { position: new THREE.Vector3(), target: new THREE.Vector3() };
+  const showcase = { position: new THREE.Vector3(), target: new THREE.Vector3() };
+  // From the front left and a little above, so the side art and the depth of the machine show.
+  const towardsShowcase = new THREE.Vector3(-0.85, 0.3, 1).normalize();
+  // Along the tube's face, towards its top.
+  const tubeUp = new THREE.Vector3(0, main.tubeNormal.z, -main.tubeNormal.y);
   const eye = wide.position.clone();
   const look = wide.target.clone();
   let started = false;
-  const towardsMachine = new THREE.Vector3(0.28, 0.1, 1).normalize();
+  const towardsMachine = new THREE.Vector3(0.18, 0.12, 1).normalize();
+  const towardsPair = new THREE.Vector3(0, 0.12, 1).normalize();
+  // From the control panel's front edge to the marquee's top, with a little room round it. The
+  // marquee juts out towards the camera, so it needs more room than its height alone.
+  const MACHINE_H = 1.38;
+  const MACHINE_MID_Y = 1.33;
 
   const fit = (needW: number, needH: number) => {
     const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
@@ -771,19 +797,33 @@ export function createTetrisCabinet({ screens, reducedMotion, onLost }: { screen
   function frame() {
     // Narrow or squarish (phones): the tube alone, as big as it goes.
     const portrait = aspect < 1.3;
-    // The machine from the control panel up to the marquee, a little from the side.
-    machine.target.set(0, portrait ? 1.3 : 1.36, 0.16);
-    machine.position.copy(machine.target).addScaledVector(towardsMachine, fit(portrait ? 0.8 : 1.0, 1.1));
+    // The whole machine, from the control panel up to the marquee, a little from the side, with
+    // the neighbours at the edges.
+    machine.target.set(0, MACHINE_MID_Y, 0.12);
+    machine.position.copy(machine.target).addScaledVector(towardsMachine, fit(portrait ? 0.8 : 1.0, MACHINE_H));
+    // Versus, before a game: both machines, square on, from halfway between yours (at x = 0) and theirs.
+    pair.target.set(rival.group.position.x / 2, MACHINE_MID_Y, 0.12);
+    pair.position.copy(pair.target).addScaledVector(towardsPair, fit(rival.group.position.x + W + 0.16, MACHINE_H));
     // The tube filling the view, seen a touch from above.
     close.target.copy(main.tubeCentre);
-    close.position.copy(main.tubeCentre).addScaledVector(main.tubeNormal, fit(TUBE_W + 0.05, TUBE_H + 0.05));
+    const closeDistance = fit(TUBE_W + 0.05, TUBE_H + 0.05);
+    close.position.copy(main.tubeCentre).addScaledVector(main.tubeNormal, closeDistance);
     close.position.y += 0.02;
+    // Versus on a phone: the same, with the tube moved up to the top edge so the other player's
+    // screen (in the corner, drawn by the page) fits underneath it instead of over it.
+    const shownHeight = 2 * closeDistance * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+    const lift = Math.max(0, (shownHeight - TUBE_H) / 2 - 0.012);
+    raised.target.copy(close.target).addScaledVector(tubeUp, -lift);
+    raised.position.copy(close.position).addScaledVector(tubeUp, -lift);
     // Versus: both tubes side by side.
     const rivalCentre = rival.group.localToWorld(rival.tubeCentre.clone());
     both.target.lerpVectors(main.tubeCentre, rivalCentre, 0.5);
     const width = main.tubeCentre.distanceTo(rivalCentre) + TUBE_W + 0.08;
     both.position.copy(both.target).addScaledVector(main.tubeNormal, fit(width, TUBE_H + 0.12));
     both.position.y += 0.03;
+    // The menu's still: your machine from the coin door up, three-quarters on.
+    showcase.target.set(0, 1.2, 0.05);
+    showcase.position.copy(showcase.target).addScaledVector(towardsShowcase, fit(1.25, 1.5));
   }
   frame();
 
@@ -792,10 +832,11 @@ export function createTetrisCabinet({ screens, reducedMotion, onLost }: { screen
 
   return {
     canvas,
-    render(dt, time, { playing, versus, narrow: isNarrow, players }) {
+    render(dt, time, { playing, versus, narrow: isNarrow, showcase: still = false, players }) {
       if (versus !== versusOn) setVersus(versus);
       narrow = isNarrow;
-      const goal = versus && playing && !narrow ? both : playing ? close : machine;
+      const side = versus && !narrow;
+      const goal = still ? showcase : playing ? (side ? both : versus ? raised : close) : side ? pair : machine;
       if (!motion || !started) {
         // With reduced motion the camera cuts; otherwise it starts across the room.
         if (!motion) {
@@ -876,6 +917,7 @@ export function createTetrisCabinet({ screens, reducedMotion, onLost }: { screen
       screenTexture.dispose();
       rivalTexture.dispose();
       rivalAttract?.dispose();
+      rivalMarquee?.dispose();
       environment.dispose();
       pmrem.dispose();
       bloom.dispose();
