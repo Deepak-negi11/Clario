@@ -12,6 +12,7 @@
     "check-types": "next typegen && tsc --noEmit"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.3.0",
     "@mediapipe/tasks-vision": "1.1.1",
     "@repo/shared": "workspace:*",
     "@repo/ui": "*",
