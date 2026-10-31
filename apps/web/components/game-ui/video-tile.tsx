@@ -185,6 +185,7 @@ export function MediaDock({
   remoteScreenStreams,
   nearbyIds,
   names,
+  lowered = false,
 }: {
   selfName: string;
   localStream: MediaStream | null;
@@ -193,6 +194,8 @@ export function MediaDock({
   remoteScreenStreams: Record<string, MediaStream>;
   nearbyIds: Set<string>;
   names: Record<string, string>;
+  // Below the 3D view's toolbar, which has the top right corner.
+  lowered?: boolean;
 }) {
   const [spotlightKey, setSpotlightKey] = useState<string | null>(null);
   const selfCameraLive = useLiveVideo(localStream);
@@ -221,7 +224,7 @@ export function MediaDock({
 
   return (
     <>
-      <div className="pointer-events-none absolute right-4 top-4 z-30 flex max-h-[calc(100dvh-15rem)] flex-col items-end gap-2 overflow-y-auto p-1">
+      <div className={`pointer-events-none absolute right-4 ${lowered ? "top-[4.5rem]" : "top-4"} z-30 flex max-h-[calc(100dvh-15rem)] flex-col items-end gap-2 overflow-y-auto p-1`}>
         {tiles.map((tile) => (
           <ScreenAwareTile
             key={tile.key}

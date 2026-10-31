@@ -28,6 +28,7 @@ Show controls
 */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { templateOffice3d } from "../../../lib/maps/template-office-3d";
 import { useParams, useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { LoaderCircle, MessageSquare } from "lucide-react";
@@ -271,7 +272,8 @@ function LiveSpace({
   // for Clario HQ's rooms (both Clario HQ maps).
   const isHq = isClarioHq(mapTemplate);
   const only3d = mapTemplate === "clario-hq-3d";
-  const can3d = only3d || (isCustomMap && !!customMap);
+  const [template3d, setTemplate3d] = useState<CustomMap | null>(null);
+  const can3d = isHq || !!template3d || (isCustomMap && !!customMap);
   const show3d = only3d || (can3d && view3d);
   // False until the map has loaded its art; the blue loading screen stays up until then.
   const [mapReady, setMapReady] = useState(false);
@@ -480,7 +482,10 @@ function LiveSpace({
         playerClickRef={playerClickRef}
         bridgeRef={bridgeRef}
         selfId={selfId}
-        onReady={() => setMapReady(true)}
+        onReady={() => {
+          setTemplate3d(templateOffice3d(mapTemplate, bridgeRef.current.map));
+          setMapReady(true);
+        }}
       />}
       {currentRoom && !selectedPlayerId && (
         <div
@@ -527,8 +532,10 @@ function LiveSpace({
         remoteScreenStreams={remoteScreenStreams}
         nearbyIds={nearbyIds}
         names={names}
+        lowered={show3d}
       />
-      <MapControls bridgeRef={bridgeRef} onOpen3d={can3d && !only3d ? () => setView3d(true) : undefined} />
+      {/* The 3D view zooms with the scroll wheel; these zoom the 2D map. */}
+      {!show3d && <MapControls bridgeRef={bridgeRef} onOpen3d={can3d && !only3d ? () => setView3d(true) : undefined} />}
       <ControlBar
         displayName={(selfId ? names[selfId] : undefined) ?? "You"}
         onReact={sendReaction}
@@ -551,12 +558,16 @@ function LiveSpace({
           onClose={only3d ? undefined : () => setView3d(false)}
           onWalkTo={(x, y) => bridgeRef.current.walkTo?.(x, y)}
           errandTarget={errandTarget}
-          customMap={isCustomMap ? draftMap ?? customMap : null}
+          customMap={isCustomMap ? draftMap ?? customMap : template3d}
           looksRef={looksRef}
           onUpdateLook={handleUpdateLook}
           onTalk={(id) => (id === "maya" ? bridgeRef.current.openMentor?.() : bridgeRef.current.openCoworker?.(id))}
           onPlay={(action) => (action.kind === "tv" ? bridgeRef.current.openTv?.() : bridgeRef.current.openGame?.(action.game))}
           bridgeRef={bridgeRef}
+          nearbyRef={nearbyRef}
+          reactionsRef={reactionsRef}
+          activitiesRef={activitiesRef}
+          onPlayerClick={(userId) => playerClickRef.current?.(userId)}
         />
       )}
       {errands.run && errands.errand && (errandRunning ? (
