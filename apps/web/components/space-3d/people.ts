@@ -60,6 +60,23 @@ const RIDE_LEAN = 0.6;
 const SIT_UP = 0.5;
 const LOOK_AHEAD = 0.8;
 const HIP_ROCK = 0.05;
+// The jog clip at JOG_SPEED keeps pace with this many tiles a second; faster or slower walkers
+// play it faster or slower (within STRIDE_RANGE) so their feet don't slide.
+const JOG_TILES = 5.5;
+const STRIDE_RANGE = [0.6, 1.6] as const;
+// Glancing: how far the head turns (radians, side to side and up and down) and how quickly; the
+// neck takes this share of it. Someone with no one to look at glances about every few seconds.
+const LOOK_TURN = 1.2;
+const LOOK_TILT = 0.45;
+const LOOK_RATE = 5;
+const NECK_SHARE = 0.4;
+// Typing: the wrists rest this far back from the keys and above them (metres), each hand this far
+// to the side of the middle, fingers tapping this high.
+const WRIST_FROM_KEYS = 0.07;
+const WRIST_OVER_KEYS = 0.03;
+const HAND_APART = 0.085;
+const TAP = 0.012;
+
 // The ball of the foot is this high over what it stands on, and the wrist this far behind and above
 // the middle of the grip (metres, before SCALE), the knuckles curled this far down over it (radians).
 const BALL_HEIGHT = 0.035;
@@ -152,10 +169,17 @@ export type Gear = {
 // Where the ball of a foot rests, with the foot tipped `pitch` toes down (radians).
 export type Foothold = { at: THREE.Vector3; pitch: number };
 
+// What someone is up to besides their pose: how fast they are going (tiles a second, so their
+// steps match the ground), a point they look at (a head nearby; null to glance about now and
+// then), and a laptop they type at.
+export type Doing = { speed?: number; look?: THREE.Vector3 | null; typing?: Keyboard | null };
+// A laptop's keys (their middle, world space), and the way from them toward the person typing.
+export type Keyboard = { at: THREE.Vector3; toward: THREE.Vector3 };
+
 export type Person = {
   root: THREE.Object3D;
   // walk, sit and play run from 0 to 1 and blend the clips; play shows while standing.
-  update: (dt: number, walk: number, sit: number, play?: number, gear?: Gear) => void;
+  update: (dt: number, walk: number, sit: number, play?: number, gear?: Gear, doing?: Doing) => void;
   // Puts something in their left hand (a drinks can, its middle at its origin), or empties it.
   hold: (object: THREE.Object3D | null) => void;
   // Plays a gesture once, over whatever else they are doing.
@@ -552,6 +576,10 @@ export function makePerson(
     playBody: mixer.clipAction(body.playing.body),
   };
   actions.move.timeScale = JOG_SPEED;
+  let rand = 0;
+  for (const char of id) rand = (rand * 31 + char.charCodeAt(0)) % 9973;
+  // A small random number each call, the same for a person every time (their glances).
+  const next = () => (rand = (rand * 16807 + 11) % 2147483647) / 2147483647;
   const ride = {
     upper: mixer.clipAction(body.riding.upper),
     hips: mixer.clipAction(body.riding.hips),
@@ -587,6 +615,7 @@ export function makePerson(
   const legs = (["l", "r"] as const).map((side) => ({ upper: bone(`thigh_${side}`), lower: bone(`calf_${side}`), end: bone(`foot_${side}`) }));
   const balls = [bone("ball_l"), bone("ball_r")];
   const pelvis = bone("pelvis");
+  const neck = bone("neck_01");
   const upperBack = bone("spine_03");
   const headBone = bone("Head");
   const spine = bone("spine_01");
@@ -657,6 +686,11 @@ export function makePerson(
     handAxes(fingers, thumbWay, handGoal);
     turnBy(hand.end, turn.setFromRotationMatrix(handGoal.multiply(handNow.transpose())), weight);
   };
+  // Where the head is turned (radians, + to their left and up), where it is turning to, and the
+  // next idle glance, and the clock their glances and typing run on.
+  const gaze = { turn: 0, tilt: 0, goalTurn: 0, goalTilt: 0, glanceAt: 2 + pick(id, [0, 1.3, 2.6, 3.9], 53), glanceUntil: 0 };
+  let clock = 0;
+  const typePhase = pick(id, [0, 0.7, 1.4, 2.1, 2.8], 59);
   // Start people at different points in their idle so a room doesn't sway in step.
   actions.idle.time = actions.playBody.time = pick(id, [0, 0.4, 0.8, 1.2, 1.6, 2], 43);
   actions.sit.time = actions.playArms.time = pick(id, [0, 0.3, 0.6, 0.9, 1.2, 1.5], 47);
@@ -683,7 +717,8 @@ export function makePerson(
       action.reset().play();
       playingGesture = { action, age: 0, length: action.getClip().duration / GESTURE_SPEED[kind], weight: 0 };
     },
-    update: (dt, walk, sit, play = 0, gear = {}) => {
+    update: (dt, walk, sit, play = 0, gear = {}, doing = {}) => {
+      clock += dt;
       // Undo last frame's lean and sip first (they went on after the tuck).
       for (const [target, before] of turned) target.quaternion.copy(before);
       turned.clear();
@@ -737,6 +772,9 @@ export function makePerson(
         ride.straight[i]!.setEffectiveWeight(riding * (1 - bend));
       });
       holdAction.setEffectiveWeight(gear.hold ?? 0);
+      // Steps that keep pace with the ground they cover.
+      actions.move.timeScale = doing.speed === undefined ? JOG_SPEED
+        : JOG_SPEED * THREE.MathUtils.clamp(doing.speed / JOG_TILES, STRIDE_RANGE[0], STRIDE_RANGE[1]);
       mixer.update(dt);
       model.position.z = SIT_FORWARD * seated * keep;
       model.updateMatrixWorld(true);
@@ -790,6 +828,55 @@ export function makePerson(
           balls[i]!.getWorldPosition(v.elbow);
           turnBy(leg.end, turn.setFromUnitVectors(v.elbow.sub(v.wrist).normalize(), toes), riding);
         });
+      }
+      // At a laptop: the hands on the keys, fingers tapping, one hand then the other.
+      const typing = doing.typing ? seated * keep * (1 - drink) : 0;
+      if (typing > 0.01 && doing.typing) {
+        const { at, toward } = doing.typing;
+        arms.forEach((limb, i) => {
+          const outward = i === 0 ? 1 : -1;
+          const tap = Math.pow(Math.max(0, Math.sin(clock * 15 + i * 2.1 + typePhase)), 3) * TAP;
+          aim.copy(at).addScaledVector(left, HAND_APART * outward).addScaledVector(toward, WRIST_FROM_KEYS).addScaledVector(up, WRIST_OVER_KEYS + tap);
+          bend.copy(up).negate().addScaledVector(left, 0.6 * outward).addScaledVector(forward, -0.2);
+          reach(limb, aim, bend, typing);
+          knuckles.copy(forward).multiplyScalar(Math.cos(0.35)).addScaledVector(up, -Math.sin(0.35));
+          holdBar(limb, knuckles, inward.copy(left).multiplyScalar(-outward), typing);
+        });
+      }
+      // Glancing: at the point they were given, if it's in front of them, or now and then about the
+      // room. Not on a bike, mid-sip or mid-gesture, and less while walking.
+      const attention = (1 - riding) * (1 - drink) * (1 - gestureWeight) * (1 - 0.6 * walk) * (1 - 0.5 * typing);
+      let looking = false;
+      if (doing.look) {
+        headBone.getWorldPosition(v.target);
+        const toward = v.a.subVectors(doing.look, v.target);
+        const ahead = toward.dot(forward);
+        const side = toward.dot(left);
+        if (Math.atan2(Math.abs(side), ahead) < 1.7) {
+          gaze.goalTurn = THREE.MathUtils.clamp(Math.atan2(side, ahead), -LOOK_TURN, LOOK_TURN);
+          gaze.goalTilt = THREE.MathUtils.clamp(Math.atan2(toward.dot(up), Math.hypot(ahead, side)), -LOOK_TILT, LOOK_TILT);
+          looking = true;
+        }
+      }
+      if (!looking) {
+        if (clock > gaze.glanceAt) {
+          // A glance aside for a second or two, then a few seconds facing ahead.
+          gaze.goalTurn = (next() - 0.5) * 1.3;
+          gaze.goalTilt = (next() - 0.5) * 0.25;
+          gaze.glanceUntil = clock + 1 + next() * 1.5;
+          gaze.glanceAt = gaze.glanceUntil + 3 + next() * 5;
+        } else if (clock > gaze.glanceUntil) {
+          gaze.goalTurn = 0;
+          gaze.goalTilt = 0;
+        }
+      }
+      const ease = 1 - Math.exp(-dt * LOOK_RATE);
+      gaze.turn += (gaze.goalTurn * attention - gaze.turn) * ease;
+      gaze.tilt += (gaze.goalTilt * attention - gaze.tilt) * ease;
+      if (Math.abs(gaze.turn) + Math.abs(gaze.tilt) > 0.005) {
+        turnBy(neck, turn.setFromAxisAngle(up, gaze.turn * NECK_SHARE), 1);
+        turnBy(headBone, turn.setFromAxisAngle(up, gaze.turn * (1 - NECK_SHARE)), 1);
+        turnBy(headBone, turn.setFromAxisAngle(v.b.copy(left).applyAxisAngle(up, gaze.turn), -gaze.tilt), 1);
       }
       if (drink > 0.01) {
         turnBy(headBone, turn.setFromAxisAngle(left, -0.3 * drink), 1);

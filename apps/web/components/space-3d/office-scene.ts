@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
-import { mergeGeometries, mergeVertices } from "three/addons/utils/BufferGeometryUtils.js";
-import { getChatRoomAtPosition, getMapTemplate, type Bike } from "@repo/shared";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import { getMapTemplate, type Bike } from "@repo/shared";
 import {
   HQ_CLAUDE_SEATS, HQ_COLS, HQ_FLOORS, HQ_ITEMS, HQ_PATH, HQ_ROWS, HQ_RUGS, HQ_TALL_WALLS, HQ_THIN_WALLS, HQ_TREES, HQ_WALL_DECOR,
   ITEM_SPECS, RUG_LOOKS, hqWallCells,
@@ -9,6 +9,8 @@ import {
 } from "../../lib/maps/clario-hq";
 import { drawFloorPattern } from "../../lib/maps/floor-patterns";
 import { makeBeanbag } from "./beanbag";
+import { batchStaticSeating, makeSeating, seatingResources } from "./seating";
+import { makeBookcase } from "./bookcase";
 import { drawArcadeCarpet, makeArcadeCabinet, makeFoosballTable, makeNeonSign, makePingPongTable } from "./game-room-3d";
 import { makeCoffeeTable, makeSideTable } from "./tables";
 import { makeClaude3d } from "./claude-3d";
@@ -21,25 +23,14 @@ import { grove } from "./trees";
 
 const MODEL_DIR = "/assets/3d/kenney/";
 const MODELS = [
-  "desk", "chairDesk", "computerScreen", "laptop", "table", "chair", "chairCushion",
-  "loungeChair",
+  "desk", "computerScreen", "laptop", "table",
   "bookcaseOpen", "kitchenCabinet", "kitchenSink", "kitchenFridgeLarge", "kitchenCoffeeMachine",
   "kitchenMicrowave", "kitchenCabinetUpper", "stoolBar", "lampRoundFloor", "televisionModern",
   "cabinetTelevision", "sideTable", "trashcan",
 ] as const;
 type ModelName = (typeof MODELS)[number];
 
-// Realistic seating (CC0): Poly Haven's armchair and leather chair, and Quaternius's office chair.
-// Each is optional: if one fails to load, that seat falls back to its Kenney model. Sofas are built
-// in code (makeSofa). Licences: public/assets/3d/polyhaven/License.txt and public/assets/3d/quaternius/License.txt.
-const SEATING = {
-  armchair: "/assets/3d/polyhaven/modern_arm_chair_01/modern_arm_chair_01_1k.gltf",
-  meetingChair: "/assets/3d/polyhaven/dining_chair_02/dining_chair_02_1k.gltf",
-  officeChair: "/assets/3d/quaternius/OfficeChair.glb",
-} as const;
-type SeatingName = keyof typeof SEATING;
-
-export type ModelSet = Record<ModelName, THREE.Group> & { seating: Partial<Record<SeatingName, THREE.Group>> };
+export type ModelSet = Record<ModelName, THREE.Group>;
 
 // Inside walls stop below head height and cubicle partitions at desk-panel height, so they mark
 // the rooms without hiding the people in them; only the building's back wall stands tall.
@@ -80,7 +71,7 @@ export const GRASS_COLOR = "#8cc56f";
 
 export async function loadModels(onProgress?: (loaded: number, total: number) => void): Promise<ModelSet> {
   const loader = new GLTFLoader();
-  const total = MODELS.length + Object.keys(SEATING).length;
+  const total = MODELS.length;
   let loaded = 0;
   const load = async (url: string) => {
     const gltf = await loader.loadAsync(url);
@@ -95,44 +86,8 @@ export async function loadModels(onProgress?: (loaded: number, total: number) =>
     onProgress?.(loaded, total);
     return gltf.scene;
   };
-  const [kenney, seating] = await Promise.all([
-    Promise.all(MODELS.map(async (name) => [name, await load(`${MODEL_DIR}${name}.glb`)] as const)),
-    Promise.all((Object.entries(SEATING) as [SeatingName, string][]).map(async ([name, url]) => {
-      try {
-        return [name, await load(url)] as const;
-      } catch (error) {
-        console.warn(`3D seating model ${name} did not load; using the simple one`, error);
-        return [name, undefined] as const;
-      }
-    })),
-  ]);
-  return { ...Object.fromEntries(kenney), seating: Object.fromEntries(seating) } as ModelSet;
-}
-
-// Scales a model to fit inside w x h x d without distorting it, sitting on the floor and centred.
-// `stretch` lets it widen a little past its own proportions (a longer sofa still looks right), and
-// `depth` makes a deep seat shallower so a seated person's back is nearer its backrest.
-function fitSeat(source: THREE.Object3D, w: number, h: number, d: number, stretch = 1, depth = 1) {
-  const model = source.clone(true);
-  const size = new THREE.Box3().setFromObject(model).getSize(new THREE.Vector3());
-  const scale = Math.min(h / (size.y || 1), d / (size.z || 1), w / (size.x || 1));
-  model.scale.set(Math.min(w / (size.x || 1), scale * stretch), scale, scale * depth);
-  const bounds = new THREE.Box3().setFromObject(model);
-  const center = bounds.getCenter(new THREE.Vector3());
-  model.position.x -= center.x;
-  model.position.z -= center.z;
-  model.position.y -= bounds.min.y;
-  const holder = new THREE.Group();
-  holder.add(model);
-  return holder;
-}
-
-// Seated people keep one pose on every seat (people.ts): their back about 0.15 behind the middle of
-// the tile, knees 0.28 in front of it, shins straight down. A seat whose back leans in over the hips, or
-// whose front reaches past the knees and would hide the shins, stands this much further back.
-function setBack(seat: THREE.Object3D, distance: number) {
-  seat.children[0]!.position.z -= distance;
-  return seat;
+  const entries = await Promise.all(MODELS.map(async (name) => [name, await load(`${MODEL_DIR}${name}.glb`)] as const));
+  return Object.fromEntries(entries) as ModelSet;
 }
 
 // Kenney's materials are all fully rough and non-metallic. Giving metal a sheen, wood a soft
@@ -181,92 +136,6 @@ function fit(source: THREE.Object3D, w: number, h: number, d: number) {
   return holder;
 }
 
-// Kenney's upholstery materials are called "carpet"; repaint them to match the 2D map.
-function recolor(object: THREE.Object3D, fabric: Fabric | undefined) {
-  if (!fabric) return object;
-  const colors = FABRIC_COLORS[fabric];
-  object.traverse((child) => {
-    const mesh = child as THREE.Mesh;
-    if (!mesh.isMesh) return;
-    const swap = (material: THREE.Material) => {
-      if (!material.name.toLowerCase().includes("carpet")) return material;
-      const copy = (material as THREE.MeshStandardMaterial).clone();
-      copy.color.set(material.name.toLowerCase().includes("dark") ? colors.dark : colors.mid);
-      return copy;
-    };
-    mesh.material = Array.isArray(mesh.material) ? mesh.material.map(swap) : swap(mesh.material);
-  });
-  return object;
-}
-
-// Poly Haven's sofa and armchair are dark leather, painted into one texture with the sofa's wooden
-// frame. On a custom map their owner picks a fabric, so this repaints the leather in that colour
-// (keeping its light and shade) and leaves the warm, saturated wood alone. Only the materials whose
-// name includes `part` change; each repainted material is made once per fabric and shared.
-const upholstered = new Map<string, THREE.Material>();
-function upholster(object: THREE.Object3D, fabric: Fabric | undefined, part = "") {
-  if (!fabric) return object;
-  object.traverse((child) => {
-    const mesh = child as THREE.Mesh;
-    if (!mesh.isMesh) return;
-    const swap = (material: THREE.Material) => {
-      const surface = material as THREE.MeshStandardMaterial;
-      if (!surface.map?.image || !surface.name.includes(part)) return material;
-      const key = `${surface.uuid}:${fabric}`;
-      let copy = upholstered.get(key);
-      if (!copy) {
-        const next = surface.clone();
-        next.map = repaintLeather(surface.map, FABRIC_COLORS[fabric].mid);
-        upholstered.set(key, (copy = next));
-      }
-      return copy;
-    };
-    mesh.material = Array.isArray(mesh.material) ? mesh.material.map(swap) : swap(mesh.material);
-  });
-  return object;
-}
-
-function repaintLeather(source: THREE.Texture, color: string) {
-  const image = source.image as CanvasImageSource & { width: number; height: number };
-  const canvas = document.createElement("canvas");
-  canvas.width = image.width;
-  canvas.height = image.height;
-  const context = canvas.getContext("2d")!;
-  context.drawImage(image, 0, 0);
-  const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
-  const data = pixels.data;
-  const isWood = (i: number) => {
-    const max = Math.max(data[i]!, data[i + 1]!, data[i + 2]!);
-    const min = Math.min(data[i]!, data[i + 1]!, data[i + 2]!);
-    return max > 30 && (max - min) / max > 0.45 && data[i]! === max;
-  };
-  const light = (i: number) => (0.2126 * data[i]! + 0.7152 * data[i + 1]! + 0.0722 * data[i + 2]!) / 255;
-  // The leather's average lightness becomes the fabric colour itself; lighter folds go lighter.
-  let sum = 0;
-  let count = 0;
-  for (let i = 0; i < data.length; i += 4) {
-    if (isWood(i) || light(i) < 0.02) continue;
-    sum += light(i);
-    count++;
-  }
-  const average = count ? sum / count : 1;
-  const fabric = new THREE.Color(color);
-  const [r, g, b] = [fabric.r, fabric.g, fabric.b].map((c) => Math.pow(c, 1 / 2.2) * 255) as [number, number, number];
-  for (let i = 0; i < data.length; i += 4) {
-    if (isWood(i)) continue;
-    const shade = Math.min(1.6, light(i) / average);
-    data[i] = Math.min(255, r * shade);
-    data[i + 1] = Math.min(255, g * shade);
-    data[i + 2] = Math.min(255, b * shade);
-  }
-  context.putImageData(pixels, 0, 0);
-  // A cloned texture shares its source image, so the copy gets a source of its own.
-  const texture = source.clone();
-  texture.source = new THREE.TextureSource(canvas);
-  texture.needsUpdate = true;
-  return texture;
-}
-
 const ANGLE: Record<Dir, number> = { down: 0, right: Math.PI / 2, up: Math.PI, left: -Math.PI / 2 };
 
 // ---------------------------------------------------------------------------
@@ -281,12 +150,15 @@ export function buildOffice(scene: THREE.Object3D, models: ModelSet) {
   ground.rotation.x = -Math.PI / 2;
   ground.position.set(centerX, 0, centerZ);
   ground.receiveShadow = true;
+  // Grass, cloud shadows and the dark of night go on in world.ts.
+  ground.userData.lawn = true;
   scene.add(ground);
 
   const path = new THREE.Mesh(new THREE.PlaneGeometry(HQ_PATH.w, HQ_PATH.h + 30), standard("#cfc9bd"));
   path.rotation.x = -Math.PI / 2;
   path.position.set(HQ_PATH.x + HQ_PATH.w / 2, 0.004, HQ_PATH.y + (HQ_PATH.h + 30) / 2 - 0.5);
   path.receiveShadow = true;
+  path.userData.outdoor = true;
   scene.add(path);
 
   buildFloors(scene, walls);
@@ -300,6 +172,7 @@ export function buildOffice(scene: THREE.Object3D, models: ModelSet) {
     object.position.z += item.y + spec.h / 2;
     scene.add(object);
   }
+  batchStaticSeating(scene);
   // Claude at work in each Open Desks cubicle chair, as on the 2D map.
   HQ_CLAUDE_SEATS.forEach(({ x, y }, index) => {
     const claude = makeClaude3d(index * 1.37);
@@ -605,7 +478,7 @@ function buildWalls(scene: THREE.Object3D, models: ModelSet) {
     switch (decor.kind) {
       case "window": {
         scene.add(box(decor.w * 0.92, 0.78, WALL_THICKNESS + 0.06, standard("#f5f3ee"), cx, mid, faceZ - WALL_THICKNESS / 2));
-        scene.add(box(decor.w * 0.8, 0.66, WALL_THICKNESS + 0.08, standard("#9fd3ef", { emissive: "#6fb5e0", emissiveIntensity: 0.25, roughness: 0.15 }), cx, mid, faceZ - WALL_THICKNESS / 2));
+        scene.add(box(decor.w * 0.8, 0.66, WALL_THICKNESS + 0.08, windowGlass(), cx, mid, faceZ - WALL_THICKNESS / 2));
         break;
       }
       case "tv": {
@@ -666,9 +539,8 @@ export type DeskSpot = { laptop: Laptop; seat: { x: number; y: number } };
 // An office chair (in `userData.chair`): the part that turns, and the angle that faces its desk.
 export type SwivelChair = { holder: THREE.Object3D; tile: { x: number; y: number }; angle: number };
 
-// The 3D object for one item, centred on its footprint (ITEM_SPECS) at the origin. `place` says
-// which map it is on: Clario HQ, or a map someone built ("custom").
-export function buildItem(item: HqItem, models: ModelSet, place: "hq" | "custom" = "hq"): THREE.Object3D | null {
+// The 3D object for one item, centred on its footprint (ITEM_SPECS) at the origin.
+export function buildItem(item: HqItem, models: ModelSet): THREE.Object3D | null {
   const dir = item.dir ?? "down";
   const group = new THREE.Group();
   const add = (object: THREE.Object3D, x = 0, y = 0, z = 0) => {
@@ -691,14 +563,13 @@ export function buildItem(item: HqItem, models: ModelSet, place: "hq" | "custom"
     // Seats are sized so their cushion is where a seated person's hips are (people.ts), about 0.42
     // above the floor: on a taller seat people sink into it, on a lower one they float over it.
     case "task-chair": {
-      const office = models.seating.officeChair;
-      const holder = add(office ? fitSeat(office, 0.68, 1.0, 0.68) : fit(models.chairDesk, 0.62, 1.09, 0.62));
+      const holder = add(makeSeating("task-chair", item.fabric));
       holder.rotation.y = ANGLE[dir];
       group.userData.chair = { holder, tile: { x: item.x, y: item.y }, angle: ANGLE[dir] } satisfies SwivelChair;
       break;
     }
     case "exec-chair":
-      add(makeExecChair(FABRIC_COLORS[item.fabric ?? "leather"])).rotation.y = ANGLE[dir];
+      add(makeSeating("exec-chair", item.fabric ?? "leather")).rotation.y = ANGLE[dir];
       break;
     case "meeting-table":
     case "meeting-table-sm": {
@@ -711,36 +582,13 @@ export function buildItem(item: HqItem, models: ModelSet, place: "hq" | "custom"
       }
       break;
     }
-    case "meet-chair": {
-      // Leather chairs at the meeting tables; the Demo Stage keeps the lighter cushioned chairs,
-      // since 28 detailed chairs would cost more than they add. On a custom map a chair is leather
-      // unless its owner picked a fabric for it.
-      const leather = models.seating.meetingChair;
-      const inMeetingRoom = place === "custom"
-        ? !item.fabric
-        : getChatRoomAtPosition("clario-hq", item)?.id.startsWith("hq-meeting");
-      add(leather && inMeetingRoom
-        ? setBack(fitSeat(leather, 0.6, 0.915, 0.62), 0.07)
-        : recolor(fit(models.chairCushion, 0.58, 0.8, 0.58), item.fabric)).rotation.y = ANGLE[dir];
-      break;
-    }
+    case "meet-chair":
     case "theatre-seat":
-      add(makeTheatreSeat()).rotation.y = ANGLE[dir];
-      break;
     case "sofa":
-      // A modern three-seater in the fabric the 2D map shows (green, tan leather, navy...).
-      add(makeSofa(2.9, 3, item.fabric)).rotation.y = ANGLE[dir];
-      break;
     case "loveseat":
-      add(makeSofa(1.95, 2, item.fabric)).rotation.y = ANGLE[dir];
+    case "armchair":
+      add(makeSeating(item.kind, item.fabric)).rotation.y = ANGLE[dir];
       break;
-    case "armchair": {
-      const armchair = models.seating.armchair;
-      add(armchair
-        ? setBack(upholster(fitSeat(armchair, 0.92, 0.81, 0.95, 1, 0.8), item.fabric, "pillow"), 0.07)
-        : setBack(recolor(fit(models.loungeChair, 0.9, 0.84, 0.65), item.fabric), 0.11)).rotation.y = ANGLE[dir];
-      break;
-    }
     case "beanbag": {
       // A slouched lounger (beanbag.ts) whose seat dips to sitting height. Set back a little like
       // the seats above, so the sitter leans into its raised back and their legs hang over the front.
@@ -761,13 +609,7 @@ export function buildItem(item: HqItem, models: ModelSet, place: "hq" | "custom"
       add(fit(models.televisionModern, 2.1, 1.0, 0.2), 0, 0.48, -0.1).userData.tvScreen = true;
       break;
     case "bookshelf":
-      add(fit(models.bookcaseOpen, 1.9, 2.0, 0.6), 0, 0, -0.18);
-      for (let i = 0; i < 3; i++) {
-        const colors = ["#d9534f", "#3a6ee8", "#f2c14e", "#4caf6d", "#7a5fd0"];
-        for (let b = 0; b < 7; b++) {
-          add(box(0.12, 0.34, 0.32, standard(colors[(b + i) % colors.length]!), -0.72 + b * 0.22, 0.2 + i * 0.62, -0.18));
-        }
-      }
+      add(makeBookcase(item.variant === 1), 0, 0, -0.12);
       break;
     case "plant-big":
       add(makePlant("snake", 1.35, 0.75, variantAt(item)));
@@ -848,11 +690,13 @@ export function buildItem(item: HqItem, models: ModelSet, place: "hq" | "custom"
       add(box(0.7, 0.9, 0.04, standard("#fdfdfb")), 0, 1.25, 0);
       for (const x of [-0.3, 0.3]) add(box(0.04, 1.7, 0.04, standard("#646b78")), x, 0.85, 0.02);
       break;
-    case "cube-shelf":
-      add(fit(models.bookcaseOpen, 1.9, 1.3, 0.5), 0, 0, -0.2);
+    case "cube-shelf": {
+      const shelf = makeBookcase(item.variant === 1); shelf.scale.set(1, 0.62, 1);
+      add(shelf, 0, 0, -0.12);
       break;
+    }
     case "cafe-chair":
-      add(fit(models.chair, 0.55, 0.85, 0.55)).rotation.y = ANGLE[dir];
+      add(makeSeating("cafe-chair")).rotation.y = ANGLE[dir];
       break;
     case "reception-desk": {
       add(box(3.8, 0.95, 1.1, standard("#f7f5f0")), 0, 0.475, 0.2);
@@ -984,7 +828,7 @@ export function buildItem(item: HqItem, models: ModelSet, place: "hq" | "custom"
       add(makeShop(variantAt(item)));
       break;
     case "cafe":
-      add(makeCafe(models));
+      add(makeCafe());
       break;
     case "office-block":
       add(makeOfficeBlock(variantAt(item)));
@@ -1088,7 +932,12 @@ function windows(spots: readonly WindowSpot[], frame: THREE.Material, glass: THR
   return group;
 }
 
-const windowGlass = () => standard("#9fd3ef", { emissive: "#6fb5e0", emissiveIntensity: 0.25, roughness: 0.15 });
+// Window glass; after dark world.ts lights it from inside (userData.glass).
+const windowGlass = () => {
+  const glass = standard("#9fd3ef", { emissive: "#6fb5e0", emissiveIntensity: 0.25, roughness: 0.15 });
+  glass.userData.glass = true;
+  return glass;
+};
 
 // A striped awning over a shop front: `width` across, reaching `depth` out from the wall face at
 // `z` and dropping `drop` from `y` at the wall, with a short valance along its front edge.
@@ -1317,7 +1166,7 @@ function makeShop(variant: number) {
 
 // A cafe (5 x 4): a low gable roof, big windows with glazing bars, a striped awning and a sign,
 // and a terrace with two bistro tables and chairs in front.
-function makeCafe(models: ModelSet) {
+function makeCafe() {
   const group = new THREE.Group();
   const walls = standard("#f1e4cf");
   const green = standard("#2f5d50");
@@ -1347,7 +1196,8 @@ function makeCafe(models: ModelSet) {
     group.add(solid(new THREE.CylinderGeometry(0.04, 0.035, 0.07, 10), standard("#ffffff"), x + 0.08, 0.775, 1.45));
     for (const side of [-1, 1]) {
       // A chair faces its table: the one on the left faces +x, the one on the right -x.
-      const chair = place(group, fit(models.chair, 0.42, 0.78, 0.42));
+      const chair = place(group, makeSeating("cafe-chair"));
+      chair.scale.setScalar(0.8);
       chair.position.set(x + side * 0.52, 0, 1.5);
       chair.rotation.y = side < 0 ? ANGLE.right : ANGLE.left;
     }
@@ -1424,259 +1274,6 @@ function tube(a: Point, b: Point, radius: number, sides = 8) {
   geometry.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), along.clone().normalize()));
   const middle = start.addScaledVector(along, 0.5);
   return geometry.translate(middle.x, middle.y, middle.z);
-}
-
-// A modern sofa `width` wide with `seats` loose seat and back cushions between padded track arms,
-// on a low base and tapered walnut legs. Seat top 0.43 (0.445 at a cushion's crown), arms 0.6, back
-// cushions lean back to 0.8. It spans z -0.44 to 0.22 like the seats above.
-function makeSofa(width: number, seats: number, fabric: Fabric | undefined) {
-  const group = new THREE.Group();
-  const arm = 0.17;
-  const inner = width - arm * 2;
-  const cushionWidth = inner / seats - 0.012;
-  const pieces: THREE.BufferGeometry[] = [];
-  // The base the cushions rest on, the back frame behind the back cushions, and the two arms.
-  pieces.push(softBox(inner + 0.02, 0.17, 0.62, 0.03, 0).translate(0, 0.205, -0.12));
-  pieces.push(softBox(inner + 0.02, 0.56, 0.15, 0.05, 0.01).translate(0, 0.4, -0.365));
-  for (const side of [-1, 1]) pieces.push(softBox(arm, 0.48, 0.66, 0.06, 0.012).translate(side * (width - arm) / 2, 0.36, -0.11));
-  for (let i = 0; i < seats; i++) {
-    const x = -inner / 2 + (i + 0.5) * (inner / seats);
-    pieces.push(softBox(cushionWidth, 0.14, 0.52, 0.055, 0.016).translate(x, 0.36, -0.04));
-    // Back cushions stand on the seat cushions and lean back, their front bulging toward the sitter.
-    const back = softBox(cushionWidth, 0.4, 0.17, 0.07, 0.025, "front").translate(0, 0.2, 0);
-    pieces.push(back.rotateX(-0.2).translate(x, 0.41, -0.235));
-  }
-  const body = mergeGeometries(pieces);
-  for (const piece of pieces) piece.dispose();
-  setFabricUvs(body);
-  group.add(solid(body, sofaFabric(fabric)));
-  // Tapered legs under the corners, and a middle pair under a long sofa.
-  const legs: THREE.BufferGeometry[] = [];
-  const legX = width / 2 - 0.07;
-  for (const x of width > 2.4 ? [-legX, 0, legX] : [-legX, legX]) {
-    for (const z of [0.15, -0.38]) legs.push(new THREE.CylinderGeometry(0.024, 0.016, 0.12, 12).translate(x, 0.06, z));
-  }
-  group.add(merged(legs, standard("#5b3b26", { roughness: 0.5 })));
-  return group;
-}
-
-// A box with edges rounded to `radius` whose top (or front) bulges by `crown` in the middle, like a
-// filled cushion. Three rows of vertices go round each edge and four cross a crowned face (one a flat
-// one); vertices are shared so it shades smoothly.
-function softBox(w: number, h: number, d: number, radius: number, crown: number, face: "top" | "front" = "top") {
-  const edge = 3;
-  const middle = crown ? 4 : 1;
-  const rows = edge * 2 + middle;
-  const raw = new THREE.BoxGeometry(1, 1, 1, rows, rows, rows);
-  raw.deleteAttribute("normal");
-  raw.deleteAttribute("uv");
-  const geometry = mergeVertices(raw);
-  raw.dispose();
-  // Spreads a unit-box coordinate so the first and last `edge` rows lie in the rounded band.
-  const spread = (c: number, half: number) => {
-    const row = (c + 0.5) * rows;
-    if (row <= edge) return -half + (radius * row) / edge;
-    if (row >= rows - edge) return half - (radius * (rows - row)) / edge;
-    return -half + radius + ((half - radius) * 2 * (row - edge)) / middle;
-  };
-  const halves = new THREE.Vector3(w / 2, h / 2, d / 2);
-  const core = halves.clone().subScalar(radius);
-  const point = new THREE.Vector3();
-  const inner = new THREE.Vector3();
-  const out = new THREE.Vector3();
-  const low = core.clone().negate();
-  const position = geometry.getAttribute("position");
-  for (let i = 0; i < position.count; i++) {
-    point.set(spread(position.getX(i), halves.x), spread(position.getY(i), halves.y), spread(position.getZ(i), halves.z));
-    // Corners and edges move onto a sphere or cylinder `radius` round the box's shrunk core.
-    inner.copy(point).clamp(low, core);
-    out.subVectors(point, inner);
-    if (out.lengthSq() > 0) point.copy(inner).add(out.setLength(radius));
-    const [x, y, z] = [point.x / halves.x, point.y / halves.y, point.z / halves.z];
-    if (face === "top" && y > 0) point.y += crown * y * (1 - x * x) * (1 - z * z);
-    if (face === "front" && z > 0) point.z += crown * z * (1 - x * x) * (1 - y * y);
-    position.setXYZ(i, point.x, point.y, point.z);
-  }
-  geometry.computeVertexNormals();
-  return geometry;
-}
-
-// Texture coordinates in metres, projected along each vertex's main axis, so the weave is the same
-// size on every cushion whatever its shape.
-function setFabricUvs(geometry: THREE.BufferGeometry) {
-  const position = geometry.getAttribute("position");
-  const normal = geometry.getAttribute("normal");
-  const uvs = new Float32Array(position.count * 2);
-  for (let i = 0; i < position.count; i++) {
-    const [nx, ny, nz] = [Math.abs(normal.getX(i)), Math.abs(normal.getY(i)), Math.abs(normal.getZ(i))];
-    const [x, y, z] = [position.getX(i), position.getY(i), position.getZ(i)];
-    const [u, v] = ny >= nx && ny >= nz ? [x, z] : nx >= nz ? [z, y] : [x, y];
-    uvs[i * 2] = u;
-    uvs[i * 2 + 1] = v;
-  }
-  geometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
-}
-
-// Upholstery: a woven fabric (soft sheen, faint weave and blotchy dye) in the fabric picked, or a
-// smoother leather. Without a fabric it is dark brown leather. Each is made once and shared.
-const sofaFabrics = new Map<string, THREE.Material>();
-let fabricTextures: { dye: THREE.Texture; weave: THREE.Texture } | null = null;
-function sofaFabric(fabric: Fabric | undefined) {
-  const key = fabric ?? "none";
-  let material = sofaFabrics.get(key);
-  if (material) return material;
-  fabricTextures ??= makeFabricTextures();
-  const color = fabric ? FABRIC_COLORS[fabric].mid : "#4a3227";
-  const leather = !fabric || fabric === "leather";
-  const dye = fabricTextures.dye.clone();
-  const weave = fabricTextures.weave.clone();
-  dye.repeat.setScalar(leather ? 0.8 : 1.4);
-  weave.repeat.setScalar(leather ? 6 : 14);
-  material = new THREE.MeshPhysicalMaterial({
-    color,
-    map: dye,
-    bumpMap: weave,
-    bumpScale: leather ? 0.6 : 1.2,
-    roughness: leather ? 0.5 : 0.9,
-    sheen: leather ? 0 : 0.7,
-    sheenRoughness: 0.7,
-    sheenColor: new THREE.Color(color).lerp(new THREE.Color("#ffffff"), 0.35),
-  });
-  sofaFabrics.set(key, material);
-  return material;
-}
-
-function makeFabricTextures() {
-  let seed = 11;
-  const rand = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
-  const canvas = (size: number, draw: (ctx: CanvasRenderingContext2D) => void, colorSpace: THREE.ColorSpace) => {
-    const element = document.createElement("canvas");
-    element.width = element.height = size;
-    draw(element.getContext("2d")!);
-    const texture = new THREE.CanvasTexture(element);
-    texture.colorSpace = colorSpace;
-    texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-    texture.anisotropy = 8;
-    return texture;
-  };
-  // Dye: near-white with soft lighter and darker patches, multiplied by the fabric colour.
-  const dye = canvas(128, (ctx) => {
-    ctx.fillStyle = "#f2f2f2";
-    ctx.fillRect(0, 0, 128, 128);
-    for (let i = 0; i < 60; i++) {
-      const [x, y, r] = [rand() * 128, rand() * 128, 10 + rand() * 26];
-      const light = rand() < 0.5;
-      // Drawn at each wrapped position so the texture tiles without seams.
-      for (const dx of [-128, 0, 128]) for (const dy of [-128, 0, 128]) {
-        const glow = ctx.createRadialGradient(x + dx, y + dy, 0, x + dx, y + dy, r);
-        glow.addColorStop(0, light ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.035)");
-        glow.addColorStop(1, "rgba(0,0,0,0)");
-        ctx.fillStyle = glow;
-        ctx.fillRect(x + dx - r, y + dy - r, r * 2, r * 2);
-      }
-    }
-  }, THREE.SRGBColorSpace);
-  // Weave: rows of short raised threads, offset row to row like a basket weave, for the bump map.
-  const weave = canvas(64, (ctx) => {
-    ctx.fillStyle = "#808080";
-    ctx.fillRect(0, 0, 64, 64);
-    for (let y = 0; y < 64; y += 4) {
-      for (let x = (y / 4) % 2 ? 0 : 4; x < 64; x += 8) {
-        const shade = 150 + Math.floor(rand() * 60);
-        ctx.fillStyle = `rgb(${shade},${shade},${shade})`;
-        ctx.fillRect(x, y, 4, 2);
-        ctx.fillRect(x + 4, y + 2, 2, 2);
-      }
-    }
-  }, THREE.NoColorSpace);
-  return { dye, weave };
-}
-
-// A high-back executive chair: a button-tufted back, a thick seat and padded arms in leather (or the
-// fabric picked), on a chrome five-star base with castors and a gas lift. Seat top 0.47, back 1.05.
-function makeExecChair(colors: { mid: string; dark: string }) {
-  const group = new THREE.Group();
-  const leather = standard(colors.mid, { roughness: 0.45 });
-  const seam = standard(colors.dark, { roughness: 0.55 });
-  const metal: THREE.BufferGeometry[] = [
-    new THREE.CylinderGeometry(0.055, 0.06, 0.06, 16).translate(0, 0.1, 0),
-    new THREE.CylinderGeometry(0.022, 0.022, 0.14, 12).translate(0, 0.3, 0),
-  ];
-  const plastic: THREE.BufferGeometry[] = [
-    new THREE.CylinderGeometry(0.035, 0.035, 0.14, 12).translate(0, 0.19, 0),
-    new THREE.BoxGeometry(0.24, 0.04, 0.24).translate(0, 0.35, -0.02),
-  ];
-  // Five legs, two of them forward either side of a seated person's feet, each on a castor.
-  for (let i = 0; i < 5; i++) {
-    const angle = Math.PI / 5 + (i / 5) * Math.PI * 2;
-    const [x, z] = [Math.sin(angle), Math.cos(angle)];
-    metal.push(tube([x * 0.04, 0.1, z * 0.04], [x * 0.27, 0.075, z * 0.27], 0.02));
-    plastic.push(new THREE.SphereGeometry(0.034, 10, 8).translate(x * 0.27, 0.034, z * 0.27));
-  }
-  // Chrome supports under each arm.
-  for (const side of [-1, 1]) {
-    metal.push(tube([side * 0.285, 0.39, 0.07], [side * 0.3, 0.625, 0.08], 0.013), tube([side * 0.285, 0.39, -0.17], [side * 0.3, 0.625, -0.18], 0.013));
-  }
-  group.add(merged(metal, standard("#d5d9e0", { metalness: 0.9, roughness: 0.2 })), merged(plastic, standard("#25282f", { roughness: 0.6 })));
-  // The seat: a dark shell under a thick cushion with a rolled front edge, short of the knees.
-  group.add(box(0.54, 0.04, 0.46, seam, 0, 0.39, -0.02));
-  group.add(boxes([[0.5, 0.06, 0.42, 0, 0.44, -0.03], [0.075, 0.045, 0.36, -0.3, 0.645, -0.05], [0.075, 0.045, 0.36, 0.3, 0.645, -0.05]], leather));
-  place(group, solid(new THREE.CylinderGeometry(0.035, 0.035, 0.5, 16), leather, 0, 0.435, 0.18)).rotation.z = Math.PI / 2;
-  // The back: four padded bands on a dark shell, buttoned in a diamond pattern, leaning back a little.
-  const back = new THREE.Group();
-  back.add(box(0.54, 0.58, 0.07, seam, 0, 0.29, -0.035));
-  const bands: BoxPart[] = [];
-  const buttons: THREE.BufferGeometry[] = [];
-  for (let i = 0; i < 4; i++) {
-    const y = 0.0825 + i * 0.135;
-    bands.push([0.48, 0.125, 0.06, 0, y, 0.03]);
-    for (const x of i % 2 ? [-0.12, 0.12] : [-0.2, 0, 0.2]) buttons.push(new THREE.SphereGeometry(0.013, 8, 6).translate(x, y, 0.058));
-  }
-  back.add(boxes(bands, leather), merged(buttons, seam));
-  back.position.set(0, 0.47, -0.25);
-  back.rotation.x = -0.12;
-  group.add(back);
-  return group;
-}
-
-// A theatre seat, like the 2D map's: a red padded cushion and tall backrest on a dark shell,
-// between steel end standards with oak armrests (a cup holder in the right one). Seat top 0.47;
-// the back leans back to about 1.0.
-function makeTheatreSeat() {
-  const group = new THREE.Group();
-  const red = standard("#b23a40", { roughness: 0.85 });
-  const redLight = standard("#c94a50", { roughness: 0.85 });
-  const shell = standard("#5a1c22", { roughness: 0.6 });
-  const oak = standard("#c08a4f", { roughness: 0.55 });
-  const metal = standard("#7b818c", { metalness: 0.5, roughness: 0.45 });
-  const frame: BoxPart[] = [[0.6, 0.04, 0.36, 0, 0.38, -0.02], [0.68, 0.04, 0.04, 0, 0.3, -0.12]];
-  const arms: BoxPart[] = [];
-  for (const x of [-0.36, 0.36]) {
-    frame.push([0.05, 0.58, 0.32, x, 0.3, -0.07], [0.08, 0.02, 0.42, x, 0.01, -0.05]);
-    arms.push([0.08, 0.035, 0.44, x, 0.62, -0.04]);
-  }
-  group.add(boxes(frame, metal), boxes(arms, oak));
-  // The cup holder: a dark ring set into the right armrest.
-  const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.04, 16), standard("#2a2d35", { roughness: 0.5 }));
-  cup.position.set(0.36, 0.63, 0.1);
-  group.add(cup);
-  // The cushion: a shell under a thick red pad, tipping up a little at the front.
-  const seat = new THREE.Group();
-  seat.add(box(0.62, 0.04, 0.44, shell, 0, 0.4, 0));
-  seat.add(box(0.6, 0.07, 0.42, red, 0, 0.455, 0.005));
-  seat.add(box(0.58, 0.015, 0.4, redLight, 0, 0.495, 0.005));
-  group.add(seat);
-  seat.rotation.x = -0.05;
-  // The backrest: a curved-looking pad (a fuller middle panel) on a dark shell, leaning back.
-  const back = new THREE.Group();
-  back.add(box(0.64, 0.52, 0.05, shell, 0, 0.26, -0.035));
-  back.add(box(0.6, 0.5, 0.06, red, 0, 0.26, 0.015));
-  back.add(box(0.36, 0.44, 0.02, redLight, 0, 0.27, 0.05));
-  back.add(box(0.62, 0.05, 0.1, red, 0, 0.52, 0));
-  back.position.set(0, 0.5, -0.22);
-  back.rotation.x = -0.16;
-  group.add(back);
-  return group;
 }
 
 // A tall two-door wardrobe in dark wood (0.9 x 1.9 x 0.55): panelled doors with brass handles, a
@@ -1803,24 +1400,45 @@ function makeAquarium() {
     }
   }
   group.add(merged(leaves[0], standard("#3f9a4f")), merged(leaves[1], standard("#6db35f")));
-  // Fish, each drifting to and fro at its own pace and turning at each end. Like the Claude
-  // coworker's typing (claude-3d.ts), this runs only while the fish is drawn.
+  // Fish, each swimming a loop of its own along the tank, turning smoothly at each end, its tail
+  // beating faster as it speeds up. Like the Claude coworker's typing (claude-3d.ts), this runs
+  // only while the fish is drawn.
   const fish = [[-0.4, 1.0, 0.02, "#f28a2e"], [0.2, 1.08, -0.1, "#f2c14e"], [0.5, 0.94, 0.06, "#e8603c"], [-0.05, 0.9, -0.04, "#f6d24a"]] as const;
   fish.forEach(([x, y, z, color], i) => {
     const material = standard(color, { roughness: 0.4, emissive: color, emissiveIntensity: 0.2 });
     const swimmer = new THREE.Group();
     const body = place(swimmer, solid(new THREE.SphereGeometry(0.035, 12, 8), material));
     body.scale.set(1.7, 1, 0.6);
-    swimmer.add(solid(new THREE.ConeGeometry(0.03, 0.05, 4).rotateZ(-Math.PI / 2).scale(1, 1, 0.3), material, -0.07, 0, 0));
+    // The tail hinges where it meets the body.
+    const tail = place(swimmer, new THREE.Group());
+    tail.position.x = -0.05;
+    tail.add(solid(new THREE.ConeGeometry(0.03, 0.05, 4).rotateZ(-Math.PI / 2).scale(1, 1, 0.3), material, -0.02, 0, 0));
     swimmer.position.set(x, y, z);
     group.add(swimmer);
+    const at = (t: number) => [x + Math.sin(t) * 0.32, y + Math.sin(t * 2.3) * 0.03, z + Math.sin(t * 2) * 0.08] as const;
     body.onBeforeRender = () => {
-      const t = performance.now() / 1000 * 0.45 + i * 1.7;
-      swimmer.position.x = x + Math.sin(t) * 0.12;
-      swimmer.position.y = y + Math.sin(t * 3.5) * 0.015;
-      swimmer.rotation.y = Math.cos(t) >= 0 ? 0 : Math.PI;
+      const t = (performance.now() / 1000) * 0.35 + i * 1.7;
+      const [px, py, pz] = at(t);
+      const [nx, , nz] = at(t + 0.02);
+      swimmer.position.set(px, py, pz);
+      // Facing the way it is going: +x is the fish's nose.
+      swimmer.rotation.y = Math.atan2(-(nz - pz), nx - px);
+      const speed = Math.hypot(nx - px, nz - pz) / 0.02;
+      tail.rotation.y = Math.sin(performance.now() / 1000 * (6 + speed * 30) + i) * 0.5;
     };
   });
+  // Bubbles rising from the air stone behind the rocks, wobbling, then starting again at the bottom.
+  const bubbleMaterial = standard("#e6f6ff", { transparent: true, opacity: 0.55, roughness: 0.05, emissive: "#bfe6ff", emissiveIntensity: 0.3 });
+  for (let b = 0; b < 7; b++) {
+    const bubble = solid(new THREE.SphereGeometry(0.008 + (b % 3) * 0.003, 8, 6), bubbleMaterial, 0.62, 0.8, -0.17);
+    bubble.castShadow = false;
+    group.add(bubble);
+    bubble.onBeforeRender = () => {
+      const rise = ((performance.now() / 1000) * 0.18 + b / 7) % 1;
+      bubble.position.y = 0.8 + rise * 0.38;
+      bubble.position.x = 0.62 + Math.sin(rise * 18 + b) * 0.012;
+    };
+  }
   // The water: see-through, so the fish and plants show through it, and casting no shadow.
   const water = place(group, box(1.74, 0.45, 0.5, standard("#5fb3e6", { transparent: true, opacity: 0.35, roughness: 0.1, depthWrite: false }), 0, 0.975, 0));
   water.castShadow = false;
@@ -1831,14 +1449,14 @@ function makeAquarium() {
 // cans and bags, a white keypad panel on the right and a pickup slot at the bottom.
 function makeVendingMachine() {
   const group = new THREE.Group();
-  const blue = standard("#2f62c4", { roughness: 0.45, metalness: 0.2 });
+  const blue = standard("#b9c0c6", { roughness: 0.38, metalness: 0.55 });
   const dark = standard("#22262e", { roughness: 0.5 });
   const front = 0.36;
   group.add(box(0.8, 0.05, 0.66, dark, 0, 0.025, -0.02));
   group.add(box(0.86, 1.8, 0.62, blue, 0, 0.95, -0.05));
   // The front frame round the window (x -0.39 to 0.17, y 0.55 to 1.62).
   group.add(boxes([[0.26, 1.8, 0.1, 0.3, 0.95, 0.31], [0.04, 1.8, 0.1, -0.41, 0.95, 0.31], [0.56, 0.5, 0.1, -0.11, 0.3, 0.31], [0.56, 0.23, 0.1, -0.11, 1.735, 0.31]], blue));
-  group.add(box(0.56, 1.07, 0.01, standard("#eef3fb", { emissive: "#dbe7ff", emissiveIntensity: 0.35 }), -0.11, 1.085, 0.265));
+  group.add(box(0.56, 1.07, 0.01, standard("#252b32", { roughness: 0.6 }), -0.11, 1.085, 0.265));
   // Five shelves: cans on every other one, bags of crisps and sweets on the rest.
   const colors = ["#e85d4f", "#f2c14e", "#4caf6d", "#3a6ee8", "#e877aa", "#f28a2e"];
   const snacks = new Map<string, THREE.BufferGeometry[]>();
@@ -1860,10 +1478,7 @@ function makeVendingMachine() {
   const glass = place(group, box(0.56, 1.07, 0.012, standard("#d6ecf7", { transparent: true, opacity: 0.2, roughness: 0.05, metalness: 0.2, depthWrite: false }), -0.11, 1.085, front - 0.005));
   glass.castShadow = false;
   // A lit sign across the top, the keypad panel with its screen and buttons, and the pickup slot.
-  group.add(box(0.8, 0.14, 0.012, standard("#ffffff", { emissive: "#ffffff", emissiveIntensity: 0.35 }), 0, 1.75, front + 0.006));
-  const label = place(group, textPlane("SNACKS", { color: "#2f62c4", background: null, weight: 800, size: 64 }));
-  label.scale.multiplyScalar(0.1);
-  label.position.set(0, 1.75, front + 0.014);
+  group.add(box(0.75, 0.12, 0.012, standard("#287dca", { emissive: "#236eb2", emissiveIntensity: 0.3, roughness: 0.28 }), 0, 1.75, front + 0.006));
   group.add(box(0.2, 0.62, 0.012, standard("#f2f4f7", { roughness: 0.5 }), 0.3, 1.18, front + 0.006));
   group.add(box(0.15, 0.07, 0.008, standard("#0f2a1c", { emissive: "#4ade80", emissiveIntensity: 0.7 }), 0.3, 1.41, front + 0.014));
   const keys: BoxPart[] = [];
@@ -2072,6 +1687,8 @@ export function disposeScene(scene: THREE.Scene) {
   scene.traverse((child) => {
     const mesh = child as THREE.Mesh;
     if (mesh.geometry) mesh.geometry.dispose();
+    // A swaying tree's shadow has a material of its own (wind.ts).
+    mesh.customDepthMaterial?.dispose();
     const materials = mesh.material ? (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) : [];
     for (const material of materials) {
       for (const value of Object.values(material)) if (value instanceof THREE.Texture) value.dispose();
@@ -2086,8 +1703,8 @@ export function disposeScene(scene: THREE.Scene) {
 export function clearOffice(root: THREE.Object3D, models: ModelSet) {
   const materialsOf = (mesh: THREE.Mesh) => (mesh.material ? (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) : []);
   const texturesOf = (material: THREE.Material) => Object.values(material).filter((value): value is THREE.Texture => value instanceof THREE.Texture);
-  const shared = new Set<unknown>();
-  const sources = [...MODELS.map((name) => models[name]), ...Object.values(models.seating)];
+  const shared = seatingResources();
+  const sources = MODELS.map((name) => models[name]);
   for (const source of sources) {
     source?.traverse((child) => {
       const mesh = child as THREE.Mesh;
@@ -2104,6 +1721,7 @@ export function clearOffice(root: THREE.Object3D, models: ModelSet) {
     // Every sprite uses the same geometry in three.js, so theirs stays.
     if (mesh.geometry && !(child instanceof THREE.Sprite) && !shared.has(mesh.geometry)) mesh.geometry.dispose();
     if (child instanceof THREE.InstancedMesh) child.dispose();
+    (child as THREE.Mesh).customDepthMaterial?.dispose();
     for (const material of materialsOf(mesh)) {
       if (shared.has(material)) continue;
       for (const texture of texturesOf(material)) if (!shared.has(texture)) texture.dispose();

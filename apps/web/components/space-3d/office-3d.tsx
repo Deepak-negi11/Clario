@@ -14,13 +14,15 @@ import { companions, type TalkerId } from "../../lib/companions/store";
 import { lookKey, originalLook } from "../../lib/avatar/recolor";
 import { readSavedLook } from "../../lib/avatar/saved-look";
 import { AvatarPicker } from "../game-ui/avatar-picker";
-import { HQ_CLAUDE_SEATS, HQ_COLS, HQ_COWORKERS, HQ_ITEMS, HQ_MENTOR, HQ_ROWS, type Dir, type HqItem } from "../../lib/maps/clario-hq";
+import { HQ_CLAUDE_SEATS, HQ_COLS, HQ_COWORKERS, HQ_ITEMS, HQ_MENTOR, HQ_PATH, HQ_ROWS, type Dir, type HqItem } from "../../lib/maps/clario-hq";
 import { hqPlaySpots, playSpotsFor, spotFront, spotInReach, type PlayAction } from "../../lib/maps/play-spots";
+import { makeClaude3d } from "./claude-3d";
 import { buildCustomOffice } from "./custom-scene";
 import { buildOffice, clearOffice, disposeScene, loadModels, seatMap, textSprite, type DeskSpot, type ModelSet, type SwivelChair } from "./office-scene";
-import { loadPeople, makePerson, type PeopleKit, type Person } from "./people";
+import { loadPeople, makePerson, type Doing, type Keyboard, type PeopleKit, type Person } from "./people";
 import { applyProp, disposeObject, dropCan, emptyProps, makeCan, stepFalling, type Falling, type PropState } from "./props-3d";
 import { createTalkerMover, makeTalker, type Talker } from "./talkers";
+import { makeWorld } from "./world";
 import type { SceneBridge, SceneMapInfo } from "../phaser/scene-bridge";
 import { attachTvScreen } from "../tv/tv-screen-3d";
 
@@ -122,14 +124,23 @@ type Avatar = {
   // and when it last did (the 3D clock's time).
   pace: number;
   lastTileAt: number;
+  // How fast they have been going lately (tiles a second), so their steps match it.
+  speed: number;
   // So people in a room don't breathe and glance around in step.
   offset: number;
   // Their bike or drink (props-3d.ts).
   props: PropState;
+  // The 2D map's cues on people (showCues): a ring while they're in your call, Claude hovering
+  // over them while their agent works, and the emoji reactions they send, rising and fading.
+  callRing: THREE.Mesh;
+  helper: THREE.Group | null;
+  reactions: { sprite: THREE.Sprite; age: number }[];
 };
 
 function makeAvatar(id: string, name: string, isSelf: boolean, people: PeopleKit | null, look: AvatarLook | null): Avatar {
   const group = new THREE.Group();
+  // Clicking them opens their card, as clicking them on the 2D map does.
+  group.userData.player = id;
   const body = new THREE.Group();
   group.add(body);
   const person = people ? makePerson(people, id, colorFor(id), { look }) : null;
@@ -146,6 +157,16 @@ function makeAvatar(id: string, name: string, isSelf: boolean, people: PeopleKit
     group.add(ring);
   }
 
+  // Shown round their feet while you can hear and see them (they're near enough to be in your call).
+  const callRing = new THREE.Mesh(
+    new THREE.RingGeometry(0.4, 0.47, 40),
+    new THREE.MeshBasicMaterial({ color: "#30d158", transparent: true, opacity: 0.85 }),
+  );
+  callRing.rotation.x = -Math.PI / 2;
+  callRing.position.y = 0.045;
+  callRing.visible = false;
+  group.add(callRing);
+
   const label = textSprite(name, isSelf
     ? { color: "#12151c", background: "rgba(255,255,255,0.95)" }
     : { color: "#ffffff", background: "rgba(18,21,28,0.85)" });
@@ -157,7 +178,8 @@ function makeAvatar(id: string, name: string, isSelf: boolean, people: PeopleKit
   return {
     group, body, person, rig, label, name, look: look ? lookKey(look) : "",
     target: new THREE.Vector3(), route: [], heading: 0, seated: false, seatHeading: null,
-    phase: 0, walk: 0, sit: 0, lastMoved: -1, pace: WALK_SPEED, lastTileAt: -Infinity, offset: pick(id, [0, 1.3, 2.6, 3.9, 5.2], 13), props: emptyProps(),
+    phase: 0, walk: 0, sit: 0, lastMoved: -1, pace: WALK_SPEED, lastTileAt: -Infinity, speed: 0, offset: pick(id, [0, 1.3, 2.6, 3.9, 5.2], 13), props: emptyProps(),
+    callRing, helper: null, reactions: [],
   };
 }
 
@@ -256,7 +278,16 @@ function removeAvatar(scene: THREE.Scene, avatar: Avatar) {
 // Walks the tiles the 2D map took, in order, at a steady pace, so it goes through doors and round
 // corners and never cuts through a wall to wherever the 2D map has got to. Turns it to face where
 // it is going, and blends its idle, walking and sitting poses, and riding or drinking (`prop`).
-function stepAvatar(avatar: Avatar, dt: number, time: number, prop: PlayerProp | null, onDrop: (can: THREE.Group) => void) {
+function stepAvatar(
+  avatar: Avatar,
+  dt: number,
+  time: number,
+  prop: PlayerProp | null,
+  onDrop: (can: THREE.Group) => void,
+  // Who they look at and the laptop they type at, if any (people.ts).
+  doing: Pick<Doing, "look" | "typing"> = {},
+) {
+  const phaseBefore = avatar.phase;
   // Far behind (a hidden tab, a long freeze): skip to a tile on the way rather than run a marathon.
   if (avatar.route.length > 16) avatar.group.position.copy(avatar.route.splice(0, avatar.route.length - 16).at(-1)!);
   // Keep pace with the 2D map: go at the rate it hands out tiles, a little faster when behind and a
@@ -295,6 +326,7 @@ function stepAvatar(avatar: Avatar, dt: number, time: number, prop: PlayerProp |
   }
   if (!avatar.route.length && avatar.seatHeading !== null) avatar.heading = avatar.seatHeading;
   const blend = (value: number, goal: number, rate: number) => value + (goal - value) * (1 - Math.exp(-dt * rate));
+  if (dt > 0) avatar.speed = blend(avatar.speed, (avatar.phase - phaseBefore) / STRIDE / dt, 6);
   // A short grace period keeps the stride going between tiles instead of stopping at each one.
   const walking = time - avatar.lastMoved < 0.12;
   avatar.walk = blend(avatar.walk, walking ? 1 : 0, 10);
@@ -305,8 +337,70 @@ function stepAvatar(avatar: Avatar, dt: number, time: number, prop: PlayerProp |
   avatar.body.rotation.y += turn * (1 - Math.exp(-dt * 12));
 
   const gear = applyProp(avatar.props, prop, avatar.body, avatar.person, dt, time, avatar.phase / STRIDE, onDrop);
-  if (avatar.person) avatar.person.update(dt, avatar.walk, avatar.sit, 0, gear);
+  if (avatar.person) avatar.person.update(dt, avatar.walk, avatar.sit, 0, gear, { ...doing, speed: avatar.speed });
   else if (avatar.rig) poseRig(avatar.rig, avatar, time);
+}
+
+// Emoji reactions rise this far over a few seconds as they fade, as on the 2D map (a little slower,
+// as the 3D camera is usually further off).
+const REACTION_SECONDS = 2.4;
+const REACTION_RISE = 0.9;
+// Claude, hovering over someone whose agent is working, is this size and this high.
+const HELPER_SCALE = 0.42;
+const HELPER_Y = 2.12;
+
+// Frees what an object made for itself. Sprites share one geometry, so theirs stays.
+function freeObject(object: THREE.Object3D) {
+  object.traverse((child) => {
+    const mesh = child as THREE.Mesh;
+    if (!(child instanceof THREE.Sprite)) mesh.geometry?.dispose();
+    for (const material of mesh.material ? (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) : []) {
+      (material as THREE.SpriteMaterial).map?.dispose();
+      material.dispose();
+    }
+  });
+}
+
+// The 2D map's cues on a person, in 3D: a green ring while they're in your call, their name faded
+// while they're out of earshot (the 2D map fades them), and Claude hovering over them, typing,
+// while their agent works. `facing` turns Claude to the camera.
+function showCues(avatar: Avatar, cue: { inCall: boolean; heard: boolean; busy: boolean }, dt: number, time: number, facing: number) {
+  avatar.callRing.visible = cue.inCall;
+  avatar.label.material.opacity = cue.heard ? 1 : 0.5;
+  if (cue.busy && !avatar.helper) {
+    avatar.helper = makeClaude3d(avatar.offset);
+    avatar.helper.scale.setScalar(HELPER_SCALE);
+    avatar.group.add(avatar.helper);
+  } else if (!cue.busy && avatar.helper) {
+    avatar.group.remove(avatar.helper);
+    freeObject(avatar.helper);
+    avatar.helper = null;
+  }
+  if (avatar.helper) {
+    avatar.helper.position.y = HELPER_Y + Math.abs(Math.sin(time * 7.7 + avatar.offset)) * 0.04;
+    avatar.helper.rotation.y = facing;
+  }
+  // Reactions rise from just over their name, or over Claude, easing out as they fade.
+  for (let i = avatar.reactions.length - 1; i >= 0; i--) {
+    const reaction = avatar.reactions[i]!;
+    reaction.age += dt;
+    const t = Math.min(1, reaction.age / REACTION_SECONDS);
+    reaction.sprite.position.y = (avatar.helper ? 2.55 : 2.2) + REACTION_RISE * (1 - (1 - t) ** 3);
+    reaction.sprite.material.opacity = 1 - t * t;
+    if (t >= 1) {
+      avatar.group.remove(reaction.sprite);
+      freeObject(reaction.sprite);
+      avatar.reactions.splice(i, 1);
+    }
+  }
+}
+
+function addReaction(avatar: Avatar, emoji: string) {
+  const sprite = textSprite(emoji, { color: "#12151c", background: null, size: 72 });
+  sprite.scale.multiplyScalar(0.85);
+  sprite.renderOrder = 21;
+  avatar.group.add(sprite);
+  avatar.reactions.push({ sprite, age: 0 });
 }
 
 // Poses the fallback person: a walk cycle driven by the distance covered, a breathing idle,
@@ -352,6 +446,10 @@ export function Office3D({
   onTalk,
   onPlay,
   bridgeRef,
+  nearbyRef,
+  reactionsRef,
+  activitiesRef,
+  onPlayerClick,
 }: {
   selfId: string | null;
   selfRef: RefObject<Position>;
@@ -377,6 +475,13 @@ export function Office3D({
   // A map someone built for this space. Without one the view shows Clario HQ. When it changes
   // (its owner is editing it) the office is rebuilt in place.
   customMap?: CustomMap | null;
+  // The same as the 2D map's: who is near enough to be in your call, the emoji reactions people
+  // send, and whose agent is working (Claude hovers over them).
+  nearbyRef?: RefObject<Set<string>>;
+  reactionsRef?: RefObject<{ id: string; userId: string; emoji: string; at: number }[]>;
+  activitiesRef?: RefObject<Record<string, { state: "cooking" | "done" }>>;
+  // Clicking someone opens their card, as on the 2D map.
+  onPlayerClick?: (userId: string) => void;
 }) {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const customMapRef = useRef(customMap);
@@ -391,6 +496,8 @@ export function Office3D({
   talkRef.current = onTalk;
   const playRef = useRef(onPlay);
   playRef.current = onPlay;
+  const playerClickRef = useRef(onPlayerClick);
+  playerClickRef.current = onPlayerClick;
   const [status, setStatus] = useState<{ state: "loading"; progress: number } | { state: "ready" } | { state: "error"; message: string }>(
     { state: "loading", progress: 0 },
   );
@@ -442,7 +549,13 @@ export function Office3D({
 
     // alpha: the Lounge TV's video shows through a see-through patch on its screen (tv-screen-3d.ts);
     // everywhere else the scene's background colour keeps the canvas solid.
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
+    } catch {
+      setStatus({ state: "error", message: "WebGL could not start. Enable hardware acceleration in your browser, or return to the 2D map." });
+      return;
+    }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setSize(mount.clientWidth, mount.clientHeight);
     renderer.shadowMap.enabled = true;
@@ -550,6 +663,13 @@ export function Office3D({
         else walkTo(talker.x, talker.y + 1);
         return;
       }
+      // A person: their card.
+      node = hit.object;
+      while (node && !node.userData.player) node = node.parent;
+      if (node && playerClickRef.current) {
+        playerClickRef.current(node.userData.player as string);
+        return;
+      }
       // A game or a TV: use it from next to it, or walk over to it. The margin catches clicks on an
       // arcade machine's front or a screen on the face of its wall.
       const { x: px, z: pz } = hit.point;
@@ -615,22 +735,29 @@ export function Office3D({
 
     // Soft studio light from every side (for reflections and bounce light), plus the sun for shadows.
     const pmrem = new THREE.PMREMGenerator(renderer);
-    const environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    const studio = new RoomEnvironment();
+    const environment = pmrem.fromScene(studio, 0.04).texture;
+    studio.dispose();
     pmrem.dispose();
     scene.environment = environment;
     scene.environmentIntensity = 0.28;
-    scene.add(new THREE.HemisphereLight("#ffffff", "#8a7a62", 0.55));
+    // The office's own light; world.ts warms it into lamplight after dark.
+    const inside = new THREE.HemisphereLight("#ffffff", "#8a7a62", 0.55);
+    scene.add(inside);
     const sun = new THREE.DirectionalLight("#fff1dc", 2.7);
     sun.position.set(center.x - 14, 34, center.z + 16);
     sun.target.position.copy(center);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
+    const shadowSize = mount.clientWidth < 800 ? 2048 : Math.min(4096, renderer.capabilities.maxTextureSize);
+    sun.shadow.mapSize.set(shadowSize, shadowSize);
     Object.assign(sun.shadow.camera, { left: -HQ_COLS / 2 - 4, right: HQ_COLS / 2 + 4, top: 30, bottom: -30, near: 1, far: 100 });
     // Softer shadow edges, like light through office windows.
     sun.shadow.radius = 3;
     sun.shadow.bias = -0.0004;
-    sun.shadow.normalBias = 0.03;
+    sun.shadow.normalBias = 0.015;
     scene.add(sun, sun.target);
+    // The sky, the sun's place for the time of day, the wind in the grass and trees, and birds.
+    const world = makeWorld({ scene, sun, inside });
 
     // The Lounge TV plays what's on (the TV's remote, components/tv) on its screen.
     const tvScreen = attachTvScreen({ scene, camera, mount, canvas: renderer.domElement, bridgeRef });
@@ -670,6 +797,8 @@ export function Office3D({
     let chairs: SwivelChair[] = [];
     let furnitureSettled = false;
     const falling: Falling[] = [];
+    // The reactions already shown (their ids), so each one rises once.
+    const shownReactions = new Set<string>();
     let trayCan: THREE.Group | null = null;
     let shownTray = "";
 
@@ -705,11 +834,12 @@ export function Office3D({
       rows = map?.rows ?? HQ_ROWS;
       reach = Math.max(1, cols / HQ_COLS, rows / HQ_ROWS);
       center.set(cols / 2, 0, rows / 2);
-      // The sun's shadows cover the whole map.
-      sun.position.set(center.x - 14, 34, center.z + 16);
-      sun.target.position.copy(center);
-      Object.assign(sun.shadow.camera, { left: -cols / 2 - 4, right: cols / 2 + 4, top: rows / 2 + 12, bottom: -rows / 2 - 12 });
-      sun.shadow.camera.updateProjectionMatrix();
+      // The lawn and the light round the map. Grass grows off a built map's edges, and round
+      // Clario HQ's building except on its front path.
+      const outside = (x: number, z: number) => x < -0.3 || z < -0.3 || x > cols + 0.3 || z > rows + 0.3;
+      const onPath = (x: number, z: number) => x > HQ_PATH.x - 0.2 && x < HQ_PATH.x + HQ_PATH.w + 0.2 && z > HQ_PATH.y - 0.6;
+      const inBuilding = (x: number, z: number) => x > 1.6 && x < HQ_COLS - 2.6 && z > 1.6 && z < HQ_PATH.y + 0.4;
+      world.furnish(office, cols, rows, map ? outside : (x, z) => !inBuilding(x, z) && !onPath(x, z));
       // Background coworkers sit at Clario HQ's desks, and Maya and the AI coworkers stand in its
       // rooms, so only Clario HQ has them.
       for (const { person, group } of [...coworkers.splice(0), ...talkers.splice(0)]) {
@@ -812,11 +942,34 @@ export function Office3D({
         syncAvatar(id, position, false);
         seen.add(id);
       }
+      // Who glances at whom: the nearest person going past within a few tiles, or anyone close by.
+      const heads = [...avatars.values()].map((avatar) => ({ avatar, at: avatar.group.position.clone().setY(avatar.sit > 0.5 ? 1 : 1.4), moving: avatar.walk > 0.4 }));
+      const lookFor = (from: THREE.Vector3, me?: Avatar) => {
+        let best: THREE.Vector3 | null = null;
+        let nearest = Infinity;
+        for (const { avatar, at, moving } of heads) {
+          const distance = Math.hypot(at.x - from.x, at.z - from.z);
+          if (avatar !== me && distance < (moving ? 4.5 : 2.2) && distance < nearest) {
+            best = at;
+            nearest = distance;
+          }
+        }
+        return best;
+      };
+      // The keys of the open laptop at a desk seat, for whoever sits there to type on.
+      const keyboardAt = (x: number, y: number): Keyboard | null => {
+        const desk = desks.find(({ seat }) => seat.x === x && seat.y === y);
+        if (!desk || desk.open < 0.6) return null;
+        const laptop = desk.laptop.object;
+        return { at: laptop.localToWorld(new THREE.Vector3(0, 0.022, -0.036)), toward: new THREE.Vector3(0, 0, 1).transformDirection(laptop.matrixWorld) };
+      };
       // A coworker steps aside (hides) while a real person is on their seat.
       const taken = new Set([self, ...Object.values(othersRef.current ?? {})].filter(Boolean).map((p) => `${p!.x},${p!.y}`));
       for (const coworker of coworkers) {
         coworker.group.visible = !taken.has(coworker.tile);
-        if (coworker.group.visible) coworker.person.update(dt, 0, 1);
+        if (!coworker.group.visible) continue;
+        const [x, y] = coworker.tile.split(",").map(Number) as [number, number];
+        coworker.person.update(dt, 0, 1, 0, {}, { look: lookFor(coworker.group.position), typing: keyboardAt(x, y) });
       }
       // Maya and the AI coworkers face the room and turn to you when you come up to them, or walk
       // and play with you when asked.
@@ -832,7 +985,32 @@ export function Office3D({
           avatars.delete(id);
           continue;
         }
-        stepAvatar(avatar, dt, clock.elapsedTime, props[id] ?? null, (can) => dropCan(scene, can, falling));
+        const { x, z } = avatar.group.position;
+        stepAvatar(avatar, dt, clock.elapsedTime, props[id] ?? null, (can) => dropCan(scene, can, falling), {
+          look: lookFor(avatar.group.position, avatar),
+          typing: avatar.seated && avatar.walk < 0.2 ? keyboardAt(Math.floor(x), Math.floor(z)) : null,
+        });
+        // Like the 2D map: others are faded out of earshot, and Claude shows over yours always and
+        // over theirs while they're near.
+        const isSelf = id === selfId;
+        const nearby = nearbyRef?.current;
+        const heard = isSelf || (nearby?.has(id) ?? true);
+        showCues(avatar, {
+          inCall: !isSelf && !!nearby?.has(id),
+          heard,
+          busy: heard && activitiesRef?.current?.[id]?.state === "cooking",
+        }, dt, clock.elapsedTime, Math.atan2(camera.position.x - x, camera.position.z - z));
+      }
+      const reactions = reactionsRef?.current ?? [];
+      for (const { id, userId, emoji } of reactions) {
+        if (shownReactions.has(id)) continue;
+        shownReactions.add(id);
+        const avatar = avatars.get(userId);
+        if (avatar) addReaction(avatar, emoji);
+      }
+      if (shownReactions.size > reactions.length) {
+        const live = new Set(reactions.map(({ id }) => id));
+        for (const id of shownReactions) if (!live.has(id)) shownReactions.delete(id);
       }
       // Desks: the laptop opens while someone sits (or stands) at it, a player who has stopped
       // there, a background coworker or Claude, and its office chair turns in square to the desk;
@@ -917,6 +1095,7 @@ export function Office3D({
         const covered = place.ahead && tags.some((tag) => Math.abs(tag.x - place.x) < tag.w + place.w && Math.abs(tag.y - place.y) < tag.h + place.h);
         label.material.opacity += ((covered ? 0.15 : 1) - label.material.opacity) * (1 - Math.exp(-dt * 10));
       }
+      world.update(dt, camera);
       renderer.render(scene, camera);
       tvScreen.render(selfRef.current);
     };
@@ -962,6 +1141,7 @@ export function Office3D({
       renderer.domElement.removeEventListener("pointercancel", onPointerCancel);
       controls.dispose();
       tvScreen.dispose();
+      world.dispose();
       disposeScene(scene);
       environment.dispose();
       renderer.dispose();
@@ -969,7 +1149,7 @@ export function Office3D({
       overviewRef.current = null;
       layoutRef.current = null;
     };
-  }, [selfId, selfRef, othersRef, namesRef, looksRef, bridgeRef]);
+  }, [selfId, selfRef, othersRef, namesRef, looksRef, bridgeRef, nearbyRef, reactionsRef, activitiesRef]);
 
   // Rebuilds the office when the custom map changes; it skips a map equal to the one shown.
   useEffect(() => {
@@ -977,16 +1157,19 @@ export function Office3D({
   }, [customMap]);
 
   return (
-    <section aria-label="3D view" className="absolute inset-0 z-[55] bg-[#cfe4f2]">
+    // Over the 2D map but under the space's own controls (the call bar, video tiles, room name and
+    // player card, z-30 to z-50), so calls work the same in 3D.
+    <section aria-label="3D view" className="absolute inset-0 z-[25] bg-[#cfe4f2]">
       {/* Its own stacking layer: the TV's video layer and the canvas stack inside it (tv-screen-3d.ts),
           so the canvas never covers the toolbar and labels drawn after it. */}
       <div ref={mountRef} className="absolute inset-0 isolate cursor-grab active:cursor-grabbing" />
 
       <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-3 p-4">
-        <div className="pointer-events-auto flex items-center gap-2 rounded-xl bg-[#1b1d2a]/90 px-3 py-2 text-sm font-semibold text-white shadow-lg ring-1 ring-white/10 backdrop-blur-md">
+        {/* Clear of the space's left rail, and only on wide screens: the room's name shows top centre. */}
+        <div className="pointer-events-auto ml-16 hidden items-center gap-2 rounded-xl bg-[#1b1d2a]/90 px-3 py-2 text-sm font-semibold text-white shadow-lg ring-1 ring-white/10 backdrop-blur-md lg:flex">
           {customMap ? "Custom office" : "Clario HQ"} <span className="font-medium text-white/55">· 3D view</span>
         </div>
-        <div className="pointer-events-auto flex items-center gap-1 rounded-xl bg-[#1b1d2a]/90 p-1 shadow-lg ring-1 ring-white/10 backdrop-blur-md">
+        <div className="pointer-events-auto ml-auto flex items-center gap-1 rounded-xl bg-[#1b1d2a]/90 p-1 shadow-lg ring-1 ring-white/10 backdrop-blur-md">
           {onUpdateLook && selfId && (
             <ToolbarButton label="Your look" pressed={!!draftLook} onClick={() => (draftLook ? setDraftLook(null) : openLook())}>
               <UserRoundPen size={16} aria-hidden="true" />

@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { floorAt, isWallAt, ITEM_SPECS, type CustomFloor, type CustomMap } from "@repo/shared";
 import { quarterFloor, wallBars } from "../../lib/maps/custom-walls";
+import { batchStaticSeating } from "./seating";
 import {
   buildItem, CAP_COLOR, floorTexture, GRASS_COLOR, roomLabel, standard, WALL_COLORS, WALL_HEIGHT, type ModelSet,
 } from "./office-scene";
@@ -15,18 +16,21 @@ export function buildCustomOffice(root: THREE.Object3D, models: ModelSet, map: C
   ground.rotation.x = -Math.PI / 2;
   ground.position.set(map.cols / 2, 0, map.rows / 2);
   ground.receiveShadow = true;
+  // Grass, cloud shadows and the dark of night go on in world.ts.
+  ground.userData.lawn = true;
   root.add(ground);
 
   buildFloors(root, map);
   buildWalls(root, map);
   for (const item of map.items) {
-    const object = buildItem(item, models, "custom");
+    const object = buildItem(item, models);
     if (!object) continue;
     const spec = ITEM_SPECS[item.kind];
     object.position.x += item.x + spec.w / 2;
     object.position.z += item.y + spec.h / 2;
     root.add(object);
   }
+  batchStaticSeating(root);
   const roomLabels = map.rooms.map((room) => {
     const label = roomLabel(room);
     root.add(label);

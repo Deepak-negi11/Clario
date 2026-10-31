@@ -7,7 +7,7 @@ import * as THREE from "three";
 // seated people sit at (people.ts), with a lower front lip so their shins hang over it.
 
 const RADIUS = 0.47; // footprint
-const MID = 0.3; // height of the bag's middle before it is shaped
+const MID = 0.27; // settled side wall below the seat
 
 const smooth = (edge0: number, edge1: number, x: number) => {
   const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
@@ -22,20 +22,20 @@ function shape(ux: number, uy: number, uz: number) {
   // The beans settle: the lower half spreads out and flattens onto the floor.
   const low = Math.max(0, -uy);
   const spread = 1 + 0.12 * Math.pow(ring, 3) * (1 - uy) * 0.5;
-  let y = uy < 0 ? MID - MID * Math.pow(low, 0.42) : MID + MID * uy;
+  let y = uy < 0 ? MID - MID * Math.pow(low, 0.42) : MID + 0.36 * uy;
   // The seat: a hollow just in front of the middle; the back rises behind it, the front lip sags.
-  const seat = Math.exp(-((ux / 0.3) ** 2 + ((uz - 0.02) / 0.34) ** 2)) * smooth(0, 0.6, uy);
+  const seat = Math.exp(-((ux / 0.52) ** 2 + ((uz - 0.08) / 0.58) ** 2)) * smooth(0, 0.6, uy);
   y -= 0.2 * seat;
-  y += 0.2 * Math.max(0, -uz) * smooth(0.1, 0.9, uy);
-  y -= 0.24 * Math.max(0, uz) * smooth(0, 0.8, uy);
+  y += 0.16 * Math.max(0, -uz) * smooth(0.1, 0.9, uy);
+  y -= 0.2 * Math.max(0, uz) * smooth(0, 0.8, uy);
   // Folds where the fabric bunches: round the base and up the sides of the seat.
   const fold =
     Math.sin(around * 9 + 2.2 * Math.sin(uy * 5)) * 0.6 + Math.sin(around * 15 + 1.3) * 0.4;
   const foldWeight = smooth(0.6, -0.2, uy) * 0.7 + seat * 0.5;
-  const out = 1 + 0.022 * fold * foldWeight;
+  const out = 1 + 0.012 * fold * foldWeight;
   const x = ux * RADIUS * spread * out;
   const z = uz * RADIUS * spread * out * (1 + 0.04 * Math.max(0, uz));
-  y = Math.max(0.005, y + 0.01 * fold * foldWeight);
+  y = Math.max(0.005, y + 0.006 * fold * foldWeight);
   return { point: new THREE.Vector3(x, y, z), seat, fold: Math.min(0, fold) * foldWeight };
 }
 
@@ -67,7 +67,7 @@ export function makeBeanbag(color: string) {
   const group = new THREE.Group();
   const base = new THREE.Color(color);
 
-  const geometry = new THREE.SphereGeometry(1, 72, 48);
+  const geometry = new THREE.SphereGeometry(1, 48, 32);
   const position = geometry.attributes.position!;
   const colors = new Float32Array(position.count * 3);
   for (let i = 0; i < position.count; i++) {
@@ -84,11 +84,11 @@ export function makeBeanbag(color: string) {
     color: base,
     vertexColors: true,
     roughness: 0.88,
-    sheen: 0.7,
-    sheenRoughness: 0.55,
+    sheen: 0.35,
+    sheenRoughness: 0.85,
     sheenColor: base.clone().lerp(new THREE.Color("#ffffff"), 0.45),
     bumpMap: weave(),
-    bumpScale: 0.35,
+    bumpScale: 0.0025,
   });
   const bag = new THREE.Mesh(geometry, fabric);
   bag.castShadow = true;
@@ -96,11 +96,12 @@ export function makeBeanbag(color: string) {
   group.add(bag);
 
   // Piped seams: one over the top from front to back, one round the base panel.
-  const piping = new THREE.MeshStandardMaterial({ color: base.clone().multiplyScalar(0.72), roughness: 0.75 });
+  const piping = new THREE.MeshStandardMaterial({ color: base.clone().multiplyScalar(0.9), roughness: 0.9 });
   const seam = (points: THREE.Vector3[], closed: boolean) => {
     const curve = new THREE.CatmullRomCurve3(points, closed);
-    const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, points.length * 2, 0.009, 6, closed), piping);
-    tube.castShadow = true;
+    const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, points.length, 0.0025, 5, closed), piping);
+    // Millimetre-wide stitching should not cast a jagged shadow across the soft bag.
+    tube.castShadow = false;
     group.add(tube);
   };
   const lift = (p: THREE.Vector3) => p.add(new THREE.Vector3(p.x, p.y - MID, p.z).normalize().multiplyScalar(0.006));

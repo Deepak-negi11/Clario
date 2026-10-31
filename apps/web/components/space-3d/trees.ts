@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { mergeGeometries, mergeVertices } from "three/addons/utils/BufferGeometryUtils.js";
+import { shadowOf, sway } from "./wind";
 
 // Trees for the grounds round the office, built in code so they cost no download. A tree is a
 // trunk that tapers and splits into branches, under a canopy of overlapping leafy clumps with
@@ -23,6 +24,12 @@ const LEAF_PALETTES: Record<Species, readonly Palette[]> = {
 const BARK_COLORS: Record<Species, string> = { broadleaf: "#5a4636", conifer: "#5d3c2a", birch: "#e8e4da" };
 const BIRCH_MARK = "#36322d";
 
+// In the wind (wind.ts) a tree bends this much (its top moves about 28 x this at most), all of it
+// together so branches stay in the leaves, and the leaves and sprigs shiver this far on top.
+const BEND = 0.004;
+const LEAF_FLUTTER = 0.012;
+const SPRIG_FLUTTER = 0.02;
+
 // How far leaves reach from the trunk. Trees stand on the middle of a 2 x 2 spot, and the ones at
 // Clario HQ's sides are 1.4 from its walls, so a wider tree is scaled down to fit.
 const REACH = 1.25;
@@ -43,35 +50,45 @@ const taper = (count: number, from: number, to: number) => Array.from({ length: 
 const vec = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
 
 // Trees standing at `spots`, as three meshes for the lot (bark, leaf clumps and sprigs): every tree
-// differs, but a whole grove costs three draw calls, or six with the sun's shadows.
+// differs, but a whole grove costs three draw calls, or six with the sun's shadows. They sway in the
+// wind, each from its own root (its vertices carry it as `windRoot`), and darken after dusk.
 export function grove(spots: readonly TreeSpot[]) {
   const bark: THREE.BufferGeometry[] = [];
   const leaves: THREE.BufferGeometry[] = [];
   const sprigs: THREE.BufferGeometry[] = [];
   for (const { x, z, seed } of spots) {
     const tree = growTree(seed);
-    for (const geometry of parts(tree)) geometry.translate(x, 0, z);
+    for (const geometry of parts(tree)) {
+      geometry.translate(x, 0, z);
+      const count = geometry.getAttribute("position").count;
+      geometry.setAttribute("windRoot", new THREE.Float32BufferAttribute(Array.from({ length: count * 2 }, (_, i) => (i % 2 ? z : x)), 2));
+    }
     bark.push(...tree.bark);
     leaves.push(tree.leaves);
     sprigs.push(tree.sprigs);
   }
+  const foliage = foliageTexture();
+  const still = { bend: BEND, rooted: true, darkAtNight: 1 };
+  const shiver = { ...still, flutter: LEAF_FLUTTER };
+  const sprigShiver = { ...still, flutter: SPRIG_FLUTTER };
   const group = new THREE.Group();
   group.add(
-    merge(bark, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 })),
-    merge(leaves, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8 })),
+    merge(bark, sway(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 }), still), shadowOf(still)),
+    merge(leaves, sway(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8 }), shiver), shadowOf(shiver)),
     // Sprigs are cut out by the texture's alpha, and so are their shadows.
-    merge(sprigs, new THREE.MeshStandardMaterial({ vertexColors: true, map: foliageTexture(), alphaTest: 0.5, roughness: 0.8 })),
+    merge(sprigs, sway(new THREE.MeshStandardMaterial({ vertexColors: true, map: foliage, alphaTest: 0.5, roughness: 0.8 }), sprigShiver), shadowOf(sprigShiver, foliage)),
   );
   return group;
 }
 
 const parts = (tree: Tree) => [...tree.bark, tree.leaves, tree.sprigs];
 
-function merge(geometries: THREE.BufferGeometry[], material: THREE.Material) {
+function merge(geometries: THREE.BufferGeometry[], material: THREE.Material, shadow: THREE.Material) {
   const mesh = new THREE.Mesh(mergeGeometries(geometries), material);
   for (const geometry of geometries) geometry.dispose();
   mesh.castShadow = true;
   mesh.receiveShadow = true;
+  mesh.customDepthMaterial = shadow;
   return mesh;
 }
 
