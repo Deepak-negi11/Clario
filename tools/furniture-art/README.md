@@ -27,3 +27,7 @@ teal bicycles share the same geometry, with only painted frame pixels recolored.
 ridden bicycles use the same sprites; the fixed rack preview uses the same hub coordinates
 as the interactive rack. The can drop is aligned and scaled to the new machine's pickup tray,
 with the original offset and scale retained when the generated atlas is unavailable.
+
+## WebGL furniture
+
+The matching 3D meshes, map coverage and validation are described in [3d-review.md](3d-review.md).
