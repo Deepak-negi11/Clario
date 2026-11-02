@@ -1,0 +1,5 @@
+# HTTPS for the API: Caddy gets the certificate for this name itself (its DNS A record must point
+# at the server) and passes requests, live connections included, to the API container.
+api.clario.games {
+    reverse_proxy api:3001
+}

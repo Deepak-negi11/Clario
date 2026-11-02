@@ -1,0 +1,41 @@
+# The Clario API on one server (an AWS EC2 instance): the API built from the repository's
+# Dockerfile, Postgres, Redis, and Caddy for HTTPS. The website runs on Vercel.
+# Put the secrets in deploy/aws/.env (never committed), then from the repository root:
+#   docker compose -f deploy/aws/docker-compose.yml up -d --build
+services:
+  api:
+    build: ../..
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORT: "3001"
+      DATABASE_URL: postgresql://clario:${POSTGRES_PASSWORD}@db:5432/clario
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_started }
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: clario
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: clario
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clario"]
+      interval: 5s
+      retries: 10
+  redis:
+    image: redis:7
+    restart: unless-stopped
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+volumes:
+  pgdata: {}
+  caddy_data: {}
