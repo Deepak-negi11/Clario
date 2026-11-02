@@ -1216,7 +1216,7 @@ export class ArenaScene extends Phaser.Scene{
                         targets: movingSprite,
                         x: px,
                         y: py,
-                        duration: this.props?.riding(id) ? RIDE_STEP_MS : 200,
+                        duration: this.props?.riding(id) ? RIDE_STEP_MS : WALK_STEP_MS,
                         ease: "Linear",
                         onComplete: () => {
                             movingSprite.anims.stop();
@@ -1356,7 +1356,7 @@ export class ArenaScene extends Phaser.Scene{
         targets: this.player,
         x: this.tileX * TILE + TILE / 2,
         y: this.tileY * TILE + TILE / 2,
-        duration: this.props?.riding(this.registry.get("selfId") as string | null) ? RIDE_STEP_MS : 200,
+        duration: this.props?.riding(this.registry.get("selfId") as string | null) ? RIDE_STEP_MS : WALK_STEP_MS,
         ease: "Linear",
         onComplete: () => {
             this.isMoving = false;

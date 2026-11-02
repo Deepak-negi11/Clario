@@ -48,7 +48,7 @@ export function Avatar3D({ look, onThumbs, onError }: {
   onThumbs?: (thumbs: Partial<Record<AvatarBase, string>>) => void;
   onError?: () => void;
 }) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const holderRef = useRef<HTMLDivElement | null>(null);
   const lookRef = useRef(look);
   const show = useRef<((look: AvatarLook) => void) | null>(null);
   const thumbsRef = useRef(onThumbs);
@@ -57,11 +57,20 @@ export function Avatar3D({ look, onThumbs, onError }: {
   errorRef.current = onError;
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    const holder = holderRef.current;
+    if (!holder) return;
+    // A new canvas each time: unmounting loses the old one's WebGL context for good, and React
+    // mounts effects twice in development, so reusing it would fail and drop the picker to 2D.
+    const canvas = document.createElement("canvas");
+    canvas.className = "h-full w-full";
+    canvas.setAttribute("role", "img");
+    canvas.setAttribute("aria-label", "Your avatar in 3D");
+    holder.appendChild(canvas);
     let disposed = false;
     let frame = 0;
-    const renderer = makeRenderer(canvas);
+    let renderer: THREE.WebGLRenderer;
+    try { renderer = makeRenderer(canvas); }
+    catch { canvas.remove(); errorRef.current?.(); return; }
     renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
     const scene = makeStage();
     const camera = new THREE.PerspectiveCamera(28, canvas.clientWidth / canvas.clientHeight, 0.1, 20);
@@ -69,12 +78,22 @@ export function Avatar3D({ look, onThumbs, onError }: {
     camera.lookAt(0, 0.72, 0);
 
     // The style pictures: a second, small renderer off the page, so the main one never flickers.
-    const thumbRenderer = makeRenderer();
+    let thumbRenderer: THREE.WebGLRenderer;
+    try { thumbRenderer = makeRenderer(); }
+    catch { renderer.dispose(); renderer.forceContextLoss(); canvas.remove(); errorRef.current?.(); return; }
     thumbRenderer.setPixelRatio(2);
     thumbRenderer.setSize(56, 56);
     const thumbCamera = new THREE.PerspectiveCamera(26, 1, 0.1, 20);
     thumbCamera.position.set(0, 1.3, 1.5);
     thumbCamera.lookAt(0, 1.16, 0);
+    const resize = new ResizeObserver(() => {
+      const width = canvas.clientWidth, height = canvas.clientHeight;
+      if (!width || !height) return;
+      renderer.setSize(width, height, false);
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+    });
+    resize.observe(canvas);
 
     let person: Person | null = null;
     let people: PeopleKit | null = null;
@@ -142,11 +161,15 @@ export function Avatar3D({ look, onThumbs, onError }: {
     return () => {
       disposed = true;
       cancelAnimationFrame(frame);
+      resize.disconnect();
       window.clearTimeout(snapshotTimer);
       show.current = null;
       person?.dispose();
       renderer.dispose();
       thumbRenderer.dispose();
+      renderer.forceContextLoss();
+      thumbRenderer.forceContextLoss();
+      canvas.remove();
     };
   }, []);
 
@@ -156,5 +179,5 @@ export function Avatar3D({ look, onThumbs, onError }: {
     show.current?.(look);
   }, [look]);
 
-  return <canvas ref={canvasRef} role="img" aria-label="Your avatar in 3D" className="h-full w-full" />;
+  return <div ref={holderRef} className="h-full w-full" />;
 }

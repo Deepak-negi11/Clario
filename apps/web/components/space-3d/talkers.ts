@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { WALK_STEP_MS } from "@repo/shared";
 import { chooseFollowTile, nearestGame } from "../../lib/companions/follow";
 import { companions, type CompanionMode, type TalkerId } from "../../lib/companions/store";
 import { findPath, type PathGrid, type Tile } from "../../lib/maps/path-finder";
@@ -10,7 +11,7 @@ import type { Person } from "./people";
 // go with you to the nearest game and play beside you, and walk back to their spot when you say
 // stop. They walk the 2D map's tiles a tile at a time, never through a wall, a desk or a chair.
 
-const WALK_SPEED = 5.5; // tiles a second, a little quicker than you so they keep up
+const WALK_SPEED = 1100 / WALK_STEP_MS; // tiles a second, a little quicker than the 2D map so they keep up with you
 // Standing still this long anywhere but the game you were walking to means you went elsewhere.
 const GAVE_UP = 1.5;
 

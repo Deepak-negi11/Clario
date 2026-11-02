@@ -8,7 +8,7 @@ import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.j
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { Crosshair, LoaderCircle, Map as MapIcon, UserRoundPen, X } from "lucide-react";
 import {
-  coworkerMission, customSeats, getCoworker, RIDE_STEP_MS, type AvatarLook, type CoworkerId, type CustomMap, type PlayerProp,
+  BREW_MS, coworkerMission, customSeats, getCoworker, getMapTemplate, RIDE_STEP_MS, WALK_STEP_MS, type AvatarLook, type CoworkerId, type CustomMap, type PlayerProp,
 } from "@repo/shared";
 import { companions, type TalkerId } from "../../lib/companions/store";
 import { lookKey, originalLook } from "../../lib/avatar/recolor";
@@ -90,9 +90,9 @@ function pick<T>(id: string, list: T[], salt: number) {
 const RIG_SCALE = 0.9;
 const HIP_Y = 0.74;
 const SEATED_HIP_Y = 0.5;
-const WALK_SPEED = 5.5; // tiles a second; the 2D map moves one tile every 200 ms
+const WALK_SPEED = 1100 / WALK_STEP_MS; // tiles a second, a touch quicker than the 2D map's steps so it keeps up
 const STRIDE = 4; // walk-cycle radians per tile walked, so feet don't slide
-const RIDE_FACTOR = 200 / RIDE_STEP_MS; // a bike crosses a tile in RIDE_STEP_MS instead of 200 ms
+const RIDE_FACTOR = WALK_STEP_MS / RIDE_STEP_MS; // a bike crosses a tile in RIDE_STEP_MS instead of WALK_STEP_MS
 // Where a bought can lies in a map's (first) vending machine tray: office-scene.ts builds the
 // machine 0.12 back from its tile's middle, its front 0.36 ahead of that, with the tray low on the
 // front a little left of centre. The can lies just proud of the front so it shows in the slot.
@@ -229,20 +229,10 @@ function makeAvatar(id: string, name: string, isSelf: boolean, people: PeopleKit
   if (person) body.add(person.root);
   const rig = person ? null : buildRig(id, body, look);
 
-  if (isSelf) {
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.38, 0.48, 40),
-      new THREE.MeshBasicMaterial({ color: "#ffffff", transparent: true, opacity: 0.9 }),
-    );
-    ring.rotation.x = -Math.PI / 2;
-    ring.position.y = 0.05;
-    group.add(ring);
-  }
-
   // Shown round their feet while you can hear and see them (they're near enough to be in your call).
   const callRing = new THREE.Mesh(
-    new THREE.RingGeometry(0.4, 0.47, 40),
-    new THREE.MeshBasicMaterial({ color: "#30d158", transparent: true, opacity: 0.85 }),
+    new THREE.RingGeometry(0.43, 0.455, 48),
+    new THREE.MeshBasicMaterial({ color: "#76d8b3", transparent: true, opacity: 0.5, depthWrite: false }),
   );
   callRing.rotation.x = -Math.PI / 2;
   callRing.position.y = 0.045;
@@ -462,6 +452,7 @@ function freeObject(object: THREE.Object3D) {
 // while their agent works. `facing` turns Claude to the camera.
 function showCues(avatar: Avatar, cue: { inCall: boolean; heard: boolean; busy: boolean }, dt: number, time: number, facing: number) {
   avatar.callRing.visible = cue.inCall;
+  avatar.label.position.y = 1.95 - 0.38 * avatar.sit;
   avatar.label.material.opacity = cue.heard ? 1 : 0.5;
   if (cue.busy && !avatar.helper) {
     avatar.helper = makeClaude3d(avatar.offset);
@@ -537,6 +528,7 @@ export function Office3D({
   onWalkTo,
   errandTarget = null,
   customMap = null,
+  mapName,
   looksRef,
   onUpdateLook,
   onTalk,
@@ -572,6 +564,7 @@ export function Office3D({
   // A map someone built for this space. Without one the view shows Clario HQ. When it changes
   // (its owner is editing it) the office is rebuilt in place.
   customMap?: CustomMap | null;
+  mapName?: string;
   // The same as the 2D map's: who is near enough to be in your call, the emoji reactions people
   // send, and whose agent is working (Claude hovers over them).
   nearbyRef?: RefObject<Set<string>>;
@@ -604,6 +597,9 @@ export function Office3D({
   const followRef = useRef(follow);
   followRef.current = follow;
   const overviewRef = useRef<(() => void) | null>(null);
+  const roomViewRef = useRef<((bounds: { x: number; y: number; width: number; height: number }) => void) | null>(null);
+  const [roomView, setRoomView] = useState("");
+  const rooms = customMap?.rooms ?? getMapTemplate("clario-hq").chatRooms;
   // Your look while you edit it here: your 3D avatar shows it before it is saved.
   const [draftLook, setDraftLook] = useState<AvatarLook | null>(null);
   const draftRef = useRef(draftLook);
@@ -644,6 +640,7 @@ export function Office3D({
     const mount = mountRef.current;
     if (!mount) return;
     let disposed = false;
+    let contextLost = false;
     let frame = 0;
 
     // alpha: the Lounge TV's video shows through a see-through patch on its screen (tv-screen-3d.ts);
@@ -664,6 +661,13 @@ export function Office3D({
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.domElement.setAttribute("aria-label", "3D view of the office");
     renderer.domElement.setAttribute("role", "img");
+    const onContextLost = (event: Event) => {
+      event.preventDefault();
+      contextLost = true;
+      cancelAnimationFrame(frame);
+      if (!disposed) setStatus({ state: "error", message: "Your browser paused the 3D graphics. Reopen the 3D view to continue." });
+    };
+    renderer.domElement.addEventListener("webglcontextlost", onContextLost);
     mount.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
@@ -695,8 +699,8 @@ export function Office3D({
     // Turning and zooming keep the camera on you (it orbits around you); only moving the camera
     // away with a right-drag stops it following. Walking somewhere turns following back on.
     const marker = new THREE.Mesh(
-      new THREE.RingGeometry(0.2, 0.3, 32),
-      new THREE.MeshBasicMaterial({ color: "#ffffff", transparent: true, opacity: 0.9, depthWrite: false }),
+      new THREE.RingGeometry(0.24, 0.265, 40),
+      new THREE.MeshBasicMaterial({ color: "#a6edcd", transparent: true, opacity: 0.5, depthWrite: false }),
     );
     marker.rotation.x = -Math.PI / 2;
     marker.position.y = 0.04;
@@ -851,7 +855,17 @@ export function Office3D({
     };
     overviewRef.current = () => {
       setFollow(false);
+      setRoomView("");
       overview();
+    };
+    roomViewRef.current = (bounds) => {
+      setFollow(false);
+      const x = bounds.x + bounds.width / 2, z = bounds.y + bounds.height / 2;
+      // Account for the actual viewport: a wide room needs more distance on a phone.
+      const distance = Math.max(9, (bounds.height + 1.5) * 0.9, (bounds.width + 1.5) / camera.aspect * 1.05);
+      controls.target.set(x, 0, z);
+      camera.position.set(x, distance, z + distance * 0.85);
+      controls.update();
     };
 
     // Soft studio light from every side (for reflections and bounce light), plus the sun for shadows.
@@ -900,7 +914,8 @@ export function Office3D({
 
     const avatars = new Map<string, Avatar>();
     let seats = seatMap();
-    const clock = new THREE.Clock();
+    const clock = new THREE.Timer();
+    clock.connect(document);
     let people: PeopleKit | null = null;
     const coworkers: { person: Person; group: THREE.Group; tile: string }[] = [];
     const talkers: Talker[] = [];
@@ -1076,9 +1091,9 @@ export function Office3D({
       // Tiles that follow on from each other (not the first after a pause, nor two in one frame)
       // set the pace it goes at.
       if (next.distanceToSquared(avatar.target) > 0.0001) {
-        const gap = clock.elapsedTime - avatar.lastTileAt;
+        const gap = clock.getElapsed() - avatar.lastTileAt;
         if (gap > 0.04 && gap < 0.6 && next.distanceTo(avatar.target) < 1.5) avatar.pace += (1 / gap - avatar.pace) * 0.35;
-        avatar.lastTileAt = clock.elapsedTime;
+        avatar.lastTileAt = clock.getElapsed();
         avatar.route.push(next);
         avatar.target.copy(next);
       }
@@ -1088,6 +1103,7 @@ export function Office3D({
 
     const animate = () => {
       frame = requestAnimationFrame(animate);
+      clock.update();
       const dt = Math.min(clock.getDelta(), 0.1);
       const seen = new Set<string>();
       const self = selfRef.current;
@@ -1132,7 +1148,7 @@ export function Office3D({
       // and play with you when asked.
       syncCoworkers();
       moveTalkers(talkers, {
-        dt, time: clock.elapsedTime, self, others: Object.values(othersRef.current ?? {}), blocked: blockedTiles(), cols, rows, seats,
+        dt, time: clock.getElapsed(), self, others: Object.values(othersRef.current ?? {}), blocked: blockedTiles(), cols, rows, seats,
       });
       // Bikes and drinks: everyone's from the 2D map. A bike someone rides isn't in its rack.
       const bridge = bridgeRef?.current;
@@ -1144,7 +1160,7 @@ export function Office3D({
           continue;
         }
         const { x, z } = avatar.group.position;
-        stepAvatar(avatar, dt, clock.elapsedTime, props[id] ?? null, (can) => dropCan(scene, can, falling), {
+        stepAvatar(avatar, dt, clock.getElapsed(), props[id] ?? null, (can) => dropCan(scene, can, falling), {
           look: lookFor(avatar.group.position, avatar),
           typing: avatar.seated && avatar.walk < 0.2 ? keyboardAt(Math.floor(x), Math.floor(z)) : null,
         });
@@ -1157,7 +1173,7 @@ export function Office3D({
           inCall: !isSelf && !!nearby?.has(id),
           heard,
           busy: heard && activitiesRef?.current?.[id]?.state === "cooking",
-        }, dt, clock.elapsedTime, Math.atan2(camera.position.x - x, camera.position.z - z));
+        }, dt, clock.getElapsed(), Math.atan2(camera.position.x - x, camera.position.z - z));
       }
       const reactions = reactionsRef?.current ?? [];
       for (const { id, userId, emoji } of reactions) {
@@ -1244,7 +1260,7 @@ export function Office3D({
       const room = errandTargetRef.current;
       errandPin.visible = !!room;
       if (room) {
-        const height = 2.4 + Math.sin(clock.elapsedTime * 3) * 0.15;
+        const height = 2.4 + Math.sin(clock.getElapsed() * 3) * 0.15;
         errandPin.position.set(room.x + room.width / 2, height, room.y + room.height / 2);
         errandPin.rotation.y += dt * 1.5;
         // The beam runs from the floor up to the tip.
@@ -1257,7 +1273,7 @@ export function Office3D({
         markerAge += dt;
         const here = self && self.x === markerTile.x && self.y === markerTile.y && mine && mine.walk < 0.2;
         marker.scale.setScalar(1 + Math.sin(markerAge * 8) * 0.12);
-        (marker.material as THREE.MeshBasicMaterial).opacity = 0.9 * Math.max(0, 1 - Math.max(0, markerAge - 3));
+        (marker.material as THREE.MeshBasicMaterial).opacity = 0.5 * Math.max(0, 1 - Math.max(0, markerAge - 3));
         if (here || markerAge > 4) marker.visible = false;
       }
       controls.update();
@@ -1267,7 +1283,9 @@ export function Office3D({
       for (const label of roomLabels) {
         const place = onScreen(label);
         const covered = place.ahead && tags.some((tag) => Math.abs(tag.x - place.x) < tag.w + place.w && Math.abs(tag.y - place.y) < tag.h + place.h);
-        label.material.opacity += ((covered ? 0.15 : 1) - label.material.opacity) * (1 - Math.exp(-dt * 10));
+        const bounds = label.userData.room as { x: number; y: number; width: number; height: number } | undefined;
+        const inside = self && bounds && self.x >= bounds.x && self.x < bounds.x + bounds.width && self.y >= bounds.y && self.y < bounds.y + bounds.height;
+        label.material.opacity += ((covered ? 0 : inside ? 0.12 : 0.8) - label.material.opacity) * (1 - Math.exp(-dt * 10));
       }
       world.update(dt, camera);
       projectors.update(projectorRef?.current ?? null);
@@ -1288,7 +1306,7 @@ export function Office3D({
       }),
     ])
       .then(([loadedModels, loadedPeople]) => {
-        if (disposed) return;
+        if (disposed || contextLost) return;
         models = loadedModels;
         people = loadedPeople;
         applyLayout(customMapRef.current ?? null);
@@ -1316,7 +1334,9 @@ export function Office3D({
       renderer.domElement.removeEventListener("pointerdown", onPointerDown);
       renderer.domElement.removeEventListener("pointerup", onPointerUp);
       renderer.domElement.removeEventListener("pointercancel", onPointerCancel);
+      renderer.domElement.removeEventListener("webglcontextlost", onContextLost);
       controls.dispose();
+      clock.dispose();
       tvScreen.dispose();
       projectors.dispose();
       noticeBoard.dispose();
@@ -1325,8 +1345,10 @@ export function Office3D({
       disposeScene(scene);
       environment.dispose();
       renderer.dispose();
+      renderer.forceContextLoss();
       renderer.domElement.remove();
       overviewRef.current = null;
+      roomViewRef.current = null;
       layoutRef.current = null;
     };
   }, [selfId, selfRef, othersRef, namesRef, looksRef, bridgeRef, nearbyRef, reactionsRef, activitiesRef]);
@@ -1347,9 +1369,27 @@ export function Office3D({
       <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-3 p-4">
         {/* Clear of the space's left rail, and only on wide screens: the room's name shows top centre. */}
         <div className="pointer-events-auto ml-16 hidden items-center gap-2 rounded-xl bg-[#1b1d2a]/90 px-3 py-2 text-sm font-semibold text-white shadow-lg ring-1 ring-white/10 backdrop-blur-md lg:flex">
-          {customMap ? "Custom office" : "Clario HQ"} <span className="font-medium text-white/55">· 3D view</span>
+          {mapName ?? (customMap ? "Custom office" : "Clario HQ")} <span className="font-medium text-white/55">· 3D view</span>
         </div>
         <div className="pointer-events-auto ml-auto flex items-center gap-1 rounded-xl bg-[#1b1d2a]/90 p-1 shadow-lg ring-1 ring-white/10 backdrop-blur-md">
+          {rooms.length > 0 && (
+            <select
+              aria-label="Explore a room"
+              value={follow ? "" : roomView}
+              disabled={status.state !== "ready"}
+              onChange={(event) => {
+                const id = event.target.value;
+                setRoomView(id);
+                const room = rooms.find((candidate) => candidate.id === id);
+                if (room) roomViewRef.current?.(room.bounds);
+                else overviewRef.current?.();
+              }}
+              className="h-9 w-32 cursor-pointer rounded-lg border-0 bg-[#292c3d] px-2 text-xs text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-white disabled:opacity-50 sm:w-40"
+            >
+              <option value="">Explore rooms</option>
+              {rooms.map((room) => <option key={room.id} value={room.id}>{room.name}</option>)}
+            </select>
+          )}
           {onUpdateLook && selfId && (
             <ToolbarButton label="Your look" pressed={!!draftLook} onClick={() => (draftLook ? setDraftLook(null) : openLook())}>
               <UserRoundPen size={16} aria-hidden="true" />

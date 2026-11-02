@@ -34,6 +34,7 @@ function fabric(color: string, leather = false) {
     bumpMap: weave, bumpScale: leather ? 0.0007 : 0.002, sheen: leather ? 0.12 : 0.55,
     sheenRoughness: 0.8, sheenColor: new THREE.Color(color).lerp(new THREE.Color("#ffffff"), 0.25),
     clearcoat: leather ? 0.08 : 0, clearcoatRoughness: 0.65 });
+  material.name = "Chair"; // Arcade copies recolor upholstery while retaining the frame and mesh.
   materials.set(key, material); return material;
 }
 

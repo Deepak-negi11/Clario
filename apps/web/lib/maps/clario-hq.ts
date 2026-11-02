@@ -96,7 +96,7 @@ export const HQ_THIN_WALLS: { x1: number; y1: number; x2: number; y2: number; ga
 
 // Things hung on a tall wall's face. `x` and `w` may be fractional; `wallY` is the wall's first row.
 // A neon sign says PLAY, or HACK with variant 1.
-export type WallDecorKind = "window" | "tv" | "whiteboard" | "art" | "clock" | "cabinets" | "logo" | "shelf" | "neon";
+export type WallDecorKind = "window" | "tv" | "whiteboard" | "art" | "clock" | "cabinets" | "logo" | "shelf" | "neon" | "projector";
 export const HQ_WALL_DECOR: { kind: WallDecorKind; x: number; w: number; wallY: number; variant?: number }[] = [
   // The conference room: windows, a clock and a framed print between them, no screen.
   { kind: "window", x: 5, w: 2.2, wallY: 2 },
@@ -106,7 +106,9 @@ export const HQ_WALL_DECOR: { kind: WallDecorKind; x: number; w: number; wallY: 
   { kind: "window", x: 17.2, w: 1.6, wallY: 2 },
   { kind: "window", x: 24.2, w: 1.6, wallY: 2 },
   { kind: "whiteboard", x: 29.6, w: 1.8, wallY: 2 },
-  { kind: "tv", x: 31.5, w: 3, wallY: 2 },
+  // Meeting Room 2's projector screen: whoever in the room shares their screen is shown on it
+  // (components/space-3d/projector-3d.ts, hooks/use-projector.ts).
+  { kind: "projector", x: 31.3, w: 3.4, wallY: 2 },
   { kind: "cabinets", x: 39, w: 5, wallY: 2 },
   // The corridor wall faces the open floor, so it stays quiet: two prints and the logo.
   { kind: "art", x: 4.1, w: 1.8, wallY: 12, variant: 3 },
@@ -254,6 +256,8 @@ export const HQ_ITEMS: HqItem[] = [
   ...row("cafe-chair", [40, 41], 7, "down"),
   ...row("cafe-chair", [40, 41], 9, "up"),
   { kind: "plant-big", x: 44, y: 10 },
+  // The shelf where people leave snacks and things they found (components/workplace).
+  { kind: "swap-shelf", x: 43, y: 7 },
 
   // Open Desks, after the user's reference: a lounge strip along the corridor wall (a sofa under
   // the print, the bookshelf with a ping-pong table in front, plants in the corners), then four
@@ -309,6 +313,9 @@ export const HQ_ITEMS: HqItem[] = [
   { kind: "coffee-table", x: 28, y: 28 },
   { kind: "plant-big", x: 16, y: 25 },
   { kind: "plant-big", x: 31, y: 25 },
+  // Everyone's mail and parcel lockers (components/workplace), on the far side of reception from
+  // the notice board, so E by one never opens the other.
+  { kind: "lockers", x: 27, y: 25 },
 
   // Game Room: arcade row on the back wall, ping-pong on its rug, foosball, and a sofa for the TV.
   { kind: "arcade", x: 33, y: 26 },
@@ -422,7 +429,15 @@ export const HQ_ITEMS: HqItem[] = [
   { kind: "plant-tree", x: 83, y: 26 },
   { kind: "plant-big", x: 60, y: 31 },
   { kind: "water-cooler", x: 70, y: 31 },
-  { kind: "filing-cabinet", x: 71, y: 31, variant: 1 },
+  { kind: "office-printer", x: 71, y: 31 },
+  // More office printers, so one is close to every place people work.
+  { kind: "office-printer", x: 3, y: 15 }, // Open Desks
+  { kind: "office-printer", x: 16, y: 26 }, // Reception
+  // The badge reader on its post just inside the main door, beside where people arrive, and the
+  // team's notice board left of the front desk.
+  { kind: "badge-reader", x: 22, y: 30 },
+  { kind: "notice-board", x: 20, y: 26 },
+  { kind: "office-printer", x: 47, y: 26 }, // Hack Space
   { kind: "plant-big", x: 77, y: 31 },
   { kind: "plant-big", x: 83, y: 31 },
 ];

@@ -107,6 +107,50 @@ function pottedPlant() {
   return group;
 }
 
+// Dining and meeting tables share the lounge's oak finish. Rounded edges, a thin apron and
+// angled steel legs give them a convincing silhouette without stretching a stock model.
+export function makeDiningTable(width: number, depth: number, round = false, height = 0.74) {
+  const group = new THREE.Group();
+  const grain = oak(109);
+  grain.repeat.set(1 / width, 1 / depth);
+  grain.offset.set(0.5, 0.5);
+  const topMaterial = varnished(grain);
+  const thickness = 0.055;
+  if (round) {
+    const shape = new THREE.Shape();
+    shape.absellipse(0, 0, width / 2 - 0.01, depth / 2 - 0.01, 0, Math.PI * 2, false);
+    const top = new THREE.ExtrudeGeometry(shape, { depth: thickness - 0.016, bevelEnabled: true,
+      bevelSize: 0.01, bevelThickness: 0.008, bevelSegments: 2, curveSegments: 32 });
+    top.rotateX(-Math.PI / 2);
+    group.add(mesh(top, topMaterial, 0, height - thickness + 0.008, 0));
+  } else {
+    group.add(mesh(new RoundedBoxGeometry(width, thickness, depth, 3, 0.025), topMaterial, 0, height - thickness / 2, 0));
+  }
+  const steel = new THREE.MeshStandardMaterial({ color: "#353b42", metalness: 0.65, roughness: 0.35 });
+  if (round) {
+    group.add(mesh(new THREE.CylinderGeometry(0.045, 0.065, height - thickness, 16), steel, 0, (height - thickness) / 2, 0));
+    group.add(mesh(new THREE.CylinderGeometry(width * 0.21, width * 0.23, 0.035, 32), steel, 0, 0.018, 0));
+  } else {
+    for (const x of [-1, 1]) for (const z of [-1, 1]) {
+      const leg = mesh(new THREE.CylinderGeometry(0.028, 0.019, height - thickness, 12), steel,
+        x * (width / 2 - 0.17), (height - thickness) / 2, z * (depth / 2 - 0.14));
+      leg.rotation.set(-z * 0.075, 0, x * 0.075);
+      group.add(leg);
+    }
+    group.add(mesh(new RoundedBoxGeometry(width - 0.2, 0.065, depth - 0.2, 2, 0.015), darkOak(), 0, height - 0.09, 0));
+  }
+  return group;
+}
+
+// A small everyday detail for café tables, low enough to keep sight lines open.
+export function tablePlaceSetting() {
+  const group = new THREE.Group();
+  const coaster = mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.006, 20), darkOak(), 0.15, 0.003, 0.05);
+  const cup = mug("#eee9df"); cup.position.set(0.15, 0.006, 0.05);
+  const notes = book("#6c8e89", 0.2, 0.018, 0.14); notes.position.set(-0.16, 0.009, -0.02); notes.rotation.y = 0.18;
+  group.add(coaster, cup, notes); return group;
+}
+
 // An oval oak coffee table on four splayed, tapered legs, with a book, a mug and a plant on it
 // (as on the 2D map). Sized for its three tiles.
 export function makeCoffeeTable() {

@@ -87,7 +87,7 @@ export const CLASSIC_OFFICE_ITEMS: HqItem[] = [
   { kind: "plant-small", x: 12, y: 3 },
   { kind: "desk-white", x: 14, y: 3 },
   { kind: "task-chair", x: 14, y: 4, dir: "up" },
-  { kind: "filing-cabinet", x: 17, y: 3, variant: 1 },
+  { kind: "office-printer", x: 17, y: 3 },
   { kind: "side-table", x: 18, y: 3, variant: 1 },
   ...readingCorner(16, 6, "navy"),
   { kind: "bookshelf", x: 11, y: 8 },
@@ -120,6 +120,9 @@ export const CLASSIC_OFFICE_ITEMS: HqItem[] = [
   ...[15, 19].flatMap((x): HqItem[] => [{ kind: "plant-tree", x, y: 22 }, { kind: "plant-tree", x, y: 25 }]),
   { kind: "water-cooler", x: 21, y: 21 },
   { kind: "plant-small", x: 21, y: 26 },
+  // An office printer for the desks, and a 3D printer.
+  { kind: "office-printer", x: 12, y: 21 },
+  { kind: "printer-3d", x: 12, y: 25 },
 
   // Game Room
   { kind: "pingpong", x: 34, y: 24 },
@@ -135,7 +138,13 @@ export const CLASSIC_OFFICE_ITEMS: HqItem[] = [
   ...cafeTable(8, 26, 2),
   { kind: "fridge", x: 4, y: 28 },
   { kind: "plant-small", x: 9, y: 28 },
+  // The shelf where people leave snacks and things they found (components/workplace).
+  { kind: "swap-shelf", x: 6, y: 28 },
+  // Everyone's mail and parcel lockers, on the Work Area's back wall.
+  { kind: "lockers", x: 19, y: 21 },
 
+  // Hall: the office's server racks against its south wall (the rack panel, components/game-ui).
+  ...[28, 29, 30].map((x): HqItem => ({ kind: "server-rack", x, y: 28, dir: "down" })),
   // Hall
   { kind: "floor-lamp", x: 25, y: 26 },
   { kind: "plant-small", x: 11, y: 24 },
@@ -146,7 +155,7 @@ export const CAMPUS_ITEMS: HqItem[] = [
   // Conference Room (doors: right x 15 rows 12-13, bottom x 9-10).
   ...meeting(6, 12, 4, "blue"),
   { kind: "side-table", x: 4, y: 9, variant: 1 },
-  { kind: "filing-cabinet", x: 13, y: 9 },
+  { kind: "office-printer", x: 13, y: 9 },
   { kind: "plant-small", x: 14, y: 9 },
   { kind: "whiteboard", x: 4, y: 16 },
   { kind: "flip-chart", x: 12, y: 16 },
@@ -181,6 +190,12 @@ export const CAMPUS_ITEMS: HqItem[] = [
   // Work Areas: two rows of four-desk pods each, with trees and cabinets between them. The
   // columns in front of the doors to the bottom rooms (x 12-13 and 38-39) stay clear.
   ...[5, 14, 33, 40].flatMap((x) => [...pod(x, 19), ...pod(x, 24)]),
+  // An office printer in each work area, and a 3D printer in the second.
+  { kind: "office-printer", x: 19, y: 18 },
+  { kind: "office-printer", x: 32, y: 18 },
+  { kind: "printer-3d", x: 47, y: 18 },
+  // The server racks, in Work Area 2's corner against the south wall.
+  ...[45, 46, 47].map((x): HqItem => ({ kind: "server-rack", x, y: 27, dir: "down" })),
   ...[4, 11, 19, 32, 46].flatMap((x): HqItem[] => [
     { kind: "plant-tree", x, y: 20 },
     { kind: "filing-cabinet", x, y: 21, variant: 1 },
@@ -194,12 +209,15 @@ export const CAMPUS_ITEMS: HqItem[] = [
   ...cafeTable(10, 32, 2),
   { kind: "fridge", x: 4, y: 33 },
   { kind: "plant-small", x: 16, y: 29 },
+  { kind: "swap-shelf", x: 12, y: 29 },
 
   // Reception: the desk with its chair behind it, and a sofa for visitors. x 24-27 is the way in.
   { kind: "plant-big", x: 18, y: 29 },
   { kind: "task-chair", x: 20, y: 29, dir: "down" },
   { kind: "reception-desk", x: 19, y: 30 },
   { kind: "plant-small", x: 28, y: 29 },
+  // Everyone's mail and parcel lockers, behind the desk (components/workplace).
+  { kind: "lockers", x: 22, y: 29 },
   { kind: "sofa", x: 29, y: 30, dir: "down", fabric: "navy" },
   { kind: "coffee-table", x: 29, y: 31 },
   { kind: "plant-big", x: 33, y: 29 },

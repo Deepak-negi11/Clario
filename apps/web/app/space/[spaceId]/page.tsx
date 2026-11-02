@@ -371,9 +371,9 @@ function LiveSpace({
   }, [self, others]);
   const peopleInRoom = useMemo(() => {
     if (!currentRoom) return 0;
-    const inRoom = Object.values(others).filter((position) => getChatRoomAtPosition(mapTemplate, position)?.id === currentRoom.id);
+    const inRoom = Object.values(others).filter((position) => roomAt(position)?.id === currentRoom.id);
     return inRoom.length + 1;
-  }, [currentRoom, others, mapTemplate]);
+  }, [currentRoom, others, roomAt]);
 
   const nearbyRef = useRef(nearbyIds);
   nearbyRef.current = nearbyIds;
@@ -559,6 +559,7 @@ function LiveSpace({
         nearbyIds={nearbyIds}
         names={names}
         lowered={show3d}
+        roomName={currentRoom?.name}
       />
       {projector && (
         <ProjectorView key={projector.userId} show={projector} in3d={show3d} onStopSharing={() => void toggleScreen()} />
@@ -588,6 +589,7 @@ function LiveSpace({
           onWalkTo={(x, y) => bridgeRef.current.walkTo?.(x, y)}
           errandTarget={errandTarget}
           customMap={isCustomMap ? draftMap ?? customMap : template3d}
+          mapName={isCustomMap ? "Team office" : getMapTemplate(mapTemplate).name}
           looksRef={looksRef}
           onUpdateLook={handleUpdateLook}
           onTalk={(id) => (id === "maya" ? bridgeRef.current.openMentor?.() : bridgeRef.current.openCoworker?.(id))}
@@ -611,6 +613,7 @@ function LiveSpace({
         />
       ) : (
         <ErrandChoice
+          bridgeRef={bridgeRef}
           errand={errands.errand}
           run={errands.run}
           lastPick={errands.lastPick}

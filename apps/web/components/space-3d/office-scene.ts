@@ -11,10 +11,12 @@ import { drawFloorPattern } from "../../lib/maps/floor-patterns";
 import { makeBeanbag } from "./beanbag";
 import { batchStaticSeating, makeSeating, seatingResources } from "./seating";
 import { makeBookcase } from "./bookcase";
+import { makeProjector } from "./projector-3d";
 import { drawArcadeCarpet, makeArcadeCabinet, makeFoosballTable, makeNeonSign, makePingPongTable } from "./game-room-3d";
-import { makeCoffeeTable, makeSideTable } from "./tables";
+import { makeCoffeeTable, makeDiningTable, makeSideTable, tablePlaceSetting } from "./tables";
 import { makeClaude3d } from "./claude-3d";
 import { makeLaptop, type Laptop } from "./laptop";
+import { makeOfficePrinter } from "./office-printer";
 import { makePlant } from "./plants";
 import { grove } from "./trees";
 
@@ -489,6 +491,10 @@ function buildWalls(scene: THREE.Object3D, models: ModelSet) {
       case "whiteboard":
         scene.add(box(decor.w * 0.95, 0.75, 0.05, standard("#fbfbf8"), cx, mid, faceZ + 0.03));
         break;
+      // A pull-down screen, and a projector on the meeting table (projector-3d.ts).
+      case "projector":
+        scene.add(makeProjector(cx, decor.w, faceZ, height));
+        break;
       case "art": {
         const colors = ["#e85d9b", "#3a6ee8", "#4caf6d", "#d9534f", "#8a78f0", "#e58f6a"];
         scene.add(box(decor.w * 0.85, 0.55, 0.05, standard("#2a2e38"), cx, mid, faceZ + 0.03));
@@ -552,11 +558,11 @@ export function buildItem(item: HqItem, models: ModelSet): THREE.Object3D | null
   switch (item.kind) {
     case "desk-l":
     case "desk-r": {
-      add(fit(models.desk, 1.9, 0.62, 0.9));
+      add(makeDiningTable(1.9, 0.9));
       // A laptop on the side the chair is (the 2D map's screen side), shut until someone sits there.
       const left = item.kind === "desk-l";
       const laptop = makeLaptop();
-      add(laptop.object, left ? -0.45 : 0.45, 0.62, -0.02);
+      add(laptop.object, left ? -0.45 : 0.45, 0.74, 0.28);
       group.userData.desk = { laptop, seat: { x: item.x + (left ? 0 : 1), y: item.y + 1 } } satisfies DeskSpot;
       break;
     }
@@ -574,11 +580,13 @@ export function buildItem(item: HqItem, models: ModelSet): THREE.Object3D | null
     case "meeting-table":
     case "meeting-table-sm": {
       const width = item.kind === "meeting-table" ? 5.7 : 3.7;
-      add(fit(models.table, width, 0.62, 1.7));
+      add(makeDiningTable(width, 1.7));
       const seats = item.kind === "meeting-table" ? 6 : 4;
       for (let i = 0; i < seats; i++) {
-        const laptop = add(fit(models.laptop, 0.42, 0.22, 0.32), -width / 2 + 0.5 + i * (width - 1) / (seats - 1), 0.62, 0.45);
-        laptop.rotation.y = Math.PI;
+        const laptop = makeLaptop(); laptop.setOpen(1);
+        const side = i < seats / 2 ? -1 : 1;
+        add(laptop.object, -width / 2 + 0.65 + (i % (seats / 2)) * (width - 1.3) / (seats / 2 - 1), 0.74, side * 0.48)
+          .rotation.y = side < 0 ? Math.PI : 0;
       }
       break;
     }
@@ -650,16 +658,15 @@ export function buildItem(item: HqItem, models: ModelSet): THREE.Object3D | null
       add(new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.5, 24), standard("#9fd6f2", { transparent: true, opacity: 0.85, roughness: 0.1 })), 0, 1.2, 0);
       break;
     case "cafe-table":
-      add(fit(models.table, 1.8, 0.62, 0.9));
+      add(makeDiningTable(1.8, 0.9));
+      add(tablePlaceSetting(), 0, 0.74, 0);
       break;
     case "round-table":
     case "coffee-bar": {
       const radius = item.kind === "coffee-bar" ? 0.75 : 0.42;
-      const wood = standard("#c8936a");
-      add(new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 0.05, 32), wood), 0, 0.72, 0).castShadow = true;
-      add(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.7, 12), standard("#5a3b26")), 0, 0.35, 0);
-      add(new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.28, 0.03, 24), standard("#5a3b26")), 0, 0.015, 0);
+      add(makeDiningTable(radius * 2, radius * 2, true));
       if (item.kind === "coffee-bar") add(fit(models.kitchenCoffeeMachine, 0.36, 0.48, 0.36), -0.2, 0.745, -0.1);
+      else add(tablePlaceSetting(), 0, 0.74, 0);
       break;
     }
     case "desk-white": {
@@ -669,7 +676,7 @@ export function buildItem(item: HqItem, models: ModelSet): THREE.Object3D | null
       // The laptop faces +z (down the map). Variant 0 faces a chair below the desk, variant 1 a
       // chair above it; it stays shut until someone sits there.
       const laptop = makeLaptop();
-      add(laptop.object, -0.35, 0.745, -0.05).rotation.y = item.variant === 1 ? Math.PI : 0;
+      add(laptop.object, -0.35, 0.745, item.variant === 1 ? -0.28 : 0.2).rotation.y = item.variant === 1 ? Math.PI : 0;
       group.userData.desk = { laptop, seat: { x: item.x, y: item.y + (item.variant === 1 ? -1 : 1) } } satisfies DeskSpot;
       break;
     }
@@ -677,7 +684,8 @@ export function buildItem(item: HqItem, models: ModelSet): THREE.Object3D | null
       add(box(0.7, 1.1, 0.6, standard(item.variant === 1 ? "#b3bac6" : "#4a80d2")), 0, 0.55, -0.1);
       break;
     case "meeting-table-md":
-      add(fit(models.table, 2.7, 0.62, 1.7));
+      add(makeDiningTable(2.7, 1.7));
+      add(tablePlaceSetting(), 0, 0.74, 0);
       break;
     case "whiteboard": {
       const frame = standard("#9aa2af");
@@ -724,6 +732,16 @@ export function buildItem(item: HqItem, models: ModelSet): THREE.Object3D | null
       });
       break;
     }
+    case "office-printer":
+      add(makeOfficePrinter());
+      break;
+    // Tall pieces that stand back against the wall, like the wardrobe.
+    case "lockers":
+      add(makeLockers(), 0, 0, -0.18);
+      break;
+    case "swap-shelf":
+      add(makeSwapShelf(), 0, 0, -0.22);
+      break;
     case "printer-3d": {
       add(fit(models.sideTable, 0.8, 0.5, 0.7));
       const frame = standard("#2a2e38", { roughness: 0.5, metalness: 0.5 });
@@ -1298,6 +1316,83 @@ function makeWardrobe() {
   return group;
 }
 
+// Mail and parcel lockers (2 tiles wide, 1.9 high): a steel bank of doors, three across and four
+// high, with the parcel screen and keypad in the middle and a green light on doors with mail.
+function makeLockers() {
+  const group = new THREE.Group();
+  const front = 0.3;
+  group.add(box(1.9, 1.86, 0.6, standard("#7d8898", { metalness: 0.55, roughness: 0.45 }), 0, 0.97, 0));
+  group.add(box(1.9, 0.08, 0.62, standard("#3a6ee8", { roughness: 0.5 }), 0, 1.9, 0.005));
+  group.add(box(1.86, 0.06, 0.56, standard("#4a5260", { roughness: 0.6 }), 0, 0.03, -0.01));
+  const doors: BoxPart[] = [];
+  const handles: BoxPart[] = [];
+  const lights: BoxPart[] = [];
+  for (let col = 0; col < 3; col++) {
+    for (let row = 0; row < 4; row++) {
+      const x = (col - 1) * 0.62;
+      const y = 0.32 + row * 0.42;
+      if (col === 1 && row === 2) continue;
+      doors.push([0.58, 0.38, 0.02, x, y, front + 0.01]);
+      handles.push([0.03, 0.12, 0.03, x + 0.22, y, front + 0.035]);
+      if ((col + row) % 3 === 0) lights.push([0.03, 0.03, 0.01, x - 0.22, y + 0.12, front + 0.025]);
+    }
+  }
+  group.add(boxes(doors, standard("#a2acba", { metalness: 0.5, roughness: 0.4 })));
+  group.add(boxes(handles, standard("#2a2e38", { metalness: 0.6, roughness: 0.35 })));
+  if (lights.length) group.add(boxes(lights, standard("#4ade80", { emissive: "#4ade80", emissiveIntensity: 1.2 })));
+  // The parcel screen and its keypad.
+  group.add(box(0.58, 0.38, 0.02, standard("#1d2430", { roughness: 0.4 }), 0, 1.16, front + 0.01));
+  group.add(box(0.44, 0.18, 0.01, standard("#3f7fae", { emissive: "#6fb5e0", emissiveIntensity: 0.7 }), 0, 1.22, front + 0.025));
+  group.add(boxes([-0.12, 0, 0.12].map((x): BoxPart => [0.07, 0.05, 0.015, x, 1.04, front + 0.025]), standard("#a9afbb", { roughness: 0.5 })));
+  return group;
+}
+
+// The kitchen swap shelf (2 tiles wide, 1.5 high): an open wooden unit with a fruit bowl, a jar of
+// cookies and mugs on top, a lost umbrella and a water bottle on the middle shelf, and a
+// lost-property box on the bottom one.
+function makeSwapShelf() {
+  const group = new THREE.Group();
+  const wood = standard("#b98451", { roughness: 0.6 });
+  const back = 0.2;
+  // Sides, back and three shelves.
+  group.add(boxes([[0.05, 1.5, 0.44, -0.875, 0.75, 0], [0.05, 1.5, 0.44, 0.875, 0.75, 0]], wood));
+  group.add(box(1.8, 1.5, 0.03, standard("#86603a", { roughness: 0.7 }), 0, 0.75, -back));
+  group.add(boxes([0.04, 0.52, 1.0, 1.48].map((y): BoxPart => [1.75, 0.04, 0.42, 0, y, 0]), standard("#e3bc87", { roughness: 0.55 })));
+  // Top: the fruit bowl, the cookie jar, two mugs.
+  const bowl = new THREE.Mesh(new THREE.SphereGeometry(0.16, 20, 10, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), standard("#f3f1ec", { roughness: 0.4, side: THREE.DoubleSide }));
+  bowl.position.set(-0.5, 1.68, 0.02);
+  group.add(bowl);
+  for (const [x, z, color] of [[-0.56, 0, "#d9534f"], [-0.44, 0.04, "#f2c14e"], [-0.5, -0.07, "#4caf6d"]] as const) {
+    const fruit = new THREE.Mesh(new THREE.SphereGeometry(0.055, 14, 10), standard(color, { roughness: 0.5 }));
+    fruit.position.set(x, 1.6, z);
+    group.add(fruit);
+  }
+  const jar = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.24, 18), standard("#bce4f6", { transparent: true, opacity: 0.6, roughness: 0.1 }));
+  jar.position.set(0.05, 1.62, 0);
+  group.add(jar);
+  group.add(new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.12, 14), standard("#c68a4a")).translateX(0.05).translateY(1.56));
+  for (const [x, color] of [[0.45, "#3a6ee8"], [0.62, "#c8714b"]] as const) {
+    const mug = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.05, 0.12, 16), standard(color, { roughness: 0.45 }));
+    mug.position.set(x, 1.56, 0.02);
+    group.add(mug);
+  }
+  // Middle: an umbrella leaning on the side, a water bottle, a notebook.
+  const umbrella = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.07, 0.5, 10), standard("#7a5fd0", { roughness: 0.6 }));
+  umbrella.position.set(-0.62, 1.26, 0.02);
+  umbrella.rotation.z = -0.5;
+  group.add(umbrella);
+  group.add(new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.26, 14), standard("#3fc5d6", { roughness: 0.3 })).translateX(0.05).translateY(1.15));
+  group.add(box(0.3, 0.05, 0.22, standard("#f2c14e", { roughness: 0.6 }), 0.5, 1.045, 0));
+  // Bottom: the lost-property box with its label, and a pair of headphones.
+  group.add(box(0.62, 0.36, 0.34, standard("#c79a62", { roughness: 0.85 }), -0.42, 0.72, 0));
+  group.add(box(0.28, 0.12, 0.005, standard("#f8f6f1"), -0.42, 0.76, 0.172));
+  const band = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.018, 8, 20, Math.PI), standard("#2a2e38", { roughness: 0.4 }));
+  band.position.set(0.45, 0.62, 0);
+  group.add(band);
+  group.add(boxes([[0.06, 0.1, 0.06, 0.35, 0.6, 0], [0.06, 0.1, 0.06, 0.55, 0.6, 0]], standard("#2a2e38", { roughness: 0.4 })));
+  return group;
+}
+
 // A desk globe on a small wooden cabinet (0.9 high): blue seas with green and sandy land, on a
 // tilted axis inside a brass meridian ring.
 function makeGlobe() {
@@ -1666,7 +1761,8 @@ function buildRoomLabels(scene: THREE.Object3D) {
 // A room's name floating over its middle.
 export function roomLabel(room: { name: string; bounds: { x: number; y: number; width: number; height: number } }) {
   const label = textSprite(room.name, { color: "#ffffff", background: "rgba(18,21,28,0.72)", weight: 600, size: 40 });
-  label.scale.multiplyScalar(0.55);
+  label.scale.multiplyScalar(0.42);
+  label.userData.room = room.bounds;
   label.position.set(room.bounds.x + room.bounds.width / 2, 2.7, room.bounds.y + room.bounds.height / 2);
   label.renderOrder = 10;
   return label;
@@ -1684,15 +1780,21 @@ export function seatMap() {
 }
 
 export function disposeScene(scene: THREE.Scene) {
+  const done = new Set<unknown>(seatingResources());
+  const free = (resource: { dispose(): void } | undefined) => {
+    if (!resource || done.has(resource)) return;
+    done.add(resource); resource.dispose();
+  };
   scene.traverse((child) => {
     const mesh = child as THREE.Mesh;
-    if (mesh.geometry) mesh.geometry.dispose();
+    free(mesh.geometry);
+    if (child instanceof THREE.InstancedMesh) child.dispose();
     // A swaying tree's shadow has a material of its own (wind.ts).
-    mesh.customDepthMaterial?.dispose();
+    free(mesh.customDepthMaterial);
     const materials = mesh.material ? (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) : [];
     for (const material of materials) {
-      for (const value of Object.values(material)) if (value instanceof THREE.Texture) value.dispose();
-      material.dispose();
+      for (const value of Object.values(material)) if (value instanceof THREE.Texture) free(value);
+      free(material);
     }
   });
 }

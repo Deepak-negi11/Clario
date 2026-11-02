@@ -128,7 +128,7 @@ export function generateTeamOffice(teamSize: number): CustomMap {
     if (i % 2 === 0) {
       put("side-table", a, y1, { variant: 1 });
       put("whiteboard", a + 1, y1);
-      put("filing-cabinet", a + 3, y1);
+      put(i === 0 ? "office-printer" : "filing-cabinet", a + 3, y1);
       put("side-table", a + 7, y1, { variant: 2 });
       put("plant-big", a + 8, y1);
     } else {
@@ -195,10 +195,17 @@ export function generateTeamOffice(teamSize: number): CustomMap {
     }
     room(`desks-${b + 1}`, plan.blocks === 1 ? "Desks" : `Desks ${b + 1}`, xs - 1, r, deskWidth + 2, 4);
   }
-  if (xs - 1 > xL + 1) put("plant-big", xL + 1, yAisle + 1);
-  if (xs + deskWidth < xR - 1) {
+  // Beside the desks: a plant and the office printer on one side; a plant, the water cooler and a
+  // 3D printer on the other. When the desks fill the width, the printers go in the reception.
+  const besideDesks = { office: xs - 1 > xL + 1, maker: xs + deskWidth < xR - 1 };
+  if (besideDesks.office) {
+    put("plant-big", xL + 1, yAisle + 1);
+    put("office-printer", xL + 1, yAisle + 2);
+  }
+  if (besideDesks.maker) {
     put("plant-big", xR - 1, yAisle + 1);
     put("water-cooler", xR - 1, yAisle + 2);
+    put("printer-3d", xR - 1, yAisle + 3);
   }
 
   // 3a. Lounge: a sofa facing two more across a coffee table on a grey carpet, beanbags either side.
@@ -256,6 +263,9 @@ export function generateTeamOffice(teamSize: number): CustomMap {
     put("task-chair", frontDoor - 4, yCommons + 3, { dir: "down" });
     put("reception-desk", frontDoor - 5, yCommons + 4);
     put("plant-big", h0, yCommons + 8);
+    // Printers that didn't fit beside the desks stand against the wall above that plant.
+    if (!besideDesks.office) put("office-printer", h0, yCommons + 6);
+    if (!besideDesks.maker) put("printer-3d", h0, yCommons + 7);
   }
   // Waiting sofas where the hall is wide enough to leave room beside the reception desk.
   if (frontDoor - h0 >= 9) {
@@ -269,6 +279,17 @@ export function generateTeamOffice(teamSize: number): CustomMap {
     put("coffee-table", h1 - 3, yCommons + 2);
   }
   if (!plan.gameCorner && h1 - frontDoor >= 3) put("plant-big", h1, yCommons + 8);
+  // The office's server racks against the front wall, left of the door: one or two side by side,
+  // on tiles that are free with nothing just above them (a rack is drawn about three tiles tall).
+  const rackRow = yCommons + 8;
+  const taken = new Set(items.map((item) => `${item.x},${item.y}`));
+  const racks: number[] = [];
+  for (let x = h0; x < frontDoor && racks.length < 2; x++) {
+    const free = [0, 1, 2].every((up) => !taken.has(`${x},${rackRow - up}`));
+    if (free && (!racks.length || racks[0] === x - 1)) racks.push(x);
+    else if (racks.length) break;
+  }
+  for (const x of racks) put("server-rack", x, rackRow, { dir: "down" });
   room("reception", "Reception", h0, yCommons, hallEnd - h0 + 1, COMMONS_H);
   if (plan.gameCorner) {
     const g0 = frontDoor + 2;

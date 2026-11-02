@@ -41,6 +41,8 @@ const SPECS = {
   wardrobe: { w: 1, h: 1, label: "Wardrobe", category: "Office" },
   "coat-rack": { w: 1, h: 1, label: "Coat rack", category: "Office" },
   "reception-desk": { w: 4, h: 2, label: "Reception desk", category: "Office" },
+  // Where people's documents and parcels wait for them (office/lockers.ts).
+  lockers: { w: 2, h: 1, label: "Mail and parcel lockers", category: "Office" },
   "meeting-table": { w: 6, h: 2, label: "Meeting table (12)", category: "Meetings" },
   "meeting-table-sm": { w: 4, h: 2, label: "Meeting table (8)", category: "Meetings" },
   "meeting-table-md": { w: 3, h: 2, label: "Meeting table (6 + ends)", category: "Meetings", looks: 2 },
@@ -68,10 +70,17 @@ const SPECS = {
   "round-table": { w: 1, h: 1, label: "Round cafe table", category: "Kitchen", looks: 3 },
   "coffee-bar": { w: 2, h: 1, label: "Coffee station", category: "Kitchen" },
   "vending-machine": { w: 1, h: 1, label: "Vending machine", category: "Kitchen" },
+  // Snacks to share and lost-and-found, left for each other (office/shelf.ts).
+  "swap-shelf": { w: 2, h: 1, label: "Snack and lost-and-found shelf", category: "Kitchen" },
   pingpong: { w: 3, h: 2, label: "Ping-pong table", category: "Fun", looks: 2 },
   arcade: { w: 1, h: 1, label: "Arcade machine", category: "Fun", looks: 3 },
   foosball: { w: 2, h: 1, label: "Foosball", category: "Fun" },
   "server-rack": { w: 1, h: 1, label: "Server rack", category: "Tech" },
+  "office-printer": { w: 1, h: 1, label: "Office printer", category: "Office" },
+  // Walk past it to badge in, or press E at it (components/badge-reader). Put it by the door.
+  "badge-reader": { w: 1, h: 1, label: "Badge reader", category: "Office" },
+  // The team's cork board: E opens it (components/notice-board).
+  "notice-board": { w: 2, h: 1, label: "Notice board", category: "Office" },
   "printer-3d": { w: 1, h: 1, label: "3D printer", category: "Tech" },
   "robot-arm": { w: 1, h: 1, label: "Robot arm", category: "Tech" },
   workbench: { w: 2, h: 1, label: "Electronics bench", category: "Tech" },

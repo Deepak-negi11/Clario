@@ -436,7 +436,80 @@ function makeFurniture(scene: Phaser.Scene) {
     px(C.metal, 12, 18, 1, 6); px(0x1d2028, 1, 40, 14, 3);
   });
 
+  // Mail and parcel lockers: a steel bank of doors, three across and four high, with the parcel
+  // screen and keypad in the middle and a green light on the doors that have something waiting.
+  make("hq-lockers", 32, 42, (px) => {
+    px(C.ink, 0, 1, 32, 39); px(0x8d98a8, 1, 2, 30, 37); px(C.accent, 1, 2, 30, 2); px(0x6f9af0, 1, 2, 30, 1);
+    for (const [col, x] of [0, 11, 21].map((left, index) => [index, left + 1] as const)) {
+      for (let row = 0; row < 4; row++) {
+        const y = 5 + row * 8;
+        if (col === 1 && row === 1) {
+          // The parcel screen and its keypad.
+          px(0x1d2430, x, y, 9, 7); px(C.screenDark, x + 1, y + 1, 7, 3); px(C.screen, x + 1, y + 1, 7, 1);
+          for (let key = 0; key < 3; key++) px(C.greyMid, x + 2 + key * 2, y + 5, 1, 1);
+          continue;
+        }
+        px(0x7b8696, x, y, 9, 7); px(0xa6b0bf, x, y, 9, 1); px(0x66707f, x, y + 6, 9, 1);
+        px(C.ink, x + 7, y + 2, 1, 3);
+        if ((col + row) % 3 === 0) px(C.green, x + 1, y + 2, 1, 1);
+      }
+    }
+    px(0x5d6675, 1, 37, 30, 2); px(C.ink, 2, 40, 3, 2); px(C.ink, 27, 40, 3, 2);
+  });
+
+  // The kitchen swap shelf: an open wooden unit with a fruit bowl, a jar of cookies and mugs on
+  // top, a lost umbrella leaning on the middle shelf, and a lost-property box at the bottom.
+  make("hq-swap-shelf", 32, 36, (px) => {
+    px(C.ink, 0, 2, 32, 34); px(C.woodEdge, 1, 3, 30, 32); px(C.woodDark, 2, 4, 28, 30);
+    for (const y of [12, 22, 32]) { px(C.woodTop, 1, y, 30, 2); px(C.woodHi, 1, y, 30, 1); }
+    px(C.woodTop, 0, 2, 32, 2); px(C.woodHi, 0, 2, 32, 1);
+    // Top shelf: fruit bowl, cookie jar, two mugs.
+    blob(px, C.white, 7, 10, 4, 1.5); blob(px, C.red, 5, 8, 1.6); blob(px, C.yellow, 8, 7.5, 1.6); blob(px, C.green, 10, 8.5, 1.4);
+    px(C.screenHi, 14, 5, 5, 7); px(C.ink, 14, 4, 5, 1); px(0xc68a4a, 15, 8, 3, 3); px(0xe3b06d, 15, 8, 1, 1);
+    px(C.accent, 22, 8, 3, 4); px(C.ink, 25, 9, 1, 2); px(C.terra, 26, 8, 3, 4);
+    // Middle shelf: an umbrella leaning over, a water bottle and a notebook.
+    for (let i = 0; i < 7; i++) px(C.purple, 4 + i, 21 - i, 2, 1);
+    px(C.ink, 11, 14, 1, 2);
+    px(C.cyan, 16, 15, 3, 7); px(C.white, 16, 14, 3, 1);
+    px(C.yellow, 22, 18, 6, 4); px(C.woodHi, 22, 18, 6, 1);
+    // Bottom shelf: the lost-property box with its label, and a pair of headphones.
+    px(0xc79a62, 3, 25, 13, 7); px(0xe0b884, 3, 25, 13, 1); px(C.white, 7, 27, 5, 2);
+    blob(px, C.ink, 23, 28, 3, 2.5); blob(px, C.woodDark, 23, 28.5, 2, 1.5); px(C.greyDark, 20, 29, 2, 3); px(C.greyDark, 25, 29, 2, 3);
+  });
+
+  // Badge reader: a dark reader box on a slim post, with a card pad and the LED socket (the LED
+  // itself is drawn live over it, badge-reader-object.ts).
+  make("hq-badge-reader", 16, 30, (px) => {
+    px(0x1b232d, 5, 27, 6, 3); px(0x313a45, 5, 27, 6, 1);
+    px(0x2a2e38, 7, 10, 2, 17); px(0x4a505c, 7, 10, 1, 17);
+    px(0x14171d, 4, 1, 8, 10); px(0x3a404c, 5, 2, 6, 8); px(0x4c5462, 5, 2, 6, 1);
+    px(0x101215, 7, 3, 2, 2);
+    px(0x5b6472, 6, 6, 4, 3); px(0x8a94a3, 7, 7, 2, 1);
+  });
+
+  // Notice board: a framed cork board on two legs, with notes and a sticky pinned up (its red
+  // "unread" pin is drawn live over it, notice-board-object.ts).
+  make("hq-notice-board", 32, 34, (px) => {
+    px(0x5a3c22, 3, 20, 2, 12); px(0x5a3c22, 27, 20, 2, 12); px(0x3e2a17, 1, 32, 6, 2); px(0x3e2a17, 25, 32, 6, 2);
+    px(0x7a5232, 1, 1, 30, 21); px(0x9a6b42, 1, 1, 30, 1);
+    px(0xc39a6b, 2, 2, 28, 19);
+    for (const [x, y] of [[3, 18], [12, 3], [20, 19], [27, 12], [9, 12], [22, 2]] as const) px(0xa98258, x, y, 1, 1);
+    px(0xf4f1e8, 4, 4, 8, 7); px(0xb7bcc6, 5, 6, 6, 1); px(0xb7bcc6, 5, 8, 4, 1); px(0x3a7bd5, 8, 4, 1, 1);
+    px(0xfff2a8, 14, 5, 7, 7); px(0xc9b65e, 15, 8, 5, 1); px(0x2fa84f, 17, 5, 1, 1);
+    px(0xe8f1fb, 23, 4, 5, 8); px(0xa9b8cc, 24, 6, 3, 1); px(0xa9b8cc, 24, 8, 3, 1); px(0xf2b630, 25, 4, 1, 1);
+    px(0xf4f1e8, 6, 13, 11, 6); px(0xb7bcc6, 7, 15, 8, 1); px(0xb7bcc6, 7, 17, 6, 1); px(0xe85d4f, 11, 13, 1, 1);
+  });
+
   // 3D printer: an open frame with a part half-printed on the bed and a spool on top.
+  make("hq-office-printer", 16, 26, (px) => {
+    px(0x313a45, 2, 6, 13, 19); px(0x1b232d, 3, 24, 2, 2); px(0x1b232d, 12, 24, 2, 2);
+    px(0xd7dde0, 1, 5, 14, 8); px(0xf0f2ed, 2, 5, 12, 2);
+    px(0xbac3c8, 3, 1, 11, 4); px(0xecf0ec, 4, 0, 9, 2); px(0x84969c, 5, 2, 6, 1);
+    px(0x152933, 10, 7, 4, 3); px(0x61c8be, 11, 7, 2, 2);
+    px(0x111d28, 3, 12, 10, 4); px(0xece8dc, 4, 13, 8, 2);
+    px(0x85949f, 4, 18, 8, 1); px(0x202a35, 3, 21, 10, 1);
+  });
+
   make("hq-printer-3d", 16, 30, (px) => {
     px(C.woodDeep, 1, 24, 14, 6); px(C.woodEdge, 1, 24, 14, 1);
     px(C.ink, 1, 4, 2, 20); px(C.ink, 13, 4, 2, 20); px(C.ink, 1, 3, 14, 3); px(C.greyDark, 2, 4, 12, 1);
@@ -873,6 +946,19 @@ function drawWallDecor(scene: Phaser.Scene) {
         const barsX = x0 + W - 34;
         [8, 12, 6, 14].forEach((bh, i) => r(barsX + i * 6, y0 + H - 5 - bh, 4, bh, [C.cyan, C.yellow, C.pink, C.green][i]!));
         r(x0 + W / 2 - 6, y0 + H, 12, 2, C.ink);
+        break;
+      }
+      // A pull-down projector screen: the roller case, the screen with its black border, the
+      // weighted bar and its pull tab. In 3D the shared screen plays on it (projector-3d.ts).
+      case "projector": {
+        const y0 = top + 2, H = 34;
+        r(x0 - 2, y0, W + 4, 5, 0x3a3f4b);
+        r(x0 - 3, y0, 2, 5, 0x2b2f38); r(x0 + W + 1, y0, 2, 5, 0x2b2f38);
+        r(x0 + 3, y0 + 5, W - 6, H - 5, 0x1d1f24);
+        r(x0 + 5, y0 + 6, W - 10, H - 9, 0xf1efe9);
+        r(x0 + 5, y0 + 6, W - 10, 2, 0xffffff, 0.6);
+        r(x0 + 2, y0 + H, W - 4, 2, 0x3a3f4b);
+        r(x0 + W / 2 - 2, y0 + H + 2, 4, 4, 0x3a3f4b);
         break;
       }
       case "whiteboard": {
