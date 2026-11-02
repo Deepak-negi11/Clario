@@ -500,7 +500,7 @@ export function createBreakout({ reducedMotion, sound, seats }: GameOptions): Ga
       slowFor = data.sl === 1 ? 1 : 0;
       balls = read.list(data.b, MAX_BALLS).map((value) => {
         const [x, y, held] = read.list(value, 3);
-        const seat = read.int(held, -1, -1, 3);
+        const seat = read.int(held, -1, -1, count - 1);
         return { x: read.num(x, 0, -10, W + 10), y: read.num(y, 0, -10, H + 10), vx: 0, vy: 0, held: seat >= 0 ? seat : null, offset: 0, heldFor: 0 };
       });
       drops = read.list(data.d, 4).flatMap((value) => {

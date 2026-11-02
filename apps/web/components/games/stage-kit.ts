@@ -6,7 +6,7 @@
 
 import * as THREE from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { makeSeating, seatingResources } from "../space-3d/seating";
 import { clamp, type GameStage, type GameView } from "./arcade-kit";
 
 export const smooth = (t: number) => t * t * (3 - 2 * t);
@@ -27,7 +27,7 @@ export function paintedTexture(width: number, height: number, paint: (ctx: Canva
 // Frees everything under `root`: geometry, materials and their textures. Shared ones are freed
 // once each.
 export function disposeTree(root: THREE.Object3D) {
-  const done = new Set<unknown>();
+  const done = new Set<unknown>(seatingResources());
   const free = (thing: { dispose(): void }) => {
     if (done.has(thing)) return;
     done.add(thing);
@@ -52,32 +52,10 @@ export function shadowed<T extends THREE.Object3D>(object: T, cast = true, recei
   return object;
 }
 
-// The office's own swivel chair (Quaternius, CC0, as used in the 3D office): loaded once and
-// shared. It faces +Z, stands on the floor at the origin, and its upholstery is the material called
-// "Chair". Null if it can't load; the games then use their own simpler chair.
-const OFFICE_CHAIR = "/assets/3d/quaternius/OfficeChair.glb";
-let officeChair: Promise<THREE.Group | null> | null = null;
+// The same rounded mesh task chair used throughout the office, ready without another download.
+// Its upholstery is named "Chair" so arcade copies keep the player's seat color.
 export function loadOfficeChair() {
-  officeChair ??= new GLTFLoader()
-    .loadAsync(OFFICE_CHAIR)
-    .then((gltf) => {
-      gltf.scene.traverse((child) => {
-        const mesh = child as THREE.Mesh;
-        if (!mesh.isMesh) return;
-        for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
-          const surface = material as THREE.MeshStandardMaterial;
-          if (surface.name === "Grey") Object.assign(surface, { metalness: 0.55, roughness: 0.35 });
-          if (surface.name === "Chair") surface.roughness = 0.75;
-        }
-      });
-      return gltf.scene;
-    })
-    .catch((error: unknown) => {
-      console.warn("The office chair model didn't load; using the simple one", error);
-      officeChair = null;
-      return null;
-    });
-  return officeChair;
+  return Promise.resolve(makeSeating("task-chair", "navy"));
 }
 
 // A copy of the office chair `width` wide, centred on the origin with its casters on the floor.
@@ -90,13 +68,17 @@ export function officeChairCopy(template: THREE.Object3D, width: number, fabric?
   const centre = bounds.getCenter(new THREE.Vector3());
   model.position.set(-centre.x, -bounds.min.y, -centre.z);
   if (fabric !== undefined) {
+    const paintedMaterials = new Map<THREE.Material, THREE.Material>();
     model.traverse((child) => {
       const mesh = child as THREE.Mesh;
       if (!mesh.isMesh) return;
       const swap = (material: THREE.Material) => {
         if (material.name !== "Chair") return material;
+        if (paintedMaterials.has(material)) return paintedMaterials.get(material)!;
         const painted = (material as THREE.MeshStandardMaterial).clone();
         painted.color.set(fabric);
+        if (painted instanceof THREE.MeshPhysicalMaterial) painted.sheenColor.set(fabric).lerp(new THREE.Color("#ffffff"), 0.25);
+        paintedMaterials.set(material, painted);
         return painted;
       };
       mesh.material = Array.isArray(mesh.material) ? mesh.material.map(swap) : swap(mesh.material);

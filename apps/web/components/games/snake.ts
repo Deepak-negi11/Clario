@@ -133,7 +133,9 @@ export function createSnake({ reducedMotion, sound, seats }: GameOptions): GameI
     const free: Cell[] = [];
     for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) if (!used.has(y * COLS + x)) free.push({ x, y });
     const cell = free[Math.floor(Math.random() * free.length)];
-    if (cell) items.push({ kind, cell, life });
+    if (!cell) return false;
+    items.push({ kind, cell, life });
+    return true;
   }
 
   const mugsWanted = solo ? 1 : 2;
@@ -324,7 +326,17 @@ export function createSnake({ reducedMotion, sound, seats }: GameOptions): GameI
         message = { text: "Something tasty appeared!", time: 1.2 };
       }
       items = items.filter((item) => (item.life -= dt) > 0);
-      while (items.filter((item) => item.kind === "mug").length < mugsWanted) place("mug");
+      while (items.filter((item) => item.kind === "mug").length < mugsWanted) {
+        if (place("mug")) continue;
+        // A full floor has no place for another coffee. Finish a completed solo run and
+        // let a crowded multiplayer round continue, instead of locking up the browser.
+        if (solo && items.length === 0) {
+          phase = "won";
+          sounds.play("win");
+          return;
+        }
+        break;
+      }
 
       for (const [index, snake] of snakes.entries()) {
         if (snake.dead) continue;
@@ -380,7 +392,7 @@ export function createSnake({ reducedMotion, sound, seats }: GameOptions): GameI
       items: items.map((item) => ({ kind: item.kind, cell: item.cell, ending: item.life < 2 })),
     }),
     headline: () => {
-      if (solo) return "Game over";
+      if (solo) return phase === "won" ? "Office cleared!" : "Game over";
       const left = survivors();
       if (left.length === 1) return winsLine(seats[left[0]!]!.name);
       return phase === "over" ? "Game over" : "It's a draw";
