@@ -1,7 +1,9 @@
 import * as THREE from "three";
-import { DRINK_NAMES, type Drink, type PlayerProp } from "@repo/shared";
+import { DRINK_NAMES, PAGE_TURN_MS, SIP_DURATION_MS, type Coffee, type Drink, type PlayerProp } from "@repo/shared";
 import { BICYCLE_SADDLE, BIKE_COLORS, makeBicycle } from "./office-scene";
 import type { Gear, Person } from "./people";
+import { makeReadingBook, type ReadingBook } from "./reading-book";
+import { sipLift } from "../../lib/maps/micro-motion";
 
 // Bikes and drinks in the 3D view. The 2D map decides who has what (props-on-map.ts); this shows
 // it: a rider on a bike sized to them, pedalling it along (wheels rolling, cranks turning, feet on
@@ -44,9 +46,10 @@ type BikeParts = {
   steerAxis: THREE.Vector3;
   grips: THREE.Object3D[];
 };
-const SIP_SECONDS = 1.7;
+const SIP_SECONDS = SIP_DURATION_MS / 1000;
 // A drink is carried with the arm part way to the torch clip's raised arm: bent, at the waist.
 const CARRY = 0.6;
+let motionPreference: MediaQueryList | undefined;
 
 const CAN_COLORS: Record<Drink, string> = { orange: "#f28a2e", cola: "#c0392b", lime: "#7cc243", berry: "#8e44ad" };
 
@@ -92,13 +95,65 @@ export function makeCan(drink: Drink) {
   return group;
 }
 
+// A coffee from the kitchen machine (about 0.1 high), its middle at its origin, in the cup it
+// comes in: an espresso cup on a saucer, a cappuccino cup of foam, a tall latte glass, a clay
+// kulhad of chai, or a red mug of hot chocolate under cream.
+export function makeCup(coffee: Coffee) {
+  const group = new THREE.Group();
+  const china = new THREE.MeshStandardMaterial({ color: "#f6f4ef", roughness: 0.35 });
+  const add = (geometry: THREE.BufferGeometry, material: THREE.Material, y: number) => {
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.y = y;
+    group.add(mesh);
+    return mesh;
+  };
+  const top = (radius: number, color: string, y: number) => add(new THREE.CircleGeometry(radius, 24).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color, roughness: 0.6 }), y);
+  const handle = (radius: number, y: number, material: THREE.Material) => {
+    const ring = add(new THREE.TorusGeometry(radius * 0.45, radius * 0.12, 8, 16, Math.PI), material, y);
+    ring.rotation.z = -Math.PI / 2;
+    ring.position.x = radius;
+  };
+  if (coffee === "espresso") {
+    add(new THREE.CylinderGeometry(0.03, 0.022, 0.04, 24), china, -0.01);
+    add(new THREE.CylinderGeometry(0.055, 0.05, 0.006, 24), china, -0.033);
+    top(0.028, "#b8783d", 0.0105);
+    handle(0.03, -0.01, china);
+  } else if (coffee === "cappuccino") {
+    add(new THREE.CylinderGeometry(0.045, 0.03, 0.055, 24), china, 0);
+    add(new THREE.CylinderGeometry(0.07, 0.065, 0.006, 24), china, -0.03);
+    top(0.042, "#fbf7ee", 0.028);
+    top(0.008, "#5a2e1a", 0.0285);
+    handle(0.045, 0, china);
+  } else if (coffee === "latte") {
+    const glass = new THREE.MeshStandardMaterial({ color: "#dfeaf0", roughness: 0.05, transparent: true, opacity: 0.35 });
+    // The layers seen through the glass: coffee, milk and foam.
+    add(new THREE.CylinderGeometry(0.029, 0.026, 0.04, 24), new THREE.MeshStandardMaterial({ color: "#6b3d1f", roughness: 0.5 }), -0.03);
+    add(new THREE.CylinderGeometry(0.03, 0.029, 0.045, 24), new THREE.MeshStandardMaterial({ color: "#e9d6b8", roughness: 0.6 }), 0.0125);
+    add(new THREE.CylinderGeometry(0.031, 0.03, 0.02, 24), new THREE.MeshStandardMaterial({ color: "#fbf7ee", roughness: 0.7 }), 0.045);
+    add(new THREE.CylinderGeometry(0.033, 0.028, 0.11, 24, 1, true), glass, 0.005);
+  } else if (coffee === "chai") {
+    const clay = new THREE.MeshStandardMaterial({ color: "#b5552f", roughness: 0.95 });
+    add(new THREE.CylinderGeometry(0.036, 0.026, 0.065, 20), clay, 0);
+    top(0.033, "#c89660", 0.033);
+  } else {
+    const mug = new THREE.MeshStandardMaterial({ color: "#c8423f", roughness: 0.4 });
+    add(new THREE.CylinderGeometry(0.035, 0.033, 0.075, 24), mug, 0);
+    add(new THREE.SphereGeometry(0.033, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: "#fbf7ee", roughness: 0.8 }), 0.037);
+    handle(0.035, 0, mug);
+  }
+  group.traverse((child) => { child.castShadow = true; });
+  return group;
+}
+
 export function disposeObject(object: THREE.Object3D) {
+  const done = new Set<unknown>();
+  const free = (item?: { dispose(): void } | null) => { if (item && !done.has(item)) { done.add(item); item.dispose(); } };
   object.traverse((child) => {
     const mesh = child as THREE.Mesh;
-    mesh.geometry?.dispose();
+    free(mesh.geometry);
     for (const material of mesh.material ? (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) : []) {
-      (material as THREE.MeshStandardMaterial).map?.dispose();
-      material.dispose();
+      free((material as THREE.MeshStandardMaterial).map);
+      free(material);
     }
   });
 }
@@ -108,6 +163,10 @@ export type PropState = {
   key: string;
   bike: THREE.Group | null;
   can: THREE.Group | null;
+  book: (ReadingBook & { id: string }) | null;
+  reading: number;
+  page: number;
+  pageStart: number;
   ride: number;
   hold: number;
   sips: number;
@@ -128,20 +187,27 @@ export type PropState = {
 };
 
 export const emptyProps = (): PropState => ({
-  key: "", bike: null, can: null, ride: 0, hold: 0, sips: 0, sipStart: -Infinity, started: false,
+  key: "", bike: null, can: null, book: null, reading: 0, page: 0, pageStart: -Infinity,
+  ride: 0, hold: 0, sips: 0, sipStart: -Infinity, started: false,
   pedal: 0, rolled: null, yaw: null, lastMoved: -Infinity, speed: 0, stop: 0, lean: 0, steer: 0,
 });
 
 // How far a sip has got (0 to 1 and back): up quickly, a moment at the mouth, then down.
-function sipCurve(t: number) {
-  if (t <= 0 || t >= 1) return 0;
-  const ease = (x: number) => x * x * (3 - 2 * x);
-  if (t < 0.3) return ease(t / 0.3);
-  if (t < 0.7) return 1;
-  return ease((1 - t) / 0.3);
+function fadeBike(object: THREE.Object3D, opacity: number) {
+  if (Math.abs((object.userData.propOpacity as number ?? -1) - opacity) < 0.01) return;
+  object.userData.propOpacity = opacity;
+  object.traverse((child) => {
+    const mesh = child as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    mesh.castShadow = opacity > 0.5;
+    for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+      if (!material.transparent) { material.transparent = true; material.needsUpdate = true; }
+      material.opacity = opacity; material.depthWrite = opacity > 0.95;
+    }
+  });
 }
 
-// Brings a person's bike or can in line with their prop and returns the pose for it. `body` turns
+// Brings a person's book, bike or can in line with their prop and returns the pose for it. `body` turns
 // with them; `rolled` is how far they have moved (tiles), which turns the wheels and the pedals.
 // A can that is put down is handed to `onDrop` (in world space) to fall to the floor.
 export function applyProp(
@@ -154,9 +220,11 @@ export function applyProp(
   rolled: number,
   onDrop: (can: THREE.Group) => void,
 ): Gear {
-  const key = !prop ? "" : prop.kind === "bike" ? `bike:${prop.bike}` : `can:${prop.drink}`;
+  const key = !prop ? "" : prop.kind === "bike" ? `bike:${prop.bike}` : prop.kind === "can" ? `can:${prop.drink}` : prop.kind === "cup" ? `cup:${prop.coffee}` : `book:${prop.book}`;
+  // A can or a coffee: both are held, sipped and thrown away the same way.
+  const drink = prop?.kind === "can" || prop?.kind === "cup" ? prop : null;
   if (key !== state.key) {
-    if (state.bike) {
+    if (state.bike && prop?.kind === "bike") {
       body.remove(state.bike);
       disposeObject(state.bike);
       state.bike = null;
@@ -167,27 +235,59 @@ export function applyProp(
       person?.hold(null);
       state.can = null;
     }
+    if (state.book && prop?.kind === "book" && state.book.id !== prop.book) {
+      person?.read(null); state.book.object.removeFromParent(); disposeObject(state.book.object); state.book = null;
+    }
     if (prop?.kind === "bike") {
       state.bike = makeBicycle(BIKE_COLORS[prop.bike]);
       body.add(state.bike);
-    } else if (prop?.kind === "can" && person) {
-      state.can = makeCan(prop.drink);
-      person.hold(state.can);
-      // A fresh can was just taken from the machine's tray: reach down for it.
-      if (prop.sips === 0 && state.started) person.gesture("pickup");
+    } else if (drink) {
+      state.can = drink.kind === "can" ? makeCan(drink.drink) : makeCup(drink.coffee);
+      if (person) person.hold(state.can);
+      else body.add(state.can);
+      // A fresh can or cup was just taken from the machine: reach down for it.
+      if (drink.sips === 0 && state.started) person?.gesture("pickup");
+      state.sipStart = -Infinity;
+    } else if (prop?.kind === "book") {
+      state.book ??= { ...makeReadingBook(prop.book), id: prop.book };
+      if (person) person.read(state.book.object);
+      else body.add(state.book.object);
+      state.page = prop.page; state.pageStart = -Infinity;
     }
     state.key = key;
-    state.sips = prop?.kind === "can" ? prop.sips : 0;
+    state.sips = drink ? drink.sips : 0;
   }
-  if (prop?.kind === "can" && prop.sips > state.sips && state.started) state.sipStart = time;
+  if (drink && drink.sips > state.sips && state.started) state.sipStart = time;
   state.started = true;
-  if (prop?.kind === "can") state.sips = prop.sips;
+  if (drink) state.sips = drink.sips;
+  if (prop?.kind === "book") {
+    if (state.page !== prop.page) state.pageStart = time;
+    state.page = prop.page;
+  }
 
   const blend = (value: number, goal: number, rate: number) => value + (goal - value) * (1 - Math.exp(-dt * rate));
   state.ride = blend(state.ride, prop?.kind === "bike" ? 1 : 0, 10);
-  state.hold = blend(state.hold, prop?.kind === "can" ? 1 : 0, 8);
+  state.hold = blend(state.hold, drink ? 1 : 0, 8);
+  state.reading = blend(state.reading, prop?.kind === "book" ? 1 : 0, 8);
+  const flip = Math.min(1, Math.max(0, (time - state.pageStart) / (PAGE_TURN_MS / 1000)));
+  if (state.book) {
+    motionPreference ??= window.matchMedia("(prefers-reduced-motion: reduce)");
+    const reduced = motionPreference.matches;
+    state.book.update(state.reading, state.page, flip, reduced);
+    if (!person) { state.book.object.position.set(0, 0.96, 0.28); state.book.object.rotation.x = -0.48; }
+    if (prop?.kind !== "book" && state.reading < 0.015) {
+      person?.read(null); state.book.object.removeFromParent(); disposeObject(state.book.object); state.book = null;
+    }
+  }
+  if (state.bike && prop?.kind !== "bike" && state.ride < 0.015) {
+    state.bike.removeFromParent(); disposeObject(state.bike); state.bike = null;
+  }
 
-  const gear: Gear = { ride: state.ride, hold: state.hold * CARRY, drink: sipCurve((time - state.sipStart) / SIP_SECONDS) };
+  const gear: Gear = { ride: state.ride, hold: state.hold * CARRY, drink: state.hold * sipLift((time - state.sipStart) / SIP_SECONDS), reading: state.reading, pageTurn: flip };
+  if (state.can && !person) {
+    state.can.position.set(0.16, 0.87 + 0.38 * (gear.drink ?? 0), 0.19);
+    state.can.rotation.x = -1.9 * (gear.drink ?? 0);
+  }
   // How far they went and how fast they turned (radians a second, + to the left) since last frame.
   const moved = state.rolled === null ? 0 : Math.max(0, rolled - state.rolled);
   state.rolled = rolled;
@@ -200,6 +300,7 @@ export function applyProp(
   let lift = RIDE_LIFT;
   let slide = 0;
   if (state.bike) {
+    fadeBike(state.bike, Math.min(1, state.ride * 1.15));
     const { wheels, crank, pedals, steer, steerAxis, grips } = state.bike.userData as BikeParts;
     // Sized so the saddle is just under the hips, and set back so it is under them.
     const scale = ((person?.hipHeight ?? 0.8) + RIDE_LIFT - SADDLE_BELOW_HIPS) / BICYCLE_SADDLE;

@@ -9,7 +9,7 @@ import { FACE_POINTS, FACE_SIZE, affineFrom, type AvatarLook } from "@repo/share
 
 const DIR = "/assets/3d/quaternius/";
 const SCALE = 0.85; // the furniture is a little under life size, so people are too
-// The 2D map moves a tile every 200 ms, far quicker than a walk, so moving people jog, sped up.
+// The 2D map moves a tile every WALK_STEP_MS, far quicker than a walk, so moving people jog, sped up.
 const JOG_SPEED = 1.5;
 // The sitting clip puts the hips 0.245 m behind the feet; moving seated people forward by that
 // (at this scale) puts the hips over the middle of the seat instead of in the backrest.
@@ -162,6 +162,8 @@ export type Gear = {
   pedal?: number;
   hold?: number;
   drink?: number;
+  reading?: number;
+  pageTurn?: number;
   grips?: readonly [THREE.Vector3, THREE.Vector3];
   upright?: number;
   feet?: readonly [Foothold, Foothold];
@@ -182,6 +184,7 @@ export type Person = {
   update: (dt: number, walk: number, sit: number, play?: number, gear?: Gear, doing?: Doing) => void;
   // Puts something in their left hand (a drinks can, its middle at its origin), or empties it.
   hold: (object: THREE.Object3D | null) => void;
+  read: (object: THREE.Object3D | null) => void;
   // Plays a gesture once, over whatever else they are doing.
   gesture: (kind: Gesture) => void;
   // How high their hips are standing up, for sitting them on a bike.
@@ -620,6 +623,7 @@ export function makePerson(
   const headBone = bone("Head");
   const spine = bone("spine_01");
   let held: THREE.Object3D | null = null;
+  let readingBook: THREE.Object3D | null = null;
   const v = { shoulder: new THREE.Vector3(), elbow: new THREE.Vector3(), wrist: new THREE.Vector3(), target: new THREE.Vector3(), a: new THREE.Vector3(), b: new THREE.Vector3() };
   const turn = new THREE.Quaternion();
   const world = new THREE.Quaternion();
@@ -709,6 +713,11 @@ export function makePerson(
       held = object;
       if (held) root.add(held);
     },
+    read: (object) => {
+      readingBook?.removeFromParent();
+      readingBook = object;
+      if (object) root.add(object);
+    },
     gesture: (kind) => {
       const action = gestures[kind];
       fadingGesture?.action.stop();
@@ -792,6 +801,7 @@ export function makePerson(
 
       // A sip: the head tips back and the hand brings the drink just under the mouth.
       const drink = gear.drink ?? 0;
+      const reading = (gear.reading ?? 0) * (1 - 0.65 * walk) * (1 - gestureWeight);
       forward.set(0, 0, 1).applyQuaternion(modelRotation);
       up.set(0, 1, 0).applyQuaternion(modelRotation);
       left.set(1, 0, 0).applyQuaternion(modelRotation);
@@ -830,7 +840,7 @@ export function makePerson(
         });
       }
       // At a laptop: the hands on the keys, fingers tapping, one hand then the other.
-      const typing = doing.typing ? seated * keep * (1 - drink) : 0;
+      const typing = doing.typing ? seated * keep * (1 - drink) * (1 - reading) : 0;
       if (typing > 0.01 && doing.typing) {
         const { at, toward } = doing.typing;
         arms.forEach((limb, i) => {
@@ -845,7 +855,7 @@ export function makePerson(
       }
       // Glancing: at the point they were given, if it's in front of them, or now and then about the
       // room. Not on a bike, mid-sip or mid-gesture, and less while walking.
-      const attention = (1 - riding) * (1 - drink) * (1 - gestureWeight) * (1 - 0.6 * walk) * (1 - 0.5 * typing);
+      const attention = (1 - riding) * (1 - drink) * (1 - reading) * (1 - gestureWeight) * (1 - 0.6 * walk) * (1 - 0.5 * typing);
       let looking = false;
       if (doing.look) {
         headBone.getWorldPosition(v.target);
@@ -892,6 +902,28 @@ export function makePerson(
         root.updateMatrixWorld(true);
         held.position.copy(root.worldToLocal(palm));
         held.quaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), -1.9 * drink);
+      }
+      if (readingBook) {
+        const book = readingBook;
+        // The book rests below the face, not on a fixed world-height shelf: the same pose works
+        // standing and in every chair. Hands meet its lower corners; the head looks at the page.
+        const middle = headBone.getWorldPosition(v.target).addScaledVector(up, -0.39 * SCALE).addScaledVector(forward, 0.24 * SCALE);
+        middle.addScaledVector(up, -0.12 * (1 - reading));
+        root.updateMatrixWorld(true);
+        book.position.copy(root.worldToLocal(middle));
+        book.rotation.set(-0.48, 0, 0);
+        book.updateWorldMatrix(true, true);
+        arms.forEach((limb, i) => {
+          const outward = i === 0 ? 1 : -1;
+          const turning = i === 1 ? Math.sin(Math.PI * (gear.pageTurn ?? 0)) * 0.06 : 0;
+          aim.set((0.16 - turning) * outward, -0.015 + turning * 0.8, 0.075);
+          book.localToWorld(aim);
+          bend.copy(up).negate().addScaledVector(left, outward * 0.7).addScaledVector(forward, -0.15);
+          reach(limb, aim, bend, gear.reading ?? 0);
+          knuckles.copy(forward).multiplyScalar(0.8).addScaledVector(up, -0.4);
+          holdBar(limb, knuckles, inward.copy(left).multiplyScalar(-outward), gear.reading ?? 0);
+        });
+        turnBy(headBone, turn.setFromAxisAngle(left, 0.28 * reading), 1);
       }
     },
     dispose: () => {

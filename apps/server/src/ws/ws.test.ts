@@ -284,6 +284,34 @@ describe("WebSocket", () => {
   });
 
   describe("props", () => {
+    test("shares reading, page turns and returning a book, including the page for late joiners", async () => {
+      const { token: tokenA, spaceId } = await setupUserAndSpace();
+      const { token: tokenB } = await setupUserAndSpace();
+      const { token: tokenC } = await setupUserAndSpace();
+      const a = new TestSocket(WS_URL), b = new TestSocket(WS_URL), c = new TestSocket(WS_URL);
+      await Promise.all([a.waitForOpen(), b.waitForOpen(), c.waitForOpen()]);
+      try {
+        a.send({ type: "join", payload: { spaceId, token: tokenA } });
+        const userA = (await a.nextMessage()).payload?.userId;
+        b.send({ type: "join", payload: { spaceId, token: tokenB } });
+        await b.nextMessage(); await a.nextMessage();
+        a.send({ type: "prop", payload: { prop: { kind: "book", book: "good-teams", page: 1 } } });
+        expect((await b.nextMessage()).payload?.prop).toEqual({ kind: "book", book: "good-teams", page: 1 });
+        c.send({ type: "join", payload: { spaceId, token: tokenC } });
+        const users = (await c.nextMessage()).payload?.users as { id: string; prop?: unknown }[];
+        expect(users.find((user) => user.id === userA)?.prop).toEqual({ kind: "book", book: "good-teams", page: 1 });
+        await a.nextMessage(); await b.nextMessage(); // C joined.
+        a.send({ type: "prop", payload: { prop: { kind: "book", book: "good-teams", page: 2 } } });
+        expect((await b.nextMessage()).payload?.prop).toEqual({ kind: "book", book: "good-teams", page: 2 });
+        expect((await c.nextMessage()).payload?.prop).toEqual({ kind: "book", book: "good-teams", page: 2 });
+        a.send({ type: "prop", payload: { prop: { kind: "book", book: "good-teams", page: 10000 } } });
+        expect((await a.nextMessage()).type).toBe("error");
+        a.send({ type: "prop", payload: { prop: null } });
+        expect((await b.nextMessage()).payload?.prop).toBeNull();
+        expect((await c.nextMessage()).payload?.prop).toBeNull();
+      } finally { a.close(); b.close(); c.close(); }
+    });
+
     test("shares a bike ride, keeps each bike to one rider and tells late joiners", async () => {
       const { token: tokenA, spaceId } = await setupUserAndSpace();
       const { token: tokenB } = await setupUserAndSpace();

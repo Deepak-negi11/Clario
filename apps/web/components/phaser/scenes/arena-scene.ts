@@ -1,8 +1,9 @@
 import Phaser from "phaser";
-import { customRoomAt, getChatRoomAtPosition, getMapTemplate, isClarioHq, type ChatRoomZone, type CoworkerId, type CustomMap, type MapTemplateId } from "@repo/shared";
-import { HQ_COWORKERS, HQ_FLOORS, HQ_ITEMS, HQ_MENTOR } from "../../../lib/maps/clario-hq";
+import { customRoomAt, floorAt, getChatRoomAtPosition, getMapTemplate, isClarioHq, WALK_STEP_MS, type ChatRoomZone, type CoworkerId, type CustomMap, type MapTemplateId } from "@repo/shared";
+import { HQ_COLS, HQ_COWORKERS, HQ_FLOORS, HQ_ITEMS, HQ_MENTOR } from "../../../lib/maps/clario-hq";
 import { hqPlaySpots, playSpotsFor } from "../../../lib/maps/play-spots";
 import { CAMPUS_ITEMS, CLASSIC_OFFICE_ITEMS } from "../../../lib/maps/classic-campus";
+import { templateOffice3d } from "../../../lib/maps/template-office-3d";
 import { findPath } from "../../../lib/maps/path-finder";
 import type { MinimapFloor, SceneBridge } from "../scene-bridge";
 import { buildClarioHq, HQ_FLOOR_COLORS, itemTextureKey, makeHqTextures, placeItems, type HqSceneApi } from "./clario-hq-builder";

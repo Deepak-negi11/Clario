@@ -1,7 +1,7 @@
 // A small shared object between the Phaser scene and the React UI around it.
 // The scene fills it in; the minimap and zoom buttons read and call it.
 
-import type { CoworkerId, Dir, Drink, Fabric, ItemKind, MentorState, PlayerProp } from "@repo/shared";
+import type { BookId, Coffee, CoworkerId, Dir, Drink, Fabric, ItemKind, MentorState, PlayerProp } from "@repo/shared";
 import type { SpotGame } from "../../lib/maps/play-spots";
 import type { TvStore } from "../tv/tv-store";
 
@@ -53,7 +53,7 @@ export type SceneBridge = {
   // The Lounge TV's channel (components/tv/tv-store.ts), set by ArcadeOnMap, so the 3D view can
   // play it on its TV (components/tv/tv-screen-3d.ts). While it does, openTv opens the TV's remote.
   tv?: TvStore;
-  // Bikes and drinks (phaser/scenes/props-on-map.ts): everyone's current prop, yours included,
+  // Books, bikes and drinks (phaser/scenes/props-on-map.ts): everyone's current prop, yours included,
   // kept up to date by the page, and how to change yours.
   props?: Record<string, PlayerProp>;
   // False if it couldn't be sent (the connection is down).

@@ -7,6 +7,7 @@ export * from "./src/maps/catalog";
 export * from "./src/maps/custom-map";
 export * from "./src/maps/custom-map-edits";
 export * from "./src/maps/team-office";
+export * from "./src/maps/library";
 export * from "./src/mentor/avatar-state";
 export * from "./src/mentor/coaching";
 export * from "./src/mentor/mentor.schema";

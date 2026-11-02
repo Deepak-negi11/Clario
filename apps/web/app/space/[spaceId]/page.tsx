@@ -32,7 +32,7 @@ import { templateOffice3d } from "../../../lib/maps/template-office-3d";
 import { useParams, useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { LoaderCircle, MessageSquare } from "lucide-react";
-import { ERRANDS, WORK_LEVEL_INFO, getChatRoom, getChatRoomAtPosition, isClarioHq, type AvatarLook, type MapTemplateId, type WorkLevel, createStarterMap, type CustomMap } from "@repo/shared";
+import { ERRANDS, WORK_LEVEL_INFO, getChatRoom, getChatRoomAtPosition, getMapTemplate, isClarioHq, type AvatarLook, type PlayerProp, customRoomAt, type MapTemplateId, type WorkLevel, createStarterMap, type CustomMap } from "@repo/shared";
 import { useSpaceSocket } from "../../../hooks/use-space-socket";
 import { useProximityVideo } from "../../../hooks/use-proximity-video";
 import { useLocalMedia, type LocalMediaController } from "../../../hooks/use-local-media";

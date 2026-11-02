@@ -20,7 +20,7 @@ import { makeClaude3d } from "./claude-3d";
 import { buildCustomOffice } from "./custom-scene";
 import { buildOffice, clearOffice, disposeScene, loadModels, seatMap, textSprite, type DeskSpot, type ModelSet, type SwivelChair } from "./office-scene";
 import { loadPeople, makePerson, type Doing, type Keyboard, type PeopleKit, type Person } from "./people";
-import { applyProp, disposeObject, dropCan, emptyProps, makeCan, stepFalling, type Falling, type PropState } from "./props-3d";
+import { applyProp, disposeObject, dropCan, emptyProps, makeCan, makeCup, stepFalling, type Falling, type PropState } from "./props-3d";
 import { createTalkerMover, makeTalker, type Talker } from "./talkers";
 import { coworkerPlaces } from "../../lib/companions/coworker-places";
 import { makeWorld } from "./world";
@@ -91,6 +91,82 @@ const RIDE_FACTOR = 200 / RIDE_STEP_MS; // a bike crosses a tile in RIDE_STEP_MS
 // Where a bought can lies in a map's (first) vending machine tray: office-scene.ts builds the
 // machine 0.12 back from its tile's middle, its front 0.36 ahead of that, with the tray low on the
 // front a little left of centre. The can lies just proud of the front so it shows in the slot.
+// Where your coffee stands in front of a kitchen machine (office-scene.ts): on the counter, in front
+// of the machine on a one-tile counter, or by the machine on the two-tile coffee station.
+function coffeeCupSpot(spot: { x: number; y: number; w: number }) {
+  return spot.w === 1
+    ? new THREE.Vector3(spot.x + 0.5, 0.94, spot.y + 0.5 + 0.12)
+    : new THREE.Vector3(spot.x + 1 - 0.2, 0.79, spot.y + 0.5 + 0.12);
+}
+
+// The cup on the counter, a ring above it that fills as it brews, and six puffs of steam that rise
+// and fade in turn. `update` takes how far the brew is (0 to 1) and the time in seconds.
+function makeBrewParts() {
+  const group = new THREE.Group();
+  let cup: THREE.Group | null = null;
+  const ringCanvas = document.createElement("canvas");
+  ringCanvas.width = ringCanvas.height = 64;
+  const ringTexture = new THREE.CanvasTexture(ringCanvas);
+  ringTexture.colorSpace = THREE.SRGBColorSpace;
+  const ring = new THREE.Sprite(new THREE.SpriteMaterial({ map: ringTexture, depthTest: false, transparent: true }));
+  ring.scale.setScalar(0.22);
+  ring.position.y = 0.42;
+  ring.renderOrder = 20;
+  group.add(ring);
+  let drawn = -1;
+  const drawRing = (progress: number) => {
+    const ctx = ringCanvas.getContext("2d")!;
+    ctx.clearRect(0, 0, 64, 64);
+    ctx.fillStyle = "rgba(18,21,28,0.6)";
+    ctx.beginPath(); ctx.arc(32, 32, 30, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#ffc46b";
+    ctx.lineWidth = 8;
+    ctx.lineCap = "round";
+    ctx.beginPath(); ctx.arc(32, 32, 20, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress); ctx.stroke();
+    ringTexture.needsUpdate = true;
+  };
+  const puffCanvas = document.createElement("canvas");
+  puffCanvas.width = puffCanvas.height = 32;
+  const puffCtx = puffCanvas.getContext("2d")!;
+  const glow = puffCtx.createRadialGradient(16, 16, 0, 16, 16, 16);
+  glow.addColorStop(0, "rgba(255,255,255,0.9)");
+  glow.addColorStop(1, "rgba(255,255,255,0)");
+  puffCtx.fillStyle = glow;
+  puffCtx.fillRect(0, 0, 32, 32);
+  const puffTexture = new THREE.CanvasTexture(puffCanvas);
+  const puffs = Array.from({ length: 6 }, () => {
+    const puff = new THREE.Sprite(new THREE.SpriteMaterial({ map: puffTexture, transparent: true, depthWrite: false }));
+    group.add(puff);
+    return puff;
+  });
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
+  return {
+    group,
+    setCup(next: THREE.Group | null) {
+      if (cup) { group.remove(cup); disposeObject(cup); }
+      cup = next;
+      if (cup) group.add(cup);
+    },
+    update(progress: number, time: number, active: boolean) {
+      group.visible = active;
+      if (!active) return;
+      const brewing = progress < 1;
+      ring.visible = brewing;
+      const step = Math.round(progress * 40) / 40;
+      if (brewing && step !== drawn) { drawRing(step); drawn = step; }
+      // Steam: busy while brewing, a lazy curl once it's ready.
+      const speed = brewing ? 0.9 : 0.35;
+      puffs.forEach((puff, i) => {
+        const phase = (time * speed + i / puffs.length) % 1;
+        puff.visible = !reduced.matches;
+        puff.position.set(Math.sin(phase * 6 + i) * 0.02, 0.06 + phase * 0.3, 0);
+        puff.scale.setScalar(0.04 + phase * 0.09);
+        (puff.material as THREE.SpriteMaterial).opacity = (1 - phase) * (brewing ? 0.55 : 0.3);
+      });
+    },
+  };
+}
+
 function vendingTray(items: readonly HqItem[]) {
   const machine = items.find((item) => item.kind === "vending-machine");
   return machine ? { x: machine.x + 0.5 - 0.11, y: 0.25, z: machine.y + 0.5 - 0.12 + 0.36 + 0.035 } : null;
@@ -261,6 +337,12 @@ function removeAvatar(scene: THREE.Scene, avatar: Avatar) {
     disposeObject(avatar.props.can);
     avatar.props.can = null;
   }
+  if (avatar.props.book) {
+    avatar.person?.read(null);
+    avatar.props.book.object.removeFromParent();
+    disposeObject(avatar.props.book.object);
+    avatar.props.book = null;
+  }
   if (avatar.person) {
     avatar.person.dispose();
     avatar.body.remove(avatar.person.root);
@@ -339,7 +421,15 @@ function stepAvatar(
 
   const gear = applyProp(avatar.props, prop, avatar.body, avatar.person, dt, time, avatar.phase / STRIDE, onDrop);
   if (avatar.person) avatar.person.update(dt, avatar.walk, avatar.sit, 0, gear, { ...doing, speed: avatar.speed });
-  else if (avatar.rig) poseRig(avatar.rig, avatar, time);
+  else if (avatar.rig) {
+    poseRig(avatar.rig, avatar, time);
+    const reading = avatar.props.reading;
+    for (const arm of avatar.rig.arms) {
+      arm.upper.rotation.x -= 0.65 * reading;
+      arm.lower.rotation.x -= 0.45 * reading;
+    }
+    avatar.rig.head.rotation.x += 0.25 * reading;
+  }
 }
 
 // Emoji reactions rise this far over a few seconds as they fade, as on the 2D map (a little slower,
@@ -580,6 +670,7 @@ export function Office3D({
     // What can be played or watched, and where a bought can lands: Clario HQ's until a custom map
     // is built (applyLayout).
     let spots = PLAY_SPOTS;
+    let micros = microSpotsFor(HQ_ITEMS);
     let vending = vendingTray(HQ_ITEMS);
     const center = new THREE.Vector3(HQ_COLS / 2, 0, HQ_ROWS / 2);
     const camera = new THREE.PerspectiveCamera(42, mount.clientWidth / Math.max(1, mount.clientHeight), 0.1, 400);
@@ -679,6 +770,14 @@ export function Office3D({
         const self = selfRef.current;
         if (self && spotInReach([spot], self.x, self.y)) playRef.current?.(spot.action);
         else walkTo(spotFront(spot).x, spotFront(spot).y);
+        return;
+      }
+      const micro = micros.find((s) => px >= s.x && px <= s.x + s.w && pz >= s.y - 0.1 && pz <= s.y + s.h + 0.1);
+      if (micro) {
+        const bridge = bridgeRef?.current;
+        if (bridge?.usePropAt?.(micro.x, micro.y)) return;
+        const at = microApproach(micro, selfRef.current, blockedTiles() ?? new Set(), cols, rows);
+        if (at) walkTo(at.x, at.y);
         return;
       }
       // A desk walks you to its seat, where you sit facing the laptop (unless someone like Claude
@@ -835,6 +934,11 @@ export function Office3D({
     const shownReactions = new Set<string>();
     let trayCan: THREE.Group | null = null;
     let shownTray = "";
+    // Your coffee at a kitchen machine (bridge.coffeeBrew): the cup on the counter in front of it,
+    // a ring above that fills while it brews, and steam rising (slower once it's ready).
+    const brew = makeBrewParts();
+    scene.add(brew.group);
+    let shownBrew = "";
 
     // The office itself (floors, walls, furniture, room names) has its own group, so a custom map
     // can be swapped for its edited version without starting the 3D view again.
@@ -855,6 +959,7 @@ export function Office3D({
         if (child.userData.bike && (!map || !rackBikes.has(child.userData.bike as string))) rackBikes.set(child.userData.bike as string, child);
       });
       spots = map ? playSpotsFor(map.items) : PLAY_SPOTS;
+      micros = microSpotsFor(map ? map.items : HQ_ITEMS);
       vending = vendingTray(map ? map.items : HQ_ITEMS);
       desks = [];
       chairs = [];
@@ -1086,6 +1191,22 @@ export function Office3D({
         const fall = Math.min(1, (performance.now() - tray.at) / 260);
         trayCan.position.set(vending.x, vending.y + 0.32 * (1 - fall * fall), vending.z);
       }
+      const coffee = bridge?.coffeeBrew ?? null;
+      const brewKey = coffee ? `${coffee.coffee}:${coffee.at}` : "";
+      if (brewKey !== shownBrew) {
+        brew.setCup(coffee ? makeCup(coffee.coffee) : null);
+        if (coffee) {
+          brew.group.position.copy(coffeeCupSpot(coffee.spot));
+          // You just ordered: turn to the machine and press its button.
+          const me = selfId ? avatars.get(selfId) : undefined;
+          if (me?.person && performance.now() - coffee.at < 1000) {
+            me.heading = Math.atan2(brew.group.position.x - me.group.position.x, brew.group.position.z - me.group.position.z);
+            me.person.gesture("press");
+          }
+        }
+        shownBrew = brewKey;
+      }
+      brew.update(coffee ? Math.min(1, (performance.now() - coffee.at) / BREW_MS) : 0, clock.getElapsed(), !!coffee);
 
       const mine = selfId ? avatars.get(selfId) : undefined;
       if (followRef.current && mine) {
