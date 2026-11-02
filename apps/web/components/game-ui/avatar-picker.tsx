@@ -3,8 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { ImageUp, LoaderCircle, RotateCcw } from "lucide-react";
-import { AVATAR_BASES, type AvatarBase, type AvatarLook, type HairShape } from "@repo/shared";
+import { AVATAR_BASES, PHOTO_AI_SIZE, lookForAiHair, type AvatarBase, type AvatarLook, type HairShape, type PhotoAiReading } from "@repo/shared";
 import { readPhoto } from "../../lib/avatar/photo-detect";
+import { getAuthToken } from "../../lib/auth-token";
 import { FRAME_HEIGHT, FRAME_WIDTH, originalLook, recolorSheet, sheetUrl } from "../../lib/avatar/recolor";
 
 const STYLE_LABELS: Record<AvatarBase, string> = {
@@ -53,6 +54,54 @@ const SHAPE_NAMES: Record<HairShape, string> = { bald: "shaved head", curly: "cu
 // Walking-down frames of the character sheet (see the "walk-down" animation in the map).
 const WALK_DOWN = [18, 19, 20, 21, 22, 23];
 const MAX_PHOTO_BYTES = 15 * 1024 * 1024;
+// "Use AI to read my photo" (on unless they turn it off): a small copy goes to NVIDIA's vision
+// model through /api/avatar/photo for the hairstyle, glasses and beard, which the face detector
+// guesses least well. Colours and the 3D face picture still come from the photo here.
+const PHOTO_AI_KEY = "clario:avatar-photo-ai";
+const PHOTO_AI_TIMEOUT_MS = 16_000;
+
+function readPhotoAiChoice(): boolean {
+  try {
+    return localStorage.getItem(PHOTO_AI_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
+// The photo as a small JPEG data URL, for the AI.
+async function smallJpeg(file: Blob): Promise<string | null> {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, PHOTO_AI_SIZE / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  const ctx = canvas.getContext("2d");
+  if (ctx) {
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  }
+  bitmap.close();
+  return ctx ? canvas.toDataURL("image/jpeg", 0.85) : null;
+}
+
+// What the AI read from the photo, or null (signed out, no key on the server, no face, a failure).
+async function readPhotoWithAi(file: Blob): Promise<PhotoAiReading | null> {
+  const token = getAuthToken();
+  if (!token) return null;
+  try {
+    const image = await smallJpeg(file);
+    if (!image) return null;
+    const response = await fetch("/api/avatar/photo", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify({ image }),
+      signal: AbortSignal.timeout(PHOTO_AI_TIMEOUT_MS),
+    });
+    return response.ok ? ((await response.json()) as PhotoAiReading) : null;
+  } catch {
+    return null;
+  }
+}
 
 function useSheets() {
   const [sheets, setSheets] = useState<Partial<Record<AvatarBase, HTMLImageElement>>>({});
@@ -107,6 +156,7 @@ export function AvatarPicker({ look, onChange, view = "2d" }: { look: AvatarLook
   const [stage, setStage] = useState<"loading" | "reading" | null>(null);
   const reading = stage !== null;
   const [note, setNote] = useState<{ tone: "ok" | "warn"; text: string } | null>(null);
+  const [useAi, setUseAi] = useState(readPhotoAiChoice);
   // The photo, shown beside the avatar to compare. It stays in this browser tab.
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   useEffect(() => () => {
@@ -139,36 +189,48 @@ export function AvatarPicker({ look, onChange, view = "2d" }: { look: AvatarLook
     setPhotoUrl(URL.createObjectURL(file));
     try {
       // On 3D maps the face itself goes on your 3D head (and is saved, for others to see).
-      const result = await readPhoto(file, setStage, { cutFace: view === "3d" });
-      if (result.method === "none") {
+      // Both at once: the AI answers in a second or two, while the detector may still be downloading.
+      const [result, ai] = await Promise.all([
+        readPhoto(file, setStage, { cutFace: view === "3d" }),
+        useAi ? readPhotoWithAi(file) : Promise.resolve(null),
+      ]);
+      if (result.method === "none" && !ai) {
         setNote({ tone: "warn", text: "Couldn't find a face in that photo. Try a clear, front-facing one, or pick below." });
         return;
       }
-      const photo = result.look;
-      const hairShape = result.method === "detected" ? result.look.hairShape : null;
+      // The AI's hairstyle, glasses and beard win over the detector's guesses; colours come from the photo.
+      const fromAi = ai ? lookForAiHair(ai.hair) : null;
+      const photo = result.method === "none" ? null : result.look;
+      const detectedShape = result.method === "detected" ? result.look.hairShape : null;
+      const hairShape = fromAi ? fromAi.hairShape : detectedShape;
+      const style = fromAi?.style ?? photo?.style ?? null;
+      const glasses = ai?.glasses ?? photo?.glasses ?? false;
+      const beard = ai?.beard ?? photo?.beard ?? false;
       onChange({
-        base: photo.style ?? look.base,
-        skin: photo.skin,
-        hair: photo.hair ?? look.hair,
-        top: photo.top ?? look.top,
-        glasses: photo.glasses,
-        beard: photo.beard,
+        base: style ?? look.base,
+        skin: photo?.skin ?? look.skin,
+        hair: photo?.hair ?? look.hair,
+        top: photo?.top ?? look.top,
+        glasses,
+        beard,
         ...(hairShape ? { hairShape } : {}),
         ...(result.method === "detected" && result.face ? { face: result.face } : {}),
       });
       // Say what was read, so a wrong guess is easy to spot and undo below.
       const found = [
         result.method === "detected" && result.face ? "face" : null,
-        "skin",
-        photo.hair && "hair colour",
-        hairShape ? SHAPE_NAMES[hairShape] : photo.style && `hairstyle (${STYLE_LABELS[photo.style].toLowerCase()})`,
-        photo.glasses && "glasses",
-        photo.beard && "beard",
-        photo.top && "top",
+        photo && "skin",
+        photo?.hair && "hair colour",
+        hairShape ? SHAPE_NAMES[hairShape] : style && `hairstyle (${STYLE_LABELS[style].toLowerCase()})`,
+        glasses && "glasses",
+        beard && "beard",
+        photo?.top && "top",
       ].filter((item): item is string => Boolean(item));
       const list = found.length > 1 ? `${found.slice(0, -1).join(", ")} and ${found.at(-1)}` : found[0];
-      const how = result.method === "colours" ? " Face detection couldn't load, so this is from colours only." : "";
-      setNote({ tone: result.method === "detected" ? "ok" : "warn", text: `From your photo: ${list}.${how} Change anything below.` });
+      const how = ai
+        ? result.method === "detected" ? " Hairstyle, glasses and beard read by AI." : " Read by AI; the colours couldn't be read, so pick them below."
+        : result.method === "colours" ? " Face detection couldn't load, so this is from colours only." : "";
+      setNote({ tone: result.method === "detected" || ai ? "ok" : "warn", text: `From your photo: ${list}.${how} Change anything below.` });
     } catch {
       setNote({ tone: "warn", text: "That file couldn't be read as an image." });
     } finally {
@@ -288,12 +350,31 @@ export function AvatarPicker({ look, onChange, view = "2d" }: { look: AvatarLook
           <RotateCcw size={15} aria-hidden="true" />
         </button>
       </div>
-      <p className="mt-1.5 text-[11px] leading-4 text-[#7a7a7a]">
+      <label className="mt-2 flex cursor-pointer items-center gap-2 text-xs font-medium text-[#404040]">
+        <input
+          type="checkbox"
+          checked={useAi}
+          disabled={reading}
+          onChange={(event) => {
+            setUseAi(event.target.checked);
+            try {
+              localStorage.setItem(PHOTO_AI_KEY, event.target.checked ? "on" : "off");
+            } catch {
+              // Private mode: the choice lasts until the page reloads.
+            }
+          }}
+          className="h-3.5 w-3.5 cursor-pointer accent-[#3f4ae8]"
+        />
+        Use AI to read my photo
+      </label>
+      <p className="mt-1 text-[11px] leading-4 text-[#7a7a7a]">
         {stage === "loading"
-          ? "The first time, this downloads the face detector (about 8 MB). Your photo isn't uploaded."
-          : view === "3d"
-            ? "Your photo stays on this device. A small picture of your face from it is saved with your avatar, and others in the space see it on your 3D head."
-            : "Your photo stays on this device. Only the avatar made from it is saved."}
+          ? `The first time, this downloads the face detector (about 8 MB).${useAi ? "" : " Your photo isn't uploaded."}`
+          : `${useAi
+              ? "A small copy of your photo goes to NVIDIA through our server, to read your hairstyle, glasses and beard. It isn't saved."
+              : "Your photo stays on this device."} ${view === "3d"
+              ? "A small picture of your face from it is saved with your avatar, and others in the space see it on your 3D head."
+              : "Only the avatar made from it is saved."}`}
       </p>
       {note && (
         <p role="status" className={`mt-1.5 text-xs leading-4 ${note.tone === "ok" ? "text-[#1f7a4a]" : "text-amber-700"}`}>
