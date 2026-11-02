@@ -9,7 +9,7 @@ export async function handleSignup(req: Request): Promise<Response> {
     return Response.json({ message: "Invalid request" }, { status: 400 });
   }
 
-  const { username, email, password, type } = parsed.data;
+  const { username, email, password } = parsed.data;
 
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) {
@@ -25,9 +25,14 @@ export async function handleSignup(req: Request): Promise<Response> {
       password: passwordHash,
 
 
-      role: type === "admin" ? "Admin" : "User",
+      role: "User",
     },
+  }).catch((error: unknown) => {
+    // Two requests can pass the existence check before either inserts its row.
+    if ((error as { code?: string })?.code === "P2002") return null;
+    throw error;
   });
+  if (!user) return Response.json({ message: "User already exists" }, { status: 400 });
 
   return Response.json({ userId: user.id });
 }

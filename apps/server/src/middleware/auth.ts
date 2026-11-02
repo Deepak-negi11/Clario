@@ -1,6 +1,7 @@
 import jwt from "jsonwebtoken";
+import { jwtSecret } from "../utils/security";
 
-const JWT_SECRET = process.env.JWT_SECRET ?? "dev-secret";
+const JWT_SECRET = jwtSecret();
 
 export type AuthUser = {
   userId: string;
@@ -15,7 +16,7 @@ type TokenPayload = { userId?: unknown; scope?: unknown };
 
 function verifyToken(token: string): TokenPayload | null {
   try {
-    return jwt.verify(token, JWT_SECRET) as TokenPayload;
+    return jwt.verify(token, JWT_SECRET, { algorithms: ["HS256"] }) as TokenPayload;
   } catch {
     return null;
   }

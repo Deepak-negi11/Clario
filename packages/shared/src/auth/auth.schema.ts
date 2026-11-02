@@ -1,10 +1,11 @@
 import * as z from "zod"
 
 export const SignupSchema = z.object({
-    username: z.string().min(1),
+    username: z.string().trim().min(1).max(80),
     password: z.string().min(8).max(30),
     email: z.email(),
-    type: z.enum(["admin", "user"]).optional().default("user"),
+    // Privileged roles are provisioned by a trusted operator, never public signup.
+    type: z.literal("user").optional().default("user"),
 })
 export const SigninSchema = z.object({
     email: z.email(),

@@ -1,8 +1,9 @@
 import prisma from "@repo/db";
 import { SigninSchema } from "@repo/shared";
 import jwt from "jsonwebtoken";
+import { jwtSecret } from "../utils/security";
 
-const JWT_SECRET = process.env.JWT_SECRET ?? "dev-secret";
+const JWT_SECRET = jwtSecret();
 
 export async function handleSignin(req: Request): Promise<Response> {
   const body = await req.json().catch(() => null);

@@ -27,6 +27,8 @@ import type { SocketData } from "./src/ws/room-manager";
 import { stopAllRoomEventSubscriptions } from "./src/ws/pubsub";
 import { handleAgentActivity } from "./src/agent/agent-activity";
 import { handleCreateAgentKey } from "./src/agent/agent-key";
+import { allowedOrigin, jwtSecret, requestBudget } from "./src/utils/security";
+import type { Server } from "bun";
 import { handleSendEmail } from "./src/email/email";
 import {
   handleListTasks,
@@ -44,21 +46,14 @@ type RouteHandler = (req: Request) => Response | Promise<Response>;
 
 
 function getCorsHeaders(origin: string | null) {
-  const configuredOrigins = (process.env.CORS_ORIGIN ?? "http://localhost:3000")
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean);
-  const fallbackOrigin = configuredOrigins[0] ?? "http://localhost:3000";
-  const isLocalDevelopmentOrigin = origin && /^https?:\/\/localhost(:\d+)?$/.test(origin);
-  const activeOrigin = origin && (isLocalDevelopmentOrigin || configuredOrigins.includes(origin))
-    ? origin
-    : fallbackOrigin;
-
   return {
-    "Access-Control-Allow-Origin": activeOrigin,
+    ...(allowedOrigin(origin) && origin ? { "Access-Control-Allow-Origin": origin } : {}),
     "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type,Authorization",
     "Vary": "Origin",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "X-Frame-Options": "DENY",
   };
 }
 
@@ -88,17 +83,36 @@ function withCors(handler: RouteHandler) {
 }
 
 export function startServer(port: number) {
+  jwtSecret(); // Enforced for every entry point, including direct imports of startServer.
   activeServers += 1;
+  const authBudget = requestBudget(60, 60_000);
+  const limitedAuth = (handler: RouteHandler) => {
+    const run = withCors(handler);
+    return async (req: Request, instance: Server<SocketData>) => {
+      // Forwarded headers are caller-controlled unless an operator explicitly trusts a proxy.
+      const ip = process.env.TRUST_PROXY === "true"
+        ? req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || instance.requestIP(req)?.address || "unknown"
+        : instance.requestIP(req)?.address || "unknown";
+      const retry = authBudget(`${new URL(req.url).pathname}:${ip}`);
+      if (retry) return withCorsResponse(Response.json({ message: "Too many attempts. Try again shortly." },
+        { status: 429, headers: { "Retry-After": String(retry) } }), req.headers.get("origin"));
+      return run(req);
+    };
+  };
 
   const server = Bun.serve({
     port,
+    maxRequestBodySize: 1024 * 1024,
+    error() {
+      return Response.json({ message: "Something went wrong. Try again." }, { status: 500, headers: { "X-Content-Type-Options": "nosniff" } });
+    },
     routes: {
 
       "/health": { GET: () => Response.json({ status: "ok" }) },
 
 
-      "/api/v1/signup": { POST: withCors(handleSignup), OPTIONS: handleCorsPreflight },
-      "/api/v1/signin": { POST: withCors(handleSignin), OPTIONS: handleCorsPreflight },
+      "/api/v1/signup": { POST: limitedAuth(handleSignup), OPTIONS: handleCorsPreflight },
+      "/api/v1/signin": { POST: limitedAuth(handleSignin), OPTIONS: handleCorsPreflight },
 
 
       "/api/v1/user/metadata": {
@@ -176,6 +190,8 @@ export function startServer(port: number) {
     fetch(req, server) {
 
       if (new URL(req.url).pathname === "/ws") {
+        const origin = req.headers.get("origin");
+        if (origin && !allowedOrigin(origin)) return new Response("Origin not allowed", { status: 403 });
         const ok = server.upgrade(req, { data: makeSocketData() });
         if (ok) return;
         return new Response("WebSocket upgrade failed", { status: 400 });
@@ -183,6 +199,7 @@ export function startServer(port: number) {
       return withCorsResponse(new Response("Not Found", { status: 404 }), req.headers.get("origin"));
     },
     websocket: {
+      maxPayloadLength: 64 * 1024,
       message: onMessage,
       close: onClose,
     },

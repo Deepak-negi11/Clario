@@ -94,7 +94,7 @@ async function setupUserAndSpace(mapTemplate?: "classic-office" | "coworking-cam
     username: `ws-${crypto.randomUUID()}`,
     password,
     email,
-    type: "admin",
+    type: "user",
   });
 
   const signin = await http.post("/api/v1/signin", { email, password });

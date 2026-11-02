@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import axios from "axios";
 import { startServer } from "../../index";
+import prisma from "@repo/db";
 
 const PORT = 4001;
 const BACKEND_URL = `http://localhost:${PORT}`;
@@ -41,7 +42,9 @@ async function makeUser(role: "admin" | "user" = "user") {
   const email = `${crypto.randomUUID()}@test.com`;
   const password = "password123";
 
-  const signup = await post("/api/v1/signup", { username, password, email, type: role });
+  const signup = await post("/api/v1/signup", { username, password, email });
+  // Admin fixtures are provisioned through the trusted database, just like operators.
+  if (role === "admin") await prisma.user.update({ where: { id: signup.data.userId }, data: { role: "Admin" } });
   const signin = await post("/api/v1/signin", { email, password });
 
   return {
@@ -59,6 +62,19 @@ function authHeader(token: string) {
 
 describe("Authentication", () => {
   describe("signup", () => {
+    test("public signup cannot grant an administrator role", async () => {
+      const email = `${crypto.randomUUID()}@test.com`;
+      const response = await post("/api/v1/signup", { username: "attacker", email, password: "password123", type: "admin" });
+      expect(response.status).toBe(400);
+      expect(await prisma.user.findUnique({ where: { email } })).toBeNull();
+    });
+
+    test("a role field cannot override the normal signup role", async () => {
+      const email = `${crypto.randomUUID()}@test.com`;
+      const response = await post("/api/v1/signup", { username: "member", email, password: "password123", role: "Admin" });
+      expect(response.status).toBe(200);
+      expect((await prisma.user.findUnique({ where: { email } }))?.role).toBe("User");
+    });
     test("user can sign up", async () => {
       const username = `deepak-${crypto.randomUUID()}`;
 
@@ -377,7 +393,7 @@ describe("Space dashboard", () => {
     expect(details.status).toBe(200);
     expect(details.data.dimensions).toBe("52x38");
     expect(details.data.mapTemplate).toBe("coworking-campus");
-    expect(details.data.thumbnail).toBe("/assets/maps/coworking-campus.png");
+    expect(details.data.thumbnail).toBe("/assets/maps/coworking-campus-v2.png");
   });
 
   test("rejects an unknown map template", async () => {

@@ -41,6 +41,9 @@ export type SocketData = {
   y: number;
   // The player's last step still being handled; the next one waits for it (ws-handler.ts).
   moves?: Promise<unknown>;
+  joining?: Promise<void>;
+  closed?: boolean;
+  budget?: { until: number; count: number };
 };
 
 
@@ -83,6 +86,15 @@ export function removeFromRoom(spaceId: string, userId: string, socket?: Socket)
 
 export function roomSize(spaceId: string) {
   return rooms.get(spaceId)?.size ?? 0;
+}
+
+// The spaces people connected to this server are in.
+export function spacesHere() {
+  return [...rooms.keys()];
+}
+
+export function membersOf(spaceId: string): Member[] {
+  return [...(rooms.get(spaceId)?.values() ?? [])];
 }
 
 

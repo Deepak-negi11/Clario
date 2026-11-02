@@ -76,6 +76,12 @@ function isOneTileMove(from: { x: number; y: number }, to: MovePayload) {
 }
 
 export async function onMessage(ws: Socket, raw: string | Buffer) {
+  if (ws.data.closed) return;
+  const now = Date.now();
+  const budget = ws.data.budget;
+  if (!budget || budget.until <= now) ws.data.budget = { until: now + 1000, count: 1 };
+  else if (++budget.count > 120) return ws.close(1008, "Too many messages");
+  if ((typeof raw === "string" ? Buffer.byteLength(raw) : raw.byteLength) > 64 * 1024) return ws.close(1009, "Message too large");
   let json: unknown;
 
   try {
