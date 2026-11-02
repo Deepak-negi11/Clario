@@ -1351,7 +1351,7 @@ export function Office3D({
       roomViewRef.current = null;
       layoutRef.current = null;
     };
-  }, [selfId, selfRef, othersRef, namesRef, looksRef, bridgeRef, nearbyRef, reactionsRef, activitiesRef]);
+  }, [selfId, selfRef, othersRef, namesRef, looksRef, bridgeRef, nearbyRef, reactionsRef, activitiesRef, projectorRef]);
 
   // Rebuilds the office when the custom map changes; it skips a map equal to the one shown.
   useEffect(() => {

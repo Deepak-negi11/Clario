@@ -71,7 +71,7 @@ import { MapBuilder } from "../../../components/game-ui/map-builder";
 import { getMyProfile, updateProfile } from "../../../lib/auth-api";
 import { getAuthToken } from "../../../lib/auth-token";
 import { saveLook } from "../../../lib/avatar/saved-look";
-import { isNearby } from "../../../lib/proximity";
+import { callPeers } from "../../../lib/proximity";
 
 const PhaserGame = dynamic(
   () => import("../../../components/phaser/phaser-game").then((module) => module.PhaserGame),
@@ -362,13 +362,8 @@ function LiveSpace({
   // The card is about other people; a click on yourself never opens one.
   playerClickRef.current = (userId: string | null) => setSelectedPlayerId(userId === selfId ? null : userId);
 
-  const nearbyIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const [id, position] of Object.entries(others)) {
-      if (isNearby(self, position)) ids.add(id);
-    }
-    return ids;
-  }, [self, others]);
+  const roomAt = useCallback((point: { x: number; y: number }) => isCustomMap && customMap ? customRoomAt(customMap, point) : getChatRoomAtPosition(mapTemplate, point), [isCustomMap, customMap, mapTemplate]);
+  const nearbyIds = useMemo(() => callPeers(self, others, roomAt), [self, others, roomAt]);
   const peopleInRoom = useMemo(() => {
     if (!currentRoom) return 0;
     const inRoom = Object.values(others).filter((position) => roomAt(position)?.id === currentRoom.id);
@@ -392,6 +387,18 @@ function LiveSpace({
     sendSignal,
     registerSignalHandler,
   });
+
+  // The meeting-room projector: someone in your room sharing their screen (Clario HQ).
+  const projector = useProjector({
+    selfId,
+    room: isHq ? currentRoom : null,
+    localScreen: media.screenStream,
+    remoteScreens: remoteScreenStreams,
+    peers: nearbyIds,
+    names,
+  });
+  const projectorRef = useRef<ProjectorFeed | null>(null);
+  projectorRef.current = projector ? { stream: projector.stream, room: projector.room.bounds } : null;
 
   useEffect(() => {
     const token = getAuthToken();

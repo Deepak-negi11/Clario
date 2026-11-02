@@ -505,6 +505,28 @@ describe("WebSocket", () => {
   });
 
   describe("webrtc signaling", () => {
+    test("five teammates can exchange call signaling with every other participant", async () => {
+      const users = await Promise.all(Array.from({ length: 5 }, () => setupUserAndSpace()));
+      const sockets = users.map(() => new TestSocket(WS_URL));
+      await Promise.all(sockets.map(socket => socket.waitForOpen()));
+      const ids: string[] = [];
+      try {
+        for (let i = 0; i < sockets.length; i++) {
+          sockets[i]!.send({ type: "join", payload: { spaceId: users[0]!.spaceId, token: users[i]!.token } });
+          const joined = await sockets[i]!.nextMessage();
+          ids.push(joined.payload!.userId as string);
+          expect((joined.payload!.users as unknown[]).length).toBe(i);
+          await Promise.all(sockets.slice(0, i).map(socket => socket.nextMessage()));
+        }
+        for (let from = 0; from < 5; from++) for (let to = 0; to < 5; to++) {
+          if (from === to) continue;
+          const signal = { kind: "offer", sdp: `participant-${from}-to-${to}` };
+          sockets[from]!.send({ type: "webrtc-signal", payload: { targetUserId: ids[to], signal } });
+          expect(await sockets[to]!.nextMessage()).toEqual({ type: "webrtc-signal", payload: { fromUserId: ids[from], signal } });
+        }
+      } finally { sockets.forEach(socket => socket.close()); }
+    });
+
     test("relays a signal only to the targeted user", async () => {
       const { token: tokenA, spaceId } = await setupUserAndSpace();
       const { token: tokenB } = await setupUserAndSpace();

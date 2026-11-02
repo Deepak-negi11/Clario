@@ -36,6 +36,11 @@ const RTC_CONFIG: RTCConfiguration = {
   iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
 };
 
+// The server passes a signal on only to someone connected right now, so an offer can be lost: their
+// page is still reloading, or the person list shows them from before. A connection waiting for an
+// answer never fails, so nothing else would try again: the offer is sent again until it's answered.
+const OFFER_RESEND_MS = 3000;
+
 // Every connection carries three slots in this fixed order on both sides,
 // so a slot's position always tells us what it carries.
 const AUDIO = 0;
@@ -76,6 +81,7 @@ export function useProximityVideo({
   const ignoredOfferRef = useRef<Set<string>>(new Set());
   const pendingOfferRef = useRef<Set<string>>(new Set());
   const signalQueueRef = useRef<Map<string, Promise<void>>>(new Map());
+  const offerTimersRef = useRef<Map<string, number>>(new Map());
 
   localStreamRef.current = localStream;
   screenStreamRef.current = screenStream;
@@ -99,6 +105,25 @@ export function useProximityVideo({
     return directionChanged;
   }, []);
 
+  // Sends the waiting offer again every OFFER_RESEND_MS until it's answered or the connection is gone.
+  const resendUntilAnswered = useCallback(
+    (peerId: string, pc: RTCPeerConnection) => {
+      const timers = offerTimersRef.current;
+      const check = () => {
+        const sdp = pc.localDescription?.sdp;
+        if (peersRef.current.get(peerId) !== pc || pc.signalingState !== "have-local-offer" || !sdp) {
+          timers.delete(peerId);
+          return;
+        }
+        sendSignal(peerId, { kind: "offer", sdp });
+        timers.set(peerId, window.setTimeout(check, OFFER_RESEND_MS));
+      };
+      window.clearTimeout(timers.get(peerId));
+      timers.set(peerId, window.setTimeout(check, OFFER_RESEND_MS));
+    },
+    [sendSignal],
+  );
+
   const sendOffer = useCallback(
     async (peerId: string, pc: RTCPeerConnection) => {
       if (pc.signalingState !== "stable") {
@@ -111,13 +136,14 @@ export function useProximityVideo({
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         sendSignal(peerId, { kind: "offer", sdp: pc.localDescription!.sdp! });
+        resendUntilAnswered(peerId, pc);
       } catch (error) {
         console.warn("WebRTC offer failed:", error);
       } finally {
         makingOfferRef.current.delete(peerId);
       }
     },
-    [sendSignal],
+    [sendSignal, resendUntilAnswered],
   );
 
   const closePeer = useCallback((peerId: string) => {
@@ -130,6 +156,8 @@ export function useProximityVideo({
     ignoredOfferRef.current.delete(peerId);
     pendingOfferRef.current.delete(peerId);
     signalQueueRef.current.delete(peerId);
+    window.clearTimeout(offerTimersRef.current.get(peerId));
+    offerTimersRef.current.delete(peerId);
     setRemoteStreams((previous) => {
       if (!(peerId in previous)) return previous;
       const next = { ...previous };
@@ -290,7 +318,10 @@ export function useProximityVideo({
     const peers = peersRef.current;
     const remoteStreamMap = remoteStreamRefs.current;
     const remoteScreenStreamMap = remoteScreenStreamRefs.current;
+    const offerTimers = offerTimersRef.current;
     return () => {
+      offerTimers.forEach((timer) => window.clearTimeout(timer));
+      offerTimers.clear();
       peers.forEach((pc) => pc.close());
       peers.clear();
       remoteStreamMap.clear();

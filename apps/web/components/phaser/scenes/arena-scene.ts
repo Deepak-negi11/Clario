@@ -691,11 +691,8 @@ export class ArenaScene extends Phaser.Scene{
             this.props = addPropsOnMap(this, { items, font: this.labelFont, bridge, selfId: () => this.registry.get("selfId") as string | null });
         }
 
-        // E uses the one thing in reach, in this order: get off your bike, talk to whoever is next
-        // to you, a game or TV, then the bike rack, the vending machine or a sip of your drink. Q
-        // throws a drink away. Neither works while you type in a panel, with Ctrl, Cmd or Alt held
-        // (browser shortcuts), or as the key repeats while held down. Every map has someone to
-        // talk to; games, bikes and drinks are on Clario HQ and built maps.
+        // E acts on a held prop first, then a nearby person, game/TV or furniture. Q puts
+        // the held prop away. Ignore typing, browser shortcuts and held-key repeats.
         const ignored = (event: KeyboardEvent) => event.repeat || event.ctrlKey || event.metaKey || event.altKey || isTypingIn(event.target);
         this.input.keyboard?.on("keydown-E", (event: KeyboardEvent) => {
             if (ignored(event)) return;
