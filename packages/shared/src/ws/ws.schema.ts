@@ -10,6 +10,9 @@ import {
   PlayLeaveBroadcast, PlayLeaveMessage, TvBroadcast, TvMessage,
 } from "./play.schema";
 import { PlayerPropSchema, PropBroadcast, PropMessage } from "./prop.schema";
+import { BadgeBroadcast, BadgeMessage } from "./badge.schema";
+import { NoticeBroadcast, NoticeMessage } from "./notice.schema";
+import { OfficeBroadcast, OfficeMessage } from "./office.schema";
 
 
 const PositionSchema = z.object({
@@ -212,6 +215,11 @@ export const ServerMessage = z.discriminatedUnion("type", [
   TvBroadcast,
   // Bikes and drinks (prop.schema.ts).
   PropBroadcast,
+  // The front-door badge reader and the notice board (badge.schema.ts, notice.schema.ts).
+  BadgeBroadcast,
+  NoticeBroadcast,
+  // Room bookings, whiteboards, lockers and the kitchen shelf (office.schema.ts).
+  OfficeBroadcast,
 ]);
 
 
@@ -254,6 +262,9 @@ export const ClientMessage = z.discriminatedUnion("type", [
   PlayDataMessage,
   TvMessage,
   PropMessage,
+  BadgeMessage,
+  NoticeMessage,
+  OfficeMessage,
 ]);
 
 

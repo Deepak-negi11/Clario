@@ -818,6 +818,7 @@ export function Office3D({
     const ahead = new THREE.Vector3();
     const side = new THREE.Vector3();
     const onArrow = (event: KeyboardEvent) => {
+      if (bridgeRef?.current.mapOverlays?.size) return;
       const arrow = ARROWS[event.key];
       const target = event.target as HTMLElement | null;
       // Typing, and a panel's focused drag handle (its arrows move the panel), keep their arrow keys.

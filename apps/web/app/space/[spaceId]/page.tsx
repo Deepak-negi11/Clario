@@ -49,6 +49,10 @@ import { ErrandCelebrationCard, ErrandChoice, ErrandHud, ErrandsPanel } from "..
 import { MentorOnMap } from "../../../components/practice-session/mentor-on-map";
 import { CoworkerOnMap } from "../../../components/coworkers/coworker-on-map";
 import { ArcadeOnMap } from "../../../components/games/arcade-on-map";
+import { BadgeOnMap } from "../../../components/badge-reader/badge-on-map";
+import { NoticeBoardOnMap } from "../../../components/notice-board/notice-board-on-map";
+import { WorkplaceOnMap } from "../../../components/workplace/workplace-on-map";
+import { useBadgeAndNotices } from "../../../hooks/use-badge-and-notices";
 import { createSceneBridge } from "../../../components/phaser/scene-bridge";
 import { PixelPet } from "../../../components/game-ui/pixel-pet";
 import { AgentWorkspace } from "../../../components/game-ui/agent-workspace";
@@ -207,6 +211,10 @@ function LiveSpace({
     layoutUpdate,
     sendPlay,
     subscribePlay,
+    sendOffice,
+    subscribeOffice,
+    sendWorkplace,
+    subscribeWorkplace,
     props,
     sendProp,
   } = useSpaceSocket(spaceId, mapTemplate, customMap);
@@ -268,6 +276,11 @@ function LiveSpace({
   const playLink = useMemo(
     () => ({ selfId, people: playPeople, send: sendPlay, subscribe: subscribePlay }),
     [selfId, playPeople, sendPlay, subscribePlay],
+  );
+  // Room bookings, whiteboards, lockers and the kitchen shelf (components/workplace).
+  const workplaceLink = useMemo(
+    () => ({ selfId, connected: status === "joined", people: playPeople, send: sendWorkplace, subscribe: subscribeWorkplace }),
+    [selfId, status, playPeople, sendWorkplace, subscribeWorkplace],
   );
   const [view3d, setView3d] = useState(false);
   // Clario HQ 3D is only ever shown in 3D; built maps can switch to a 3D view. Errands are written
@@ -594,6 +607,9 @@ function LiveSpace({
       <MentorOnMap bridgeRef={bridgeRef} />
       <CoworkerOnMap bridgeRef={bridgeRef} />
       <ArcadeOnMap bridgeRef={bridgeRef} link={playLink} />
+      <BadgeOnMap bridgeRef={bridgeRef} office={office} />
+      <NoticeBoardOnMap bridgeRef={bridgeRef} office={office} selfId={selfId} />
+      <WorkplaceOnMap bridgeRef={bridgeRef} link={workplaceLink} self={status === "joined" ? self : null} mapTemplate={mapTemplate} customMap={isCustomMap ? (draftMap ?? customMap) : null} />
       </main>
       {panel === "people" && (
         <PeoplePanel

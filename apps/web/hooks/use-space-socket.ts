@@ -118,6 +118,10 @@ export function useSpaceSocket(spaceId: string, mapTemplate: MapTemplateId, cust
   const signalHandlerRef = useRef<((fromUserId: string, signal: unknown) => void) | null>(null);
   // Game Room play and the Lounge TV (components/games/arcade-on-map.tsx) listen here.
   const playListenersRef = useRef(new Set<(message: PlayServerMessage) => void>());
+  // The badge reader and the notice board (hooks/use-badge-and-notices.ts) listen here.
+  const officeListenersRef = useRef(new Set<(message: BadgeBroadcast | NoticeBroadcast) => void>());
+  // Room bookings, whiteboards, lockers and the kitchen shelf (components/workplace) listen here.
+  const workplaceListenersRef = useRef(new Set<(message: OfficeServerMessage) => void>());
   const loadedRoomsRef = useRef<Set<string>>(new Set());
 
   const currentRoom = useMemo(
@@ -371,6 +375,13 @@ export function useSpaceSocket(spaceId: string, mapTemplate: MapTemplateId, cust
         case "tv":
           for (const listener of playListenersRef.current) listener(message);
           break;
+        case "badge":
+        case "notice":
+          for (const listener of officeListenersRef.current) listener(message);
+          break;
+        case "office":
+          for (const listener of workplaceListenersRef.current) listener(message);
+          break;
       }
     };
 
@@ -592,6 +603,38 @@ export function useSpaceSocket(spaceId: string, mapTemplate: MapTemplateId, cust
     };
   }, []);
 
+  // The badge reader and the notice board. False when it couldn't be sent (reconnecting).
+  const sendOffice = useCallback((message: BadgeMessage | NoticeMessageInput) => {
+    const ws = socketRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    ws.send(JSON.stringify(message));
+    return true;
+  }, []);
+
+  const subscribeOffice = useCallback((listener: (message: BadgeBroadcast | NoticeBroadcast) => void) => {
+    const listeners = officeListenersRef.current;
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  }, []);
+
+  // Room bookings, whiteboards, lockers and the kitchen shelf. False when it couldn't be sent.
+  const sendWorkplace = useCallback((payload: OfficeClientMessage["payload"]) => {
+    const ws = socketRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    ws.send(JSON.stringify({ type: "office", payload }));
+    return true;
+  }, []);
+
+  const subscribeWorkplace = useCallback((listener: (message: OfficeServerMessage) => void) => {
+    const listeners = workplaceListenersRef.current;
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  }, []);
+
   return {
     status,
     error,
@@ -612,6 +655,10 @@ export function useSpaceSocket(spaceId: string, mapTemplate: MapTemplateId, cust
     registerSignalHandler,
     sendPlay,
     subscribePlay,
+    sendOffice,
+    subscribeOffice,
+    sendWorkplace,
+    subscribeWorkplace,
     props,
     sendProp,
     chatRequests,

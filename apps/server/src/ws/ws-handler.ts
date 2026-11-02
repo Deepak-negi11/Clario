@@ -55,6 +55,9 @@ import {
 import { forgetSpacePlay } from "./play";
 import { forgetPlayer, handlePlay } from "./play-handler";
 import { handleProp } from "./prop-handler";
+import { badgeOutOnLeave, handleBadge } from "./badge-handler";
+import { handleNotice } from "./notice-handler";
+import { forgetOfficeBudget, handleOffice } from "./office-handler";
 
 type JoinPayload = Extract<ClientMessage, { type: "join" }>["payload"];
 type MovePayload = Extract<ClientMessage, { type: "move" }>["payload"];
@@ -149,6 +152,12 @@ export async function onMessage(ws: Socket, raw: string | Buffer) {
       return handlePlay(ws, parsed.data);
     case "prop":
       return handleProp(ws, parsed.data.payload);
+    case "badge":
+      return handleBadge(ws, parsed.data.payload);
+    case "notice":
+      return handleNotice(ws, parsed.data.payload);
+    case "office":
+      return handleOffice(ws, parsed.data.payload);
   }
 }
 
