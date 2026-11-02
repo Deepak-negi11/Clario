@@ -9,7 +9,6 @@ import {
 } from "@repo/shared";
 import { getAuthToken } from "../lib/auth-token";
 import { getSpaceMessages, type ChatScope } from "../lib/space-api";
-import { captureEvent } from "../lib/analytics";
 import { createPrivateChatKeys } from "../lib/private-chat-keys";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
@@ -205,7 +204,6 @@ export function useSpaceSocket(spaceId: string, mapTemplate: MapTemplateId, cust
           retry.attempts = 0;
           setError(null);
           setStatus("joined");
-          captureEvent("space_entered");
 
           getSpaceMessages(token, spaceId, "general")
             .then((response) => {
@@ -447,7 +445,6 @@ export function useSpaceSocket(spaceId: string, mapTemplate: MapTemplateId, cust
     if (scope === "room" && !currentRoom) return;
 
     ws.send(JSON.stringify({ type: "chat", payload: { text: trimmed, scope } }));
-    captureEvent("message_sent");
 
     const at = Date.now();
     const entry: ChatEntry = {

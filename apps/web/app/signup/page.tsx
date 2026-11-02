@@ -8,7 +8,6 @@ import { ArrowRight } from "lucide-react";
 import { TextField } from "../../components/TextField";
 import { signinUser, signupUser } from "../../lib/auth-api";
 import { getAuthToken, saveAuthToken, saveAuthEmail } from "../../lib/auth-token";
-import { captureEvent } from "../../lib/analytics";
 import { useEffect } from "react";
 
 export default function SignupPage() {
@@ -38,11 +37,9 @@ export default function SignupPage() {
     }
 
     setIsSubmitting(true);
-    captureEvent("signup_started");
 
     try {
       await signupUser({ username, email, password });
-      captureEvent("signup_completed");
       const { token } = await signinUser({ email, password });
       saveAuthToken(token);
       saveAuthEmail(email);

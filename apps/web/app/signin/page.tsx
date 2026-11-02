@@ -8,7 +8,6 @@ import { ArrowRight } from "lucide-react";
 import { TextField } from "../../components/TextField";
 import { signinUser } from "../../lib/auth-api";
 import { getAuthToken, saveAuthToken, saveAuthEmail } from "../../lib/auth-token";
-import { captureEvent } from "../../lib/analytics";
 import { useEffect } from "react";
 
 export default function SigninPage() {
@@ -36,7 +35,6 @@ export default function SigninPage() {
       const { token } = await signinUser({ email, password });
       saveAuthToken(token);
       saveAuthEmail(email);
-      captureEvent("signin_completed");
       router.push("/spaces");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to sign in");

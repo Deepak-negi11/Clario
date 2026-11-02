@@ -1,22 +1,22 @@
 {
-  "name": "viora-agent",
+  "name": "clario-agent",
   "version": "0.1.0",
-  "description": "Show what your Claude Code agent is doing (project, branch, commit) on your Viora avatar.",
+  "description": "Show what your Claude Code agent is doing (project, branch, commit) on your Clario avatar.",
   "type": "module",
   "bin": {
-    "viora-agent": "cli.mjs"
+    "clario-agent": "cli.mjs"
   },
   "files": [
     "cli.mjs",
     "setup.mjs",
-    "viora-agent-hook.mjs",
+    "clario-agent-hook.mjs",
     "README.md"
   ],
   "engines": {
     "node": ">=18"
   },
   "keywords": [
-    "viora",
+    "clario",
     "claude-code",
     "hooks",
     "agent",

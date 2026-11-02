@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { captureEvent } from "../lib/analytics";
 
 type Signal =
   | { kind: "offer"; sdp: string }
@@ -76,7 +75,6 @@ export function useProximityVideo({
   const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const remoteStreamRefs = useRef<Map<string, MediaStream>>(new Map());
   const remoteScreenStreamRefs = useRef<Map<string, MediaStream>>(new Map());
-  const connectedPeersRef = useRef<Set<string>>(new Set());
   const makingOfferRef = useRef<Set<string>>(new Set());
   const ignoredOfferRef = useRef<Set<string>>(new Set());
   const pendingOfferRef = useRef<Set<string>>(new Set());
@@ -151,7 +149,6 @@ export function useProximityVideo({
     peersRef.current.delete(peerId);
     remoteStreamRefs.current.delete(peerId);
     remoteScreenStreamRefs.current.delete(peerId);
-    connectedPeersRef.current.delete(peerId);
     makingOfferRef.current.delete(peerId);
     ignoredOfferRef.current.delete(peerId);
     pendingOfferRef.current.delete(peerId);
@@ -199,11 +196,6 @@ export function useProximityVideo({
         const stream = remote;
         if (isScreen) setRemoteScreenStreams((previous) => ({ ...previous, [peerId]: stream }));
         else setRemoteStreams((previous) => ({ ...previous, [peerId]: stream }));
-
-        if (!isScreen && !connectedPeersRef.current.has(peerId)) {
-          connectedPeersRef.current.add(peerId);
-          captureEvent("proximity_connected");
-        }
       };
 
       pc.onconnectionstatechange = () => {

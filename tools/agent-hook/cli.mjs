@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * viora-agent: show what your Claude Code agent is doing on your Viora avatar.
+ * clario-agent: show what your Claude Code agent is doing on your Clario avatar.
  *
- *   npx viora-agent setup [--api-url URL] [--global]   agent key + hook, once
- *   npx viora-agent status                              what is set up
- *   npx viora-agent uninstall [--global]                remove the hook
+ *   npx clario-agent setup [--api-url URL] [--global]   agent key + hook, once
+ *   npx clario-agent status                              what is set up
+ *   npx clario-agent uninstall [--global]                remove the hook
  *
- * setup saves a 180-day agent key in ~/.viora/agent.json (it can only post agent
- * activity), copies the hook to ~/.viora/hook.mjs and registers it in this project's
+ * setup saves a 180-day agent key in ~/.clario/agent.json (it can only post agent
+ * activity), copies the hook to ~/.clario/hook.mjs and registers it in this project's
  * .claude/settings.local.json, or in ~/.claude/settings.json with --global.
  */
 
@@ -18,10 +18,12 @@ import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
-const DIR = join(homedir(), ".viora");
+const DIR = join(homedir(), ".clario");
 const CONFIG_PATH = join(DIR, "agent.json");
 const HOOK_PATH = join(DIR, "hook.mjs");
-const HOOK_SOURCE = join(dirname(fileURLToPath(import.meta.url)), "viora-agent-hook.mjs");
+const HOOK_SOURCE = join(dirname(fileURLToPath(import.meta.url)), "clario-agent-hook.mjs");
+// Where this package kept its key before it was renamed: setup reuses that key instead of asking again.
+const OLD_CONFIG_PATH = join(homedir(), ".viora", "agent.json");
 const DEFAULT_API_URL = "http://localhost:3001";
 const HOOK_EVENTS = ["PreToolUse", "PostToolUse", "Stop", "SessionEnd"];
 const RENEW_DAYS = 14; // setup makes a new key when the saved one has less time left than this
@@ -73,20 +75,20 @@ async function post(apiUrl, path, body, token) {
       body: JSON.stringify(body),
     });
   } catch {
-    fail(`Can't reach the Viora server at ${apiUrl}. Start it, or pass --api-url, then run this again.`);
+    fail(`Can't reach the Clario server at ${apiUrl}. Start it, or pass --api-url, then run this again.`);
   }
   return { status: res.status, json: await res.json().catch(() => null) };
 }
 
-/** Email and password from the terminal (the password isn't echoed), or VIORA_EMAIL / VIORA_PASSWORD. */
+/** Email and password from the terminal (the password isn't echoed), or CLARIO_EMAIL / CLARIO_PASSWORD. */
 async function askCredentials() {
-  if (process.env.VIORA_EMAIL && process.env.VIORA_PASSWORD) {
-    return { email: process.env.VIORA_EMAIL, password: process.env.VIORA_PASSWORD };
+  if (process.env.CLARIO_EMAIL && process.env.CLARIO_PASSWORD) {
+    return { email: process.env.CLARIO_EMAIL, password: process.env.CLARIO_PASSWORD };
   }
-  if (!process.stdin.isTTY) fail("No terminal to ask for your email and password; set VIORA_EMAIL and VIORA_PASSWORD.");
+  if (!process.stdin.isTTY) fail("No terminal to ask for your email and password; set CLARIO_EMAIL and CLARIO_PASSWORD.");
   const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
   const ask = (text) => new Promise((resolve) => rl.question(text, resolve));
-  const email = (await ask("Viora email: ")).trim();
+  const email = (await ask("Clario email: ")).trim();
   const answer = ask("Password: ");
   const write = rl._writeToOutput;
   rl._writeToOutput = () => {}; // hide the password as it's typed
@@ -123,11 +125,12 @@ async function ensureAgentKey(config, apiUrl) {
 const settingsFile = (global) =>
   global ? join(homedir(), ".claude", "settings.json") : join(process.cwd(), ".claude", "settings.local.json");
 
-/** Viora hooks from any version: this package's copy, or the repo script. */
-const isVioraHook = (hook) => typeof hook?.command === "string" && /viora-agent-hook\.mjs|[\\/]\.viora[\\/]hook\.mjs/.test(hook.command);
+/** Our hooks from any version (also from before the rename): this package's copy, or the repo script. */
+const isOurHook = (hook) =>
+  typeof hook?.command === "string" && /(clario|viora)-agent-hook\.mjs|[\\/]\.(clario|viora)[\\/]hook\.mjs/.test(hook.command);
 
-/** Settings with every Viora hook removed; other hooks and settings are left exactly as they were. */
-function withoutViora(settings) {
+/** Settings with every one of our hooks removed; other hooks and settings are left exactly as they were. */
+function withoutOurHooks(settings) {
   if (!settings.hooks || typeof settings.hooks !== "object") return settings;
   const hooks = {};
   for (const [event, groups] of Object.entries(settings.hooks)) {
@@ -136,7 +139,7 @@ function withoutViora(settings) {
       continue;
     }
     const kept = groups
-      .map((group) => (Array.isArray(group?.hooks) ? { ...group, hooks: group.hooks.filter((h) => !isVioraHook(h)) } : group))
+      .map((group) => (Array.isArray(group?.hooks) ? { ...group, hooks: group.hooks.filter((h) => !isOurHook(h)) } : group))
       .filter((group) => !Array.isArray(group?.hooks) || group.hooks.length > 0);
     if (kept.length) hooks[event] = kept;
   }
@@ -144,14 +147,14 @@ function withoutViora(settings) {
   return Object.keys(hooks).length ? { ...rest, hooks } : rest;
 }
 
-const countViora = (settings) =>
-  Object.values(settings?.hooks ?? {}).flat().flatMap((group) => group?.hooks ?? []).filter(isVioraHook).length;
+const countOurHooks = (settings) =>
+  Object.values(settings?.hooks ?? {}).flat().flatMap((group) => group?.hooks ?? []).filter(isOurHook).length;
 
-/** Add the hook for every event, replacing older Viora entries so it never fires twice. */
+/** Add the hook for every event, replacing older entries of ours so it never fires twice. */
 function registerHooks(file) {
   const { value = {} } = readJson(file);
-  if (existsSync(file)) copyFileSync(file, `${file}.viora-backup`);
-  const settings = withoutViora(value);
+  if (existsSync(file)) copyFileSync(file, `${file}.clario-backup`);
+  const settings = withoutOurHooks(value);
   const hooks = { ...(settings.hooks ?? {}) };
   const command = `node "${HOOK_PATH}"`;
   for (const event of HOOK_EVENTS) hooks[event] = [...(hooks[event] ?? []), { hooks: [{ type: "command", command, timeout: 10 }] }];
@@ -170,7 +173,7 @@ function gitIgnored(file) {
 // ---- Commands -----------------------------------------------------------------------
 
 async function setup(opts) {
-  const { value: config = {} } = readJson(CONFIG_PATH);
+  const { value: config = readJson(OLD_CONFIG_PATH).value ?? {} } = readJson(CONFIG_PATH);
   const apiUrl = String(opts.apiUrl || config.apiUrl || DEFAULT_API_URL).replace(/\/+$/, "");
   const { key, days, reused } = await ensureAgentKey(config, apiUrl);
 
@@ -189,7 +192,7 @@ async function setup(opts) {
   if (!opts.global && gitIgnored(file) === false) {
     console.log("Note: .claude/settings.local.json isn't git-ignored here. It holds no secrets, but you may want to ignore it.");
   }
-  console.log("Open your Viora space and give Claude a task: your avatar's card shows what it's doing.");
+  console.log("Open your Clario space and give Claude a task: your avatar's card shows what it's doing.");
 }
 
 function status() {
@@ -204,7 +207,7 @@ function status() {
   console.log(`Hook:    ${existsSync(HOOK_PATH) ? HOOK_PATH : "not installed (run setup)"}`);
   for (const global of [false, true]) {
     const file = settingsFile(global);
-    const n = countViora(readJson(file).value);
+    const n = countOurHooks(readJson(file).value);
     console.log(`${global ? "All projects" : "This project"}: ${n ? `registered (${file})` : "not registered"}`);
   }
 }
@@ -212,20 +215,20 @@ function status() {
 function uninstall(opts) {
   const file = settingsFile(opts.global);
   const { value } = readJson(file);
-  if (!value || !countViora(value)) {
-    console.log(`No Viora hook in ${file}.`);
+  if (!value || !countOurHooks(value)) {
+    console.log(`No Clario hook in ${file}.`);
     return;
   }
-  copyFileSync(file, `${file}.viora-backup`);
-  writeJson(file, withoutViora(value));
-  console.log(`Removed the Viora hook from ${file}. Your key stays in ${CONFIG_PATH}; delete that file to remove it too.`);
+  copyFileSync(file, `${file}.clario-backup`);
+  writeJson(file, withoutOurHooks(value));
+  console.log(`Removed the Clario hook from ${file}. Your key stays in ${CONFIG_PATH}; delete that file to remove it too.`);
 }
 
-const HELP = `viora-agent: show what your Claude Code agent is doing on your Viora avatar
+const HELP = `clario-agent: show what your Claude Code agent is doing on your Clario avatar
 
-  viora-agent setup [--api-url URL] [--global]   save an agent key and register the hook
-  viora-agent status                              show what is set up
-  viora-agent uninstall [--global]                remove the hook
+  clario-agent setup [--api-url URL] [--global]   save an agent key and register the hook
+  clario-agent status                              show what is set up
+  clario-agent uninstall [--global]                remove the hook
 
 Without --global the hook is registered only for the project you run it in.
 --api-url defaults to the saved server, then ${DEFAULT_API_URL}.`;

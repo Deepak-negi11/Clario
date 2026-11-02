@@ -91,7 +91,6 @@ docker compose -f deploy/aws/docker-compose.yml exec db pg_dump -U clario clario
    | `GEMINI_API_KEY` | For Maya and the missions. Without it Maya answers from saved tips. |
    | `YOUTUBE_API_KEY` | Optional. Lounge TV search. |
    | `GITHUB_TOKEN` | Optional. Lets the coworkers read more GitHub links per hour. |
-   | `NEXT_PUBLIC_POSTHOG_KEY`, `NEXT_PUBLIC_POSTHOG_HOST` | Optional. Analytics. |
 
    `apps/web/.env.example` describes the rest (models, timeouts). Visitors' own AI keys stay in their
    browser and are never set here.

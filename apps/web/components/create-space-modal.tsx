@@ -8,7 +8,6 @@ import { Button } from "@repo/ui/button";
 import { MAP_TEMPLATES, TEAM_OFFICE_THUMBNAIL, isClarioHq, teamOfficePlan, type MapTemplateId } from "@repo/shared";
 import { getAuthToken } from "../lib/auth-token";
 import { createSpace, type SpaceSummary } from "../lib/space-api";
-import { captureEvent } from "../lib/analytics";
 import { TeamOfficePreview } from "./team-office-preview";
 
 type CreateSpaceModalProps = {
@@ -85,7 +84,6 @@ export function CreateSpaceModal({ open, onClose, onCreated }: CreateSpaceModalP
       const { spaceId } = await createSpace(token, { name, dimensions, mapTemplate, ...(teamOffice ? { teamSize: TEAM_SIZE } : {}) });
 
       onCreated({ id: spaceId, name, dimensions, thumbnail: teamOffice ? TEAM_OFFICE_THUMBNAIL : template.thumbnail, mapTemplate });
-      captureEvent("space_created");
       setCreatedSpaceId(spaceId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create space");

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
+import { Analytics } from "@vercel/analytics/next";
 import { DM_Serif_Display, IBM_Plex_Mono, Manrope, DM_Sans, Pixelify_Sans, Geist, Geist_Mono } from "next/font/google";
-import { PostHogProvider } from "../components/analytics/posthog-provider";
 import { SITE_NAME, SITE_URL } from "../lib/site";
 import "./globals.css";
 
@@ -100,7 +100,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${manrope.variable} ${ibmPlexMono.variable} ${dmSerif.variable} ${dmSans.variable} ${pixelify.variable} ${geist.variable} ${geistMono.variable}`}>
-        <PostHogProvider>{children}</PostHogProvider>
+        {children}
+        {/* Vercel Web Analytics: page views, no cookies. Turn it on in the Vercel project (Analytics tab). */}
+        <Analytics />
       </body>
     </html>
   );

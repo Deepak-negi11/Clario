@@ -1,17 +1,17 @@
 #!/usr/bin/env node
 /**
- * Viora agent hook for Claude Code
+ * Clario agent hook for Claude Code
  *
- * Broadcasts what your AI agent is doing to everyone in your current Viora space.
+ * Broadcasts what your AI agent is doing to everyone in your current Clario space.
  * Setup guide: tools/agent-hook/README.md
  *
  * Reads Claude Code hook events from stdin and POSTs activity to
- * POST /api/v1/agent-activity on your Viora server. Exits 0 silently on any
+ * POST /api/v1/agent-activity on your Clario server. Exits 0 silently on any
  * failure so it never blocks your agent session.
  *
  * Sent: a short status line (tool name, edited file name, or the programs a shell
  * command runs, never its arguments) plus the project folder, git branch and short
- * commit. `"shareGit": false` in ~/.viora/agent.json (or VIORA_SHARE_GIT=0) keeps
+ * commit. `"shareGit": false` in ~/.clario/agent.json (or CLARIO_SHARE_GIT=0) keeps
  * project, branch and commit on this machine.
  */
 
@@ -19,9 +19,9 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
-const CONFIG_PATH = join(homedir(), ".viora", "agent.json");
+const CONFIG_PATH = join(homedir(), ".clario", "agent.json");
 const THROTTLE_MS = 2000;
-const STATE_PATH = join(homedir(), ".viora", ".agent-hook-state");
+const STATE_PATH = join(homedir(), ".clario", ".agent-hook-state");
 
 function readStdin() {
   return new Promise((resolve) => {
@@ -119,7 +119,7 @@ function readRef(gitDir, name) {
 
 /** Project folder, branch and short commit for the agent card; nothing when sharing is off. */
 function gitInfo(event, config) {
-  const env = process.env.VIORA_SHARE_GIT;
+  const env = process.env.CLARIO_SHARE_GIT;
   if (env !== undefined ? env === "0" : config.shareGit === false) return {};
   const cwd = typeof event.cwd === "string" && event.cwd ? event.cwd : process.cwd();
   const root = findGitRoot(cwd);
@@ -210,7 +210,7 @@ async function main() {
     if (state === "cooking") {
       const { writeFileSync, mkdirSync } = await import("node:fs");
       try {
-        mkdirSync(join(homedir(), ".viora"), { recursive: true });
+        mkdirSync(join(homedir(), ".clario"), { recursive: true });
         writeFileSync(STATE_PATH, String(now));
       } catch {
       }
