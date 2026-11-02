@@ -45,5 +45,5 @@ jobs:
 
       - name: Build web
         env:
-          NEXT_PUBLIC_API_BASE_URL: https://api.vioraa.tech
+          NEXT_PUBLIC_API_BASE_URL: https://api.clario.games
         run: bun run --cwd apps/web build
