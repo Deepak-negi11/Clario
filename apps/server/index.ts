@@ -12,6 +12,7 @@ import {
   handleUpdateProfile,
   handleGetProfile,
 } from "./src/user/user";
+import { handleGetFreeAi, handleUseFreeAi } from "./src/user/free-ai";
 import {
   handleCreateSpace,
   handleDeleteSpace,
@@ -130,6 +131,11 @@ export function startServer(port: number) {
       "/api/v1/user/profile": {
         GET: withCors(handleGetProfile),
         POST: withCors(handleUpdateProfile),
+        OPTIONS: handleCorsPreflight,
+      },
+      "/api/v1/user/free-ai": {
+        GET: withCors(handleGetFreeAi),
+        POST: withCors(handleUseFreeAi),
         OPTIONS: handleCorsPreflight,
       },
       "/api/v1/user/metadata/bulk": {

@@ -1,7 +1,9 @@
 // POST /api/coworkers/chat: the learner talks to an AI coworker in the office (Arjun, Priya,
 // Rahul). It runs on the visitor's own AI key when they set one (x-ai-key header, used for this
-// call only and never stored or logged), else on the site's NVIDIA key. A GitHub link in the chat
-// gets the public repo read for context. Without a working AI the coworker answers with a saved
+// call only and never stored or logged), else on the site's NVIDIA key, which gives each signed-in
+// player FREE_AI_REPLIES AI replies (counted by the game server, lib/ai/free-tries.ts) before the
+// panel asks for their own key. Saved lines and movement commands don't use one. A GitHub link in
+// the chat gets the public repo read for context. Without a working AI the coworker answers with a saved
 // line (movement commands still work), so walking up to them always gets a reply.
 
 import {
@@ -14,6 +16,7 @@ import {
   coworkerUserContent,
   findGithubLink,
   firstName,
+  freeTriesUsedUpNotice,
   getCoworker,
   githubLabel,
   parseGithubLink,
@@ -24,6 +27,7 @@ import {
 } from "@repo/shared";
 import { AiHttpError } from "../../../../lib/ai/ai-call";
 import { parseCompanionIntent } from "../../../../lib/companions/intent";
+import { countFreeTry, freeTriesLeft, loginToken } from "../../../../lib/ai/free-tries";
 import { aiConnection, askAi, type AiConnection } from "../../../../lib/ai/providers";
 import { repoContext } from "../../../../lib/github/repo-context";
 import { takeAiCall } from "../../../../lib/mentor/rate-limit";
@@ -37,8 +41,10 @@ function visitorOf(request: Request): string {
   return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
 }
 
-function fromSavedLines(coworker: Coworker, message: string, abilities: CoworkerAbilities, notice: string): Response {
-  return Response.json(coworkerChatResponse(coworker, savedCoworkerReply(coworker, message, abilities), "saved", { notice }));
+type SavedExtra = { freeTriesLeft?: number; needsKey?: boolean };
+
+function fromSavedLines(coworker: Coworker, message: string, abilities: CoworkerAbilities, notice: string, extra: SavedExtra = {}): Response {
+  return Response.json(coworkerChatResponse(coworker, savedCoworkerReply(coworker, message, abilities), "saved", { notice, ...extra }));
 }
 
 // What to tell the learner when their own key fails, so they can fix it in AI settings.
@@ -95,6 +101,18 @@ export async function POST(request: Request) {
   if (!takeAiCall(`coworkers:${visitorOf(request)}`)) {
     return fromSavedLines(coworker, message, abilities, `You've chatted a lot in a short time, so ${name} answers with a saved line. Try again in a minute.`);
   }
+  // The site's key: only for signed-in players, and only while they have free replies left.
+  const token = connection.own ? null : loginToken(request);
+  let tries: SavedExtra = {};
+  if (!connection.own) {
+    const left = token ? await freeTriesLeft(token) : "signed-out";
+    if (left === "signed-out") {
+      return fromSavedLines(coworker, message, abilities, `Sign in to chat with ${name} on the AI, or add your own AI key in AI settings.`);
+    }
+    if (!left) return fromSavedLines(coworker, message, abilities, `Couldn't check your free AI replies just now, so ${name} answers with a saved line.`);
+    if (left.left <= 0) return fromSavedLines(coworker, message, abilities, freeTriesUsedUpNotice(), { freeTriesLeft: 0, needsKey: true });
+    tries = { freeTriesLeft: left.left };
+  }
 
   const timeoutMs = connection.own ? OWN_KEY_TIMEOUT_MS : Number(process.env.NVIDIA_TIMEOUT_MS) || SITE_TIMEOUT_MS;
   // Stop paying for an answer the panel stopped waiting for.
@@ -114,7 +132,12 @@ export async function POST(request: Request) {
       if (command?.type === "leave" && !reply.action) reply.action = command;
       // Name the repo only when this message linked it; follow-ups still get it as context.
       const linked = link && repo && parseGithubLink(message) ? githubLabel(link) : undefined;
-      return Response.json(coworkerChatResponse(coworker, reply, "ai", { repo: linked }));
+      if (token && tries.freeTriesLeft !== undefined) {
+        const after = await countFreeTry(token);
+        if (!after || after === "signed-out") console.warn("[coworkers] couldn't count a free AI reply");
+        tries = { freeTriesLeft: after && after !== "signed-out" ? after.left : Math.max(0, tries.freeTriesLeft - 1) };
+      }
+      return Response.json(coworkerChatResponse(coworker, reply, "ai", { repo: linked, ...tries }));
     }
     console.warn(`[coworkers] ${connection.provider} returned an empty or unreadable answer`);
   } catch (error) {
@@ -123,5 +146,5 @@ export async function POST(request: Request) {
     const notice = ownKeyNotice(connection, error, name);
     if (notice) return fromSavedLines(coworker, message, abilities, notice);
   }
-  return fromSavedLines(coworker, message, abilities, `The AI didn't answer this time, so ${name} answers with a saved line.`);
+  return fromSavedLines(coworker, message, abilities, `The AI didn't answer this time, so ${name} answers with a saved line.`, tries);
 }

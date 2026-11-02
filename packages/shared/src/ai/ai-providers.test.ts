@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { AiChoiceSchema, AiKeySchema, chatModels, detectAiProvider, suggestModel } from "./ai-providers";
+import { AiChoiceSchema, AiKeySchema, chatModels, cleanAiKey, detectAiProvider, suggestModel } from "./ai-providers";
 
 describe("detectAiProvider", () => {
   test("spots each provider from its key prefix", () => {
@@ -11,9 +11,37 @@ describe("detectAiProvider", () => {
     expect(detectAiProvider("  sk-example  ")).toBe("openai");
   });
 
+  test("longer prefixes win over sk-", () => {
+    expect(detectAiProvider("sk-ant-admin01-example")).toBe("anthropic");
+    expect(detectAiProvider("sk-or-v1-0123456789abcdef")).toBe("openrouter");
+    expect(detectAiProvider("sk-svcacct-example")).toBe("openai");
+  });
+
+  test("still spots the key when pasted with an env name, quotes or Bearer", () => {
+    expect(detectAiProvider('NVIDIA_API_KEY="nvapi-abc123"')).toBe("nvidia");
+    expect(detectAiProvider("Bearer sk-ant-api03-example")).toBe("anthropic");
+    expect(detectAiProvider("'AIzaSyD-example'")).toBe("google");
+  });
+
   test("anything else is unknown", () => {
     expect(detectAiProvider("hello")).toBeNull();
     expect(detectAiProvider("")).toBeNull();
+    expect(detectAiProvider("gsk_groqkeyexample")).toBeNull();
+  });
+});
+
+describe("cleanAiKey", () => {
+  test("keeps just the key", () => {
+    const key = "sk-proj-abcdefghijklmnopqrstuvwxyz";
+    for (const pasted of [key, `  ${key}\n`, `"${key}"`, `'${key}';`, `Bearer ${key}`, `OPENAI_API_KEY=${key}`, `OPENAI_KEY: ${key}`]) {
+      expect(cleanAiKey(pasted)).toBe(key);
+    }
+    expect(AiKeySchema.safeParse(cleanAiKey(`OPENAI_API_KEY="${key}"`)).success).toBe(true);
+  });
+
+  test("leaves keys that merely contain those characters alone", () => {
+    expect(cleanAiKey("nvapi-AbC_123-xyz")).toBe("nvapi-AbC_123-xyz");
+    expect(cleanAiKey("AIzaSyD-ab_cd")).toBe("AIzaSyD-ab_cd");
   });
 });
 

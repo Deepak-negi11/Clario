@@ -1,15 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useId, useReducer, useRef, useState } from "react";
-import { ArrowLeft, ArrowUp, Briefcase, CheckCircle2, Copy, Footprints, GitBranch, Mic, Settings2, Square, Trash2, Volume2, VolumeX, X } from "lucide-react";
+import { ArrowLeft, ArrowUp, Briefcase, CheckCircle2, Copy, Footprints, GitBranch, KeyRound, Mic, Settings2, Square, Trash2, Volume2, VolumeX, X } from "lucide-react";
 import {
   AI_PROVIDER_INFO,
   COWORKER_HISTORY_LIMIT,
+  FREE_AI_REPLIES,
   MAX_COWORKER_MESSAGE,
   MISSIONS,
   coworkerChatResponse,
   coworkerMission,
   firstName,
+  freeTriesUsedUpNotice,
   getCoworker,
   nextMentorState,
   savedCoworkerReply,
@@ -18,9 +20,12 @@ import {
   type CoworkerChatResponse,
   type CoworkerId,
   type CoworkerPlace,
+  type FreeAiTries,
   type MentorState,
 } from "@repo/shared";
 import { AI_CHANGED_EVENT, aiRequestParts, readStoredAi, type StoredAi } from "../../lib/ai/ai-settings";
+import { apiRequest } from "../../lib/api-client";
+import { getAuthToken } from "../../lib/auth-token";
 import { isSpeechRecognitionSupported, listen, type ListenSession } from "../../lib/speech/recognition";
 import { isSpeechSynthesisSupported, speak, warmUpVoices } from "../../lib/speech/synthesis";
 import { readRuns, readShowXp } from "../../lib/missions/progress";
@@ -35,7 +40,9 @@ import { MissionChat } from "../missions/mission-chat";
 // you in the 3D view (lib/companions; the AI's "follow / play / stop" actions go there too), go to
 // a room when the scene can (onGoTo), and "leave" closes the chat once they've said bye. When they
 // ask for help with their task, the reply gets a button that opens their Workplace Quest mission
-// here. Visitors can plug in their own AI key (ai-settings/). Same flow as Maya's panel
+// here. On the site's AI each player gets FREE_AI_REPLIES free AI replies (counted by the game
+// server); the panel shows what's left and opens AI settings once they're used up, so they can
+// plug in their own AI key (ai-settings/). Same flow as Maya's panel
 // (practice-session.tsx). Render it only in the browser: it reads storage and speech support when
 // it mounts.
 
@@ -119,6 +126,9 @@ export function CoworkerPanel({ coworkerId, onClose, onStateChange, getPlace, on
   // The visitor's own AI key, if they added one (ai-settings/); null means the site's AI.
   const [ai, setAi] = useState<StoredAi | null>(readStoredAi);
   const [aiOpen, setAiOpen] = useState(false);
+  // Free AI replies left on the site's AI; null until the game server says.
+  const [freeLeft, setFreeLeft] = useState<number | null>(null);
+  const [aiReason, setAiReason] = useState<string | undefined>();
   const leaveTimerRef = useRef<number | null>(null);
   const leaveAfterSpeechRef = useRef(false);
   const onCloseRef = useRef(onClose);
@@ -126,6 +136,21 @@ export function CoworkerPanel({ coworkerId, onClose, onStateChange, getPlace, on
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
+
+  // Only matters on the site's AI. Signed out or offline: no count is shown, and the chat route says why.
+  useEffect(() => {
+    const token = getAuthToken();
+    if (ai || !token) return;
+    let current = true;
+    apiRequest<FreeAiTries>("/api/v1/user/free-ai", { token })
+      .then((tries) => {
+        if (current) setFreeLeft(tries.left);
+      })
+      .catch(() => {});
+    return () => {
+      current = false;
+    };
+  }, [ai]);
 
   useEffect(() => {
     const reload = () => setAi(readStoredAi());
@@ -292,6 +317,7 @@ export function CoworkerPanel({ coworkerId, onClose, onStateChange, getPlace, on
       canGoTo: !!onGoTo && !!where?.rooms.length,
     };
     const { headers, choice } = aiRequestParts(ai);
+    const token = getAuthToken();
 
     const controller = new AbortController();
     requestRef.current = controller;
@@ -299,7 +325,7 @@ export function CoworkerPanel({ coworkerId, onClose, onStateChange, getPlace, on
     try {
       const response = await fetch("/api/coworkers/chat", {
         method: "POST",
-        headers: { "content-type": "application/json", ...headers },
+        headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers },
         body: JSON.stringify({ coworkerId: coworker.id, message, history, place, ...(choice ? { ai: choice } : {}) }),
         signal: controller.signal,
       });
@@ -331,7 +357,13 @@ export function CoworkerPanel({ coworkerId, onClose, onStateChange, getPlace, on
       closeAfter = true;
     }
 
-    setNotice(answer.notice ?? null);
+    if (answer.freeTriesLeft !== undefined) setFreeLeft(answer.freeTriesLeft);
+    // Out of free replies: the saved line still comes, and their key goes in right here.
+    if (answer.needsKey) {
+      setAiReason(answer.notice);
+      setAiOpen(true);
+    }
+    setNotice(answer.needsKey ? null : (answer.notice ?? null));
     const replyId = newId();
     setMessages((previous) => [
       ...previous,
@@ -507,7 +539,11 @@ export function CoworkerPanel({ coworkerId, onClose, onStateChange, getPlace, on
                 title="Change which AI powers the coworkers"
                 className="-ml-1 mt-1 max-w-full cursor-pointer truncate rounded-md px-1 py-0.5 text-left text-[10px] font-semibold text-[#5c6371] transition hover:bg-[#eceef1] hover:text-[#12151c] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#12151c]"
               >
-                {ai ? `AI: your ${AI_PROVIDER_INFO[ai.provider].label} key · ${ai.model}` : "AI: the site's free AI · use your own key"}
+                {ai
+                  ? `AI: your ${AI_PROVIDER_INFO[ai.provider].label} key · ${ai.model}`
+                  : freeLeft === null
+                    ? "AI: the site's free AI · use your own key"
+                    : `AI: the site's free AI · ${freeLeft} of ${FREE_AI_REPLIES} free replies left · use your own key`}
               </button>
             </div>
           </div>
@@ -591,6 +627,23 @@ export function CoworkerPanel({ coworkerId, onClose, onStateChange, getPlace, on
             })}
           </div>
 
+          {!ai && freeLeft === 0 && (
+            <div className="flex items-center gap-3 border-t border-[#eceef1] bg-[#fbf7ec] px-4 py-2.5 text-[12px] leading-4 text-[#5f4b12]">
+              <p className="min-w-0 flex-1">{freeTriesUsedUpNotice()}</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setAiReason(undefined);
+                  setAiOpen(true);
+                }}
+                className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-[#12151c] px-2.5 py-1.5 text-[11px] font-semibold text-white transition hover:bg-black active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#12151c]"
+              >
+                <KeyRound size={12} aria-hidden="true" />
+                Add API key
+              </button>
+            </div>
+          )}
+
           {(notice || voiceError) && (
             <div className="space-y-1 border-t border-[#eceef1] bg-[#fbf7ec] px-4 py-2 text-[11px] leading-4 text-[#5f4b12]">
               {voiceError && <p role="alert">{voiceError}</p>}
@@ -652,8 +705,10 @@ export function CoworkerPanel({ coworkerId, onClose, onStateChange, getPlace, on
       )}
       {aiOpen && (
         <AiSettingsDialog
+          reason={aiReason}
           onClose={() => {
             setAiOpen(false);
+            setAiReason(undefined);
             inputRef.current?.focus();
           }}
         />

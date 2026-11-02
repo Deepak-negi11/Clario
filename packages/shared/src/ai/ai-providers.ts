@@ -18,9 +18,22 @@ export const AI_PROVIDER_INFO: Record<AiProvider, { label: string; keyUrl: strin
   openrouter: { label: "OpenRouter", keyUrl: "https://openrouter.ai/settings/keys", keyHint: "sk-or-…" },
 };
 
+/**
+ * A key as pasted, without what often comes along with it: spaces and line breaks, quotes, a
+ * "Bearer " prefix or an env line like OPENAI_API_KEY=sk-….
+ */
+export function cleanAiKey(pasted: string): string {
+  return pasted
+    .trim()
+    .replace(/^[A-Z][A-Z0-9_]*\s*[=:]\s*/, "")
+    .replace(/^Bearer\s+/i, "")
+    .replace(/^["'`]+|["'`;]+$/g, "")
+    .trim();
+}
+
 /** The provider a key belongs to, from its prefix, or null when it doesn't look like any of them. */
 export function detectAiProvider(key: string): AiProvider | null {
-  const trimmed = key.trim();
+  const trimmed = cleanAiKey(key);
   if (trimmed.startsWith("nvapi-")) return "nvidia";
   if (trimmed.startsWith("AIza")) return "google";
   if (trimmed.startsWith("sk-ant-")) return "anthropic";

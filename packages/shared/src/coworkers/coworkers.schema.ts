@@ -52,6 +52,10 @@ export type CoworkerChatResponse = {
   // What the panel does with the reply: always one of these typed actions, never text from the AI.
   action?: CoworkerAction;
   repo?: string;              // "owner/repo" when a GitHub repo was read for this answer
+  // On the site's AI key: the free AI replies left after this one (FREE_AI_REPLIES).
+  freeTriesLeft?: number;
+  // The free replies are used up: the panel asks for their own key.
+  needsKey?: true;
 };
 
 /** The response for a reply; an offer can only ever open this coworker's own mission. */
@@ -59,7 +63,7 @@ export function coworkerChatResponse(
   coworker: Coworker,
   { reply, details, action }: CoworkerReply,
   source: CoworkerChatResponse["source"],
-  extra: { notice?: string; repo?: string } = {},
+  extra: { notice?: string; repo?: string; freeTriesLeft?: number; needsKey?: boolean } = {},
 ): CoworkerChatResponse {
   const safeAction = action?.type === "open-mission" ? { type: "open-mission" as const, missionId: coworker.missionId } : action;
   return {
@@ -69,5 +73,7 @@ export function coworkerChatResponse(
     ...(extra.notice ? { notice: extra.notice } : {}),
     ...(safeAction ? { action: safeAction } : {}),
     ...(extra.repo ? { repo: extra.repo } : {}),
+    ...(extra.freeTriesLeft !== undefined ? { freeTriesLeft: extra.freeTriesLeft } : {}),
+    ...(extra.needsKey ? { needsKey: true as const } : {}),
   };
 }

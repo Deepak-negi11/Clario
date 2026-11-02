@@ -41,3 +41,4 @@ export * from "./src/coworkers/github-link";
 export * from "./src/space/project-repo";
 export * from "./src/media/youtube";
 export * from "./src/media/youtube-search";
+export * from "./src/ai/free-ai";

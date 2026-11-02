@@ -7,6 +7,8 @@ import {
   AI_PROVIDERS,
   AI_PROVIDER_INFO,
   AiKeySchema,
+  FREE_AI_REPLIES,
+  cleanAiKey,
   detectAiProvider,
   type AiModelsResponse,
   type AiProvider,
@@ -14,14 +16,18 @@ import {
 import { clearStoredAi, readStoredAi, saveStoredAi } from "../../lib/ai/ai-settings";
 
 // "Your AI key": a visitor pastes a key from NVIDIA, Google Gemini, Anthropic, OpenAI or OpenRouter.
-// We guess the provider from the key, check the key and list its models (/api/ai/models), and they
-// pick one. Saved in this browser only (lib/ai/ai-settings.ts). Shown over the coworker panel.
+// We guess the provider from the key and then check it and list its models (/api/ai/models) right
+// away, with a model already picked, so a pasted key only needs Save. An unknown key asks for the
+// provider first. Saved in this browser only (lib/ai/ai-settings.ts). Shown over the coworker panel.
 
 type KeyCheck = { state: "idle" } | { state: "checking" } | { state: "ok"; models: string[] } | { state: "error"; message: string };
 
 const MANY_MODELS = 12;
+// After the last keystroke of a recognised key, check it.
+const AUTO_CHECK_MS = 600;
 
-export function AiSettingsDialog({ onClose }: { onClose: () => void }) {
+// reason: why it opened by itself (their free replies are used up), shown at the top.
+export function AiSettingsDialog({ onClose, reason }: { onClose: () => void; reason?: string }) {
   const [stored] = useState(readStoredAi);
   const [key, setKey] = useState(stored?.key ?? "");
   const [showKey, setShowKey] = useState(false);
@@ -36,13 +42,18 @@ export function AiSettingsDialog({ onClose }: { onClose: () => void }) {
   const modelId = useId();
   const keyRef = useRef<HTMLInputElement | null>(null);
   const requestRef = useRef<AbortController | null>(null);
+  const autoCheckRef = useRef<number | null>(null);
 
   useEffect(() => {
     keyRef.current?.focus();
-    return () => requestRef.current?.abort();
+    return () => {
+      requestRef.current?.abort();
+      if (autoCheckRef.current) window.clearTimeout(autoCheckRef.current);
+    };
   }, []);
 
-  const keyValid = AiKeySchema.safeParse(key).success;
+  const cleanKey = cleanAiKey(key);
+  const keyValid = AiKeySchema.safeParse(cleanKey).success;
   const detected = detectAiProvider(key);
   const models = useMemo(() => (check.state === "ok" ? check.models : []), [check]);
   const shown = useMemo(() => {
@@ -54,12 +65,20 @@ export function AiSettingsDialog({ onClose }: { onClose: () => void }) {
   const canSave = keyValid && !!provider && !!model && models.includes(model);
 
   function changeKey(next: string) {
-    setKey(next);
+    // A recognised key pasted with extras (quotes, an env name) shows as just the key.
+    setKey(detectAiProvider(next) ? cleanAiKey(next) : next);
     setCheck({ state: "idle" });
     setModel("");
     setFilter("");
+    if (autoCheckRef.current) window.clearTimeout(autoCheckRef.current);
+    requestRef.current?.abort();
     const guess = detectAiProvider(next);
-    if (guess) setProvider(guess);
+    if (!guess) return;
+    setProvider(guess);
+    const nextKey = cleanAiKey(next);
+    if (AiKeySchema.safeParse(nextKey).success) {
+      autoCheckRef.current = window.setTimeout(() => void loadModels(nextKey, guess), AUTO_CHECK_MS);
+    }
   }
 
   function changeProvider(next: AiProvider | "") {
@@ -69,8 +88,9 @@ export function AiSettingsDialog({ onClose }: { onClose: () => void }) {
     setFilter("");
   }
 
-  async function loadModels() {
-    if (!keyValid || !provider) return;
+  // The key and provider come in as arguments when checked straight after typing, before state updates.
+  async function loadModels(keyNow = cleanKey, providerNow = provider) {
+    if (!AiKeySchema.safeParse(keyNow).success || !providerNow) return;
     requestRef.current?.abort();
     const controller = new AbortController();
     requestRef.current = controller;
@@ -78,8 +98,8 @@ export function AiSettingsDialog({ onClose }: { onClose: () => void }) {
     try {
       const response = await fetch("/api/ai/models", {
         method: "POST",
-        headers: { "content-type": "application/json", [AI_KEY_HEADER]: key.trim() },
-        body: JSON.stringify({ provider }),
+        headers: { "content-type": "application/json", [AI_KEY_HEADER]: keyNow },
+        body: JSON.stringify({ provider: providerNow }),
         signal: controller.signal,
       });
       const body = (await response.json()) as AiModelsResponse & { error?: string };
@@ -88,7 +108,7 @@ export function AiSettingsDialog({ onClose }: { onClose: () => void }) {
         return;
       }
       setCheck({ state: "ok", models: body.models });
-      setModel(body.models.includes(model) ? model : body.suggested);
+      setModel((current) => (body.models.includes(current) ? current : body.suggested));
     } catch {
       if (!controller.signal.aborted) setCheck({ state: "error", message: "Couldn't reach the server. Try again." });
     } finally {
@@ -98,7 +118,7 @@ export function AiSettingsDialog({ onClose }: { onClose: () => void }) {
 
   function save() {
     if (!canSave || !provider) return;
-    saveStoredAi({ provider, model, key: key.trim(), remember });
+    saveStoredAi({ provider, model, key: cleanKey, remember });
     onClose();
   }
 
@@ -144,9 +164,14 @@ export function AiSettingsDialog({ onClose }: { onClose: () => void }) {
           else void loadModels();
         }}
       >
+        {reason && (
+          <p role="status" className="rounded-xl bg-[#fbf7ec] px-3 py-2 text-[12px] font-semibold leading-5 text-[#5f4b12]">
+            {reason}
+          </p>
+        )}
         <p className="leading-5 text-[#3b414c]">
-          Power the coworkers with your own AI: paste a key from NVIDIA, Google Gemini, Anthropic, OpenAI or OpenRouter. Without one,
-          they use the site&apos;s free AI.
+          Power the coworkers with your own AI: paste a key from NVIDIA, Google Gemini, Anthropic, OpenAI or OpenRouter and we set it
+          up. Without one, you get {FREE_AI_REPLIES} free AI replies on the site&apos;s AI.
         </p>
 
         <div>

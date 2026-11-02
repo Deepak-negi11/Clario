@@ -22,24 +22,26 @@ enum WorkLevel {
 }
 
 model User {
-  id            String       @id @default(cuid())
-  username      String
-  password      String
-  email         String       @unique
-  role          Role         @default(User)
-  avatarId      String?
-  avatar        Avatar?      @relation(fields: [avatarId], references: [id])
+  id                String       @id @default(cuid())
+  username          String
+  password          String
+  email             String       @unique
+  role              Role         @default(User)
+  avatarId          String?
+  avatar            Avatar?      @relation(fields: [avatarId], references: [id])
   // JSON of AvatarLook (@repo/shared): base character plus skin, hair and top colours.
-  avatarLook    String?
+  avatarLook        String?
   // Null until the user picks one on the join screen.
-  level         WorkLevel?
-  spaces        Space[]
-  tasksAssigned Task[]       @relation("TasksAssigned")
-  tasksReceived Task[]       @relation("TasksReceived")
-  attendance    Attendance[]
-  notices       Notice[]
-  noticeVotes   NoticeVote[]
-  createdAt     DateTime     @default(now())
+  level             WorkLevel?
+  // Coworker AI replies used on the site's NVIDIA key (FREE_AI_REPLIES in @repo/shared).
+  freeAiRepliesUsed Int          @default(0)
+  spaces            Space[]
+  tasksAssigned     Task[]       @relation("TasksAssigned")
+  tasksReceived     Task[]       @relation("TasksReceived")
+  attendance        Attendance[]
+  notices           Notice[]
+  noticeVotes       NoticeVote[]
+  createdAt         DateTime     @default(now())
 }
 
 model Avatar {
