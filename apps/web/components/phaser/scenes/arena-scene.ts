@@ -552,6 +552,10 @@ export class ArenaScene extends Phaser.Scene{
                 builder.onPointer(tx, ty, "down");
                 return;
             }
+            // Furniture you stand next to (a printer, a server rack): use it. Tall pieces are drawn
+            // over the tile above them too.
+            const bridge = this.bridge?.current;
+            if (bridge?.usePropAt?.(tx, ty) || bridge?.usePropAt?.(tx, ty + 1)) return;
             this.path = this.findPath(this.tileX, this.tileY, tx, ty);
             if (!this.isMoving) this.followPath();
         })
@@ -671,10 +675,11 @@ export class ArenaScene extends Phaser.Scene{
                 bridge.coworkerGoTo = undefined;
             });
         }
-        // Games, TVs, bikes and drinks work on Clario HQ and on maps built in the map builder
-        // (buildCustom hands them the new items when the owner changes the map).
-        if (hq || mapTemplate === "custom-office") {
-            const items = hq ? HQ_ITEMS : rideableRack(this.customMap?.items ?? []);
+        // Use the live furniture catalog on every map, including lounge shelves drawn separately
+        // by the older templates. Builder edits refresh this catalog in buildCustom.
+        {
+            const items = hq ? HQ_ITEMS : mapTemplate === "custom-office" ? rideableRack(this.customMap?.items ?? [])
+                : templateOffice3d(mapTemplate, bridge?.map ?? null)?.items ?? (mapTemplate === "coworking-campus" ? CAMPUS_ITEMS : CLASSIC_OFFICE_ITEMS);
             // The Game Room machines and tables, and the TVs.
             this.playSpots = addPlaySpots(this, {
                 spots: hq ? hqPlaySpots() : playSpotsFor(items),
@@ -682,7 +687,7 @@ export class ArenaScene extends Phaser.Scene{
                 bridge,
                 busy: () => !!this.props?.busy() || [this.mentor, ...this.coworkers].some((npc) => npc?.near()),
             });
-            // The bikes in their rack and the vending machine's drinks.
+            // Books to read, bikes to ride and drinks from the vending machine.
             this.props = addPropsOnMap(this, { items, font: this.labelFont, bridge, selfId: () => this.registry.get("selfId") as string | null });
         }
 

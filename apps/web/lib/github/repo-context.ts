@@ -35,12 +35,12 @@ function headers(raw: boolean): HeadersInit {
 const encodePath = (path: string) => path.split("/").map(encodeURIComponent).join("/");
 
 async function get(url: string, raw: boolean, signal: AbortSignal): Promise<Response> {
-  return fetch(url, { headers: headers(raw), signal: AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]) });
+  return fetch(url, { headers: headers(raw), redirect: "error", signal: AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]) });
 }
 
 const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max)}\n… (cut)` : text);
 
-type RepoInfo = { full_name?: string; description?: string | null; language?: string | null; default_branch?: string; stargazers_count?: number };
+type RepoInfo = { private?: boolean; full_name?: string; description?: string | null; language?: string | null; default_branch?: string; stargazers_count?: number };
 type Entry = { name?: string; type?: string };
 
 /** The repo summary for the prompt, or null when GitHub couldn't be reached at all. */
@@ -59,6 +59,13 @@ export async function repoContext(target: GithubTarget, signal: AbortSignal): Pr
     }
     if (!repoResponse.ok) return null;
     const info = (await repoResponse.json()) as RepoInfo;
+    // An operator's token might have broader permissions than intended. Never pass a private
+    // repository's name, description or contents to a visitor or an external AI provider.
+    if (info.private !== false) {
+      const text = `${githubLabel(target)}: not found. It is private or doesn't exist; only public repos can be read.`;
+      remember(key, text);
+      return text;
+    }
     const ref = target.ref ?? info.default_branch ?? "";
     const refQuery = ref ? `?ref=${encodeURIComponent(ref)}` : "";
     const folder = target.kind === "tree" ? (target.path ?? "") : target.kind === "blob" ? (target.path ?? "").split("/").slice(0, -1).join("/") : "";

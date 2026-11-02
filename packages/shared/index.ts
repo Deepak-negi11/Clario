@@ -38,5 +38,6 @@ export * from "./src/coworkers/coworkers";
 export * from "./src/coworkers/coworkers.schema";
 export * from "./src/coworkers/coworker-commands";
 export * from "./src/coworkers/github-link";
+export * from "./src/space/project-repo";
 export * from "./src/media/youtube";
 export * from "./src/media/youtube-search";

@@ -1,4 +1,4 @@
-import type { AvatarLook, CustomMap, MapTemplateId, WorkLevel } from "@repo/shared";
+import type { AvatarLook, CustomMap, MapTemplateId, SpaceProject, WorkLevel } from "@repo/shared";
 import { apiRequest } from "./api-client";
 
 export type SpaceSummary = {
@@ -74,6 +74,19 @@ export function saveSpaceLayout(token: string, spaceId: string, layout: CustomMa
   });
 }
 
+// The team's public GitHub project shown in the server rack; only the owner may change it.
+export function getSpaceProject(token: string, spaceId: string) {
+  return apiRequest<SpaceProject>(`/api/v1/space/${spaceId}/project`, { token });
+}
+
+// Only the fields given change; null removes one.
+export function saveSpaceProject(token: string, spaceId: string, changes: { link?: string | null; website?: string | null }) {
+  return apiRequest<SpaceProject, typeof changes>(`/api/v1/space/${spaceId}/project`, {
+    method: "PUT",
+    token,
+    body: changes,
+  });
+}
 
 export type UserMeta = {
   userId: string;

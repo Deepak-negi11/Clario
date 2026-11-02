@@ -22,6 +22,7 @@ import {
   handleGetMessages,
 } from "./src/space/space";
 import { handleGetLayout, handleSaveLayout } from "./src/space/layout";
+import { handleGetProject, handleSaveProject } from "./src/space/project";
 import {
   makeSocketData,
   onMessage,
@@ -163,6 +164,11 @@ export function startServer(port: number) {
       "/api/v1/space/:spaceId/layout": {
         GET: withCors(handleGetLayout),
         PUT: withCors(handleSaveLayout),
+        OPTIONS: handleCorsPreflight,
+      },
+      "/api/v1/space/:spaceId/project": {
+        GET: withCors(handleGetProject),
+        PUT: withCors(handleSaveProject),
         OPTIONS: handleCorsPreflight,
       },
       "/api/v1/space/:spaceId/messages": {

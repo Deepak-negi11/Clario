@@ -15,6 +15,19 @@ export type SceneMapInfo = {
   floors: MinimapFloor[];
 };
 
+export type PropInteraction = {
+  kind: "shelf" | "vending" | "rack" | "book" | "can" | "bike" | "printer" | "server" | "coffee" | "cup";
+  title: string;
+  detail: string;
+  action: string;
+  ready: boolean;
+  book?: BookId;
+  page?: number;
+  // At a coffee machine: the order menu is open, and how far the brew is (0 to 1) while brewing.
+  menu?: boolean;
+  brew?: number;
+};
+
 export type SceneBridge = {
   map: SceneMapInfo | null;
   // The part of the world the camera shows, in world pixels (32 per tile).
@@ -60,6 +73,39 @@ export type SceneBridge = {
   setProp?: (prop: PlayerProp | null) => boolean;
   // The can you bought, waiting in the vending machine's tray (dropped at `at`, in ms), for the 3D view.
   vendingTray?: { drink: Drink; at: number } | null;
+  // Your coffee at a kitchen machine (props-on-map.ts), for the 3D view: brewing from `at`
+  // (performance.now() ms) for BREW_MS, then waiting to be taken. `spot` is the machine's tiles.
+  coffeeBrew?: { coffee: Coffee; spot: { x: number; y: number; w: number; h: number }; at: number } | null;
+  // Orders a coffee at the machine you stand at; false if you can't now (see props-on-map.ts).
+  orderCoffee?: (coffee: Coffee) => boolean;
+  // Context actions are published by the live map, so the same buttons work in 2D and WebGL.
+  propInteraction?: PropInteraction | null;
+  useProp?: () => boolean;
+  openPrinter?: () => void;
+  // A server rack: its units and the jobs it runs (components/game-ui/server-rack.tsx).
+  openServerRack?: () => void;
+  mapOverlays?: Set<string>;
+  returnProp?: () => boolean;
+  readBook?: (book: BookId) => boolean;
+  turnBook?: (page: number) => boolean;
+  usePropAt?: (x: number, y: number) => boolean;
+  // Front-door badge reader (components/badge-reader/badge-on-map.tsx). The scene calls badgeIn when
+  // the player walks past the reader ("walk": nothing happens if they are already in) or presses E
+  // at it ("key"). badgeLight is for the reader's LED: `in` while you are badged in, and `flashAt`
+  // (Date.now() ms) when it last beeped: show it bright green for about 1.2 s after that.
+  badgeIn?: (how: "walk" | "key") => void;
+  // Badges you out (E at the reader while you are in, or walking out of the building).
+  badgeOut?: () => void;
+  badgeLight?: { in: boolean; flashAt: number };
+  // Notice board (components/notice-board/notice-board-on-map.tsx): the scene calls openNoticeBoard
+  // when the player presses E at the board. noticeUnread: posts by others they haven't seen (a red pin).
+  openNoticeBoard?: () => void;
+  noticeUnread?: number;
+  // A badge reader the 2D map stood by the spawn because the map has none (office-objects.ts), so
+  // the 3D view shows it there too; null when the map has its own.
+  badgeReaderTile?: { x: number; y: number } | null;
+  // The tile the board stands on (phaser/scenes/notice-board-object.ts), for the 3D view to use too.
+  noticeBoardSpot?: { x: number; y: number } | null;
 };
 
 // The tiles an edit would cover, whether it fits, and the piece being placed (if any).

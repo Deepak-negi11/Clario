@@ -45,6 +45,11 @@ import { SpaceSidebar, type SidePanel } from "../../../components/game-ui/space-
 import { PeoplePanel, type PanelPerson } from "../../../components/game-ui/people-panel";
 import { TasksPanel, countNewTasks, useSpaceTasks } from "../../../components/game-ui/tasks-panel";
 import { MapControls } from "../../../components/game-ui/map-controls";
+import { OfficePrinter } from "../../../components/game-ui/office-printer";
+import { ServerRackPanel } from "../../../components/game-ui/server-rack";
+import { microApproach, microSpotsFor } from "../../../lib/maps/micro-spots";
+import { HQ_ITEMS } from "../../../lib/maps/clario-hq";
+import { MapInteractions } from "../../../components/game-ui/map-interactions";
 import { ErrandCelebrationCard, ErrandChoice, ErrandHud, ErrandsPanel } from "../../../components/game-ui/errands";
 import { MentorOnMap } from "../../../components/practice-session/mentor-on-map";
 import { CoworkerOnMap } from "../../../components/coworkers/coworker-on-map";
@@ -512,6 +517,9 @@ function LiveSpace({
           <span className="text-xs text-white/60">· {peopleInRoom} here</span>
         </div>
       )}
+      <MapInteractions bridgeRef={bridgeRef} />
+      <OfficePrinter bridgeRef={bridgeRef} />
+      <ServerRackPanel bridgeRef={bridgeRef} spaceId={spaceId} />
       {selectedPlayerId && (
         <PlayerAgentCard
           activity={agentActivities[selectedPlayerId]}

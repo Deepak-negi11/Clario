@@ -82,6 +82,10 @@ model Space {
   mapTemplate String          @default("classic-office")
   // CustomMap (@repo/shared) for "custom-office" spaces; null for every other template.
   layout      Json?
+  // "owner/repo" of the team's public GitHub project, shown in the server rack panel; set by the owner.
+  githubRepo  String?
+  // The team's website (https), checked for the rack's health check; without it, the repo's own.
+  websiteUrl  String?
   elements    spaceElements[]
   tasks       Task[]
   attendance  Attendance[]
