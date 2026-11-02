@@ -25,6 +25,10 @@ import { coworkerPlaces, type CoworkerPlaces } from "../../../lib/companions/cow
 import { addClaudeNpcs, type ClaudeNpcs } from "./claude-npcs";
 import { addPlaySpots, type PlaySpots } from "./play-spots";
 import { addPropsOnMap, rideableRack, RIDE_STEP_MS, type Holder, type PropsOnMap } from "./props-on-map";
+import { addNoticeBoard, type NoticeBoardObject } from "./notice-board-object";
+import { chooseNoticeBoardSpot, noticeBoardItem, usableItemTiles } from "../../../lib/maps/notice-board-spot";
+import { addBadgeReaders, type BadgeReaders } from "./badge-reader-object";
+import { badgeReadersFor, outsideByWalls, readerSpot } from "../../../lib/maps/badge-reader-spot";
 import { isTypingIn } from "./talk-npc";
 import { addErrandMarker } from "./errand-marker";
 import { makeSeatingTextures, preloadSeatingArt } from "./seating-art";
@@ -120,6 +124,10 @@ export class ArenaScene extends Phaser.Scene{
     private claudes?: ClaudeNpcs;
     private playSpots?: PlaySpots;
     private props?: PropsOnMap;
+    private noticeBoard?: NoticeBoardObject;
+    private badgeReaders?: BadgeReaders;
+    // Whether a tile is outside the building (set with the badge readers): walking out badges you out.
+    private outsideTile: (x: number, y: number) => boolean = () => false;
     // The way each other person last walked, so their bike faces it.
     private otherFacing: Record<string, "down" | "up" | "left" | "right"> = {};
 
@@ -687,7 +695,7 @@ export class ArenaScene extends Phaser.Scene{
         this.input.keyboard?.on("keydown-E", (event: KeyboardEvent) => {
             if (ignored(event)) return;
             const npc = [this.mentor, ...this.coworkers].find((each) => each?.near());
-            const used = !!this.props?.getOff() || (npc ? (npc.talk(), true) : false) || !!this.playSpots?.use() || !!this.props?.use();
+            const used = !!this.props?.useHeld() || (npc ? (npc.talk(), true) : false) || !!this.playSpots?.use() || !!this.badgeReaders?.use() || !!this.noticeBoard?.use() || !!this.props?.use();
             // Otherwise the "e" would land in the panel or overlay that just opened.
             if (used) event.preventDefault();
         });
@@ -729,6 +737,76 @@ export class ArenaScene extends Phaser.Scene{
             unblock: (x, y) => this.blocked.delete(x + "," + y),
             texture: (look) => this.lookTexture(look),
             busy: () => !!this.props?.busy(),
+        });
+        this.placeBadgeReaders();
+        this.placeNoticeBoard();
+    }
+
+    // The front-door badge readers: the map's own (Clario HQ's by its main door), or on a map with
+    // none, one beside where people arrive (lib/maps/badge-reader-spot.ts). Placed again whenever a
+    // built map is redrawn, before the notice board picks its spot.
+    private placeBadgeReaders() {
+        this.badgeReaders ??= addBadgeReaders(this, {
+            font: this.labelFont,
+            bridge: this.bridge?.current,
+            block: (x, y) => this.blocked.add(x + "," + y),
+            unblock: (x, y) => this.blocked.delete(x + "," + y),
+            isOutside: (x, y) => this.outsideTile(x, y),
+        });
+        // The last map's extra reader goes first, so its tile is free to choose again.
+        this.badgeReaders.setItems([], null);
+        const items = isClarioHq(this.mapTemplateId) ? HQ_ITEMS : this.customMap?.items ?? [];
+        const spawn = this.customMap?.spawn ?? getMapTemplate(this.mapTemplateId).spawn;
+        // Outside Clario HQ's walls, on a built map's grass, or (the other templates) outside their walls.
+        const cols = this.maxTileX + 1, rows = this.maxTileY + 1;
+        const byWalls = outsideByWalls(cols, rows, (x, y) => this.wallCells.has(x + "," + y));
+        const map = this.customMap;
+        this.outsideTile = isClarioHq(this.mapTemplateId)
+            ? (x, y) => x < 2 || y < 2 || x > HQ_COLS - 4 || y > 32
+            : map ? (x, y) => !floorAt(map, x, y) : byWalls;
+        // A map with no reader of its own gets one just inside its way in (lib/maps/badge-reader-spot.ts).
+        const extra = badgeReadersFor(items).length ? null : readerSpot(spawn, {
+            cols, rows, isOutside: this.outsideTile,
+            isFree: (x, y) => this.isFreeTile(x, y) && (x !== this.tileX || y !== this.tileY),
+        });
+        this.badgeReaders.setItems(items, extra);
+    }
+
+    // The notice board on every map: the map's own, or else one near where people arrive, clear
+    // of the coworkers and Maya (lib/maps/notice-board-spot.ts). Placed again whenever a built map
+    // is redrawn.
+    private placeNoticeBoard() {
+        this.noticeBoard?.destroy();
+        this.noticeBoard = undefined;
+        const id = this.mapTemplateId;
+        // The map's furniture, as the props use it (arena-scene's create).
+        const items = isClarioHq(id) ? HQ_ITEMS : id === "custom-office" ? this.customMap?.items ?? []
+            : templateOffice3d(id, this.bridge?.current?.map ?? null)?.items ?? (id === "coworking-campus" ? CAMPUS_ITEMS : CLASSIC_OFFICE_ITEMS);
+        const own = noticeBoardItem(items);
+        const avoid = [{ x: this.tileX, y: this.tileY }, ...this.coworkers.map((npc) => npc.tile())];
+        if (isClarioHq(this.mapTemplateId)) avoid.push(HQ_MENTOR);
+        const tile = own ? null : chooseNoticeBoardSpot({
+            spawn: this.customMap?.spawn ?? getMapTemplate(this.mapTemplateId).spawn,
+            cols: this.maxTileX + 1,
+            rows: this.maxTileY + 1,
+            isFree: (x, y) => this.isFreeTile(x, y),
+            isWall: (x, y) => this.wallCells.has(x + "," + y),
+            avoid,
+            rooms: this.mapRooms(),
+            // The map's usable furniture, and the reader stood by the spawn on maps without one.
+            keepClear: [...usableItemTiles(items), ...(this.bridge?.current?.badgeReaderTile ? [this.bridge.current.badgeReaderTile] : [])],
+            indoors: (x, y) => this.minimapFloors.some((floor) => x >= floor.x && y >= floor.y && x < floor.x + floor.w && y < floor.y + floor.h),
+        });
+        const board = own ?? (tile ? { ...tile, w: 1, h: 1 } : null);
+        if (!board) return;
+        this.noticeBoard = addNoticeBoard(this, {
+            board,
+            drawn: !!own,
+            font: this.labelFont,
+            bridge: this.bridge?.current,
+            block: (x, y) => this.blocked.add(x + "," + y),
+            unblock: (x, y) => this.blocked.delete(x + "," + y),
+            player: () => ({ x: this.tileX, y: this.tileY }),
         });
     }
 
@@ -1014,6 +1092,7 @@ export class ArenaScene extends Phaser.Scene{
     update() {
         this.updateCurrentRoom();
         this.mentor?.update(this.tileX, this.tileY);
+        this.badgeReaders?.update({ x: this.tileX, y: this.tileY });
         for (const coworker of this.coworkers) coworker.update(this.tileX, this.tileY);
         this.claudes?.update(this.tileX, this.tileY);
         this.playSpots?.update(this.tileX, this.tileY);

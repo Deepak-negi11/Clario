@@ -22,21 +22,24 @@ enum WorkLevel {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  username  String
-  password  String
-  email     String   @unique
-  role      Role     @default(User)
-  avatarId  String?
-  avatar    Avatar?  @relation(fields: [avatarId], references: [id])
+  id            String       @id @default(cuid())
+  username      String
+  password      String
+  email         String       @unique
+  role          Role         @default(User)
+  avatarId      String?
+  avatar        Avatar?      @relation(fields: [avatarId], references: [id])
   // JSON of AvatarLook (@repo/shared): base character plus skin, hair and top colours.
-  avatarLook String?
+  avatarLook    String?
   // Null until the user picks one on the join screen.
-  level     WorkLevel?
-  spaces    Space[]
-  tasksAssigned Task[] @relation("TasksAssigned")
-  tasksReceived Task[] @relation("TasksReceived")
-  createdAt DateTime @default(now())
+  level         WorkLevel?
+  spaces        Space[]
+  tasksAssigned Task[]       @relation("TasksAssigned")
+  tasksReceived Task[]       @relation("TasksReceived")
+  attendance    Attendance[]
+  notices       Notice[]
+  noticeVotes   NoticeVote[]
+  createdAt     DateTime     @default(now())
 }
 
 model Avatar {
@@ -67,13 +70,13 @@ model Map {
 }
 
 model Space {
-  id        String          @id @default(cuid())
-  name      String
-  width     Int
-  height    Int
-  thumbnail String?
-  creatorId String
-  creator   User            @relation(fields: [creatorId], references: [id])
+  id          String          @id @default(cuid())
+  name        String
+  width       Int
+  height      Int
+  thumbnail   String?
+  creatorId   String
+  creator     User            @relation(fields: [creatorId], references: [id])
   mapId       String?
   map         Map?            @relation(fields: [mapId], references: [id])
   mapTemplate String          @default("classic-office")
@@ -81,7 +84,9 @@ model Space {
   layout      Json?
   elements    spaceElements[]
   tasks       Task[]
-  createdAt DateTime        @default(now())
+  attendance  Attendance[]
+  notices     Notice[]
+  createdAt   DateTime        @default(now())
 }
 
 model spaceElements {
@@ -103,7 +108,6 @@ model mapElements {
   x         Int?
   y         Int?
 }
-
 
 enum ChatScope {
   General
@@ -145,4 +149,58 @@ model Task {
 
   @@index([spaceId, assigneeId])
   @@index([spaceId, assignerId])
+}
+
+// One visit through the front-door badge reader: when someone badged in, and when they badged
+// out or left the space (null while they are in). Nothing else about them is kept.
+model Attendance {
+  id      String    @id @default(cuid())
+  spaceId String
+  space   Space     @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  userId  String
+  user    User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  inAt    DateTime  @default(now())
+  outAt   DateTime?
+
+  @@index([spaceId, inAt])
+  @@index([spaceId, userId, outAt])
+}
+
+enum NoticeKind {
+  Announcement
+  Poll
+}
+
+// A post on a space's notice board: an announcement, or a poll with 2 to 5 options.
+model Notice {
+  id        String       @id @default(cuid())
+  spaceId   String
+  space     Space        @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User         @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  kind      NoticeKind
+  title     String
+  body      String       @default("")
+  pinned    Boolean      @default(false)
+  // Polls only; empty for announcements.
+  options   String[]
+  closesAt  DateTime?
+  createdAt DateTime     @default(now())
+  editedAt  DateTime?
+  votes     NoticeVote[]
+
+  @@index([spaceId, pinned, createdAt])
+}
+
+// One person's vote in a poll (the option's index). Voting again changes it.
+model NoticeVote {
+  noticeId  String
+  notice    Notice   @relation(fields: [noticeId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  option    Int
+  createdAt DateTime @default(now())
+
+  @@id([noticeId, userId])
+  @@index([userId])
 }

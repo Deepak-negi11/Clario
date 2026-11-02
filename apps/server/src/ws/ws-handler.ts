@@ -470,6 +470,9 @@ async function leaveSpace(ws: Socket, spaceId: string, userId: string) {
 
   forgetDirectChats(spaceId, userId);
   forgetPlayer(spaceId, userId);
+  // Closing the tab badges them out (badge-handler.ts), unless they are back within 30 seconds.
+  badgeOutOnLeave(spaceId, userId);
+  forgetOfficeBudget(userId);
   await removeUser(spaceId, userId);
   await clearCurrentSpace(userId);
   await clearAgentActivity(spaceId, userId);

@@ -746,6 +746,18 @@ export function Office3D({
       raycaster.setFromCamera(pointer, camera);
       const hit = raycaster.intersectObjects(scene.children, true).find(({ object }) => !(object instanceof THREE.Sprite) && object !== marker);
       if (!hit) return;
+      // The notice board opens from anywhere (notice-board-3d.ts).
+      if (isNoticeBoard(hit.object)) {
+        bridgeRef?.current?.openNoticeBoard?.();
+        return;
+      }
+      // A badge reader badges you in, or out when you are in (badge-reader-3d.ts).
+      if (isBadgeReader(hit.object)) {
+        const bridge = bridgeRef?.current;
+        if (bridge?.badgeLight?.in) bridge.badgeOut?.();
+        else bridge?.badgeIn?.("key");
+        return;
+      }
       let node: THREE.Object3D | null = hit.object;
       while (node && !node.userData.talker) node = node.parent;
       const talker = node?.userData.talker as (typeof talkers)[number] | undefined;

@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   customRoomAt, DM_TEXT_MAX_CHARS, getChatRoomAtPosition, ServerMessage,
   type AvatarLook, type CustomMap, type MapTemplateId, type PlayClientMessage, type PlayerProp, type PlayServerMessage,
+  type BadgeBroadcast, type BadgeMessage, type NoticeBroadcast, type NoticeMessageInput,
+  type OfficeClientMessage, type OfficeServerMessage,
 } from "@repo/shared";
 import { getAuthToken } from "../lib/auth-token";
 import { getSpaceMessages, type ChatScope } from "../lib/space-api";

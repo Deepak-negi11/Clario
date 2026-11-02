@@ -211,6 +211,8 @@ function LiveSpace({
     sendProp,
   } = useSpaceSocket(spaceId, mapTemplate, customMap);
   const spaceTasks = useSpaceTasks(spaceId, tasksChangedAt);
+  // The front-door badge reader and the notice board, both live over the space socket.
+  const office = useBadgeAndNotices({ spaceId, status, selfId, send: sendOffice, subscribe: subscribeOffice });
 
   const othersRef = useRef(others);
   othersRef.current = others;
@@ -597,6 +599,15 @@ function LiveSpace({
         <PeoplePanel
           people={people}
           mapTemplate={mapTemplate}
+          attendance={{
+            latest: office.latest,
+            arrivals: office.arrivals,
+            today: office.today,
+            selfIn: office.selfIn,
+            // Through the reader, so it beeps and lights up as if you walked up to it.
+            onBadgeIn: () => (bridgeRef.current.badgeIn ? bridgeRef.current.badgeIn("key") : office.badgeIn("key")),
+            onBadgeOut: office.badgeOut,
+          }}
           onWalkTo={(position) => bridgeRef.current.walkTo?.(position.x, position.y)}
           onClose={() => setPanel(null)}
         />
