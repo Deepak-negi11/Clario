@@ -31,3 +31,7 @@ with the original offset and scale retained when the generated atlas is unavaila
 ## WebGL furniture
 
 The matching 3D meshes, map coverage and validation are described in [3d-review.md](3d-review.md).
+
+The follow-up map, character, arcade and security review is in [review-2026-11-02.md](review-2026-11-02.md).
+
+Library, drinks and cycling interactions are described in [micro-interactions.md](micro-interactions.md).
