@@ -66,7 +66,7 @@ class TestSocket {
 async function signUp() {
   const email = `${crypto.randomUUID()}@test.com`;
   const password = "password123";
-  await http.post("/api/v1/signup", { username: `play-${crypto.randomUUID()}`, password, email, type: "admin" });
+  await http.post("/api/v1/signup", { username: `play-${crypto.randomUUID()}`, password, email });
   const signin = await http.post("/api/v1/signin", { email, password });
   return signin.data.token as string;
 }

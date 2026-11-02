@@ -22,7 +22,13 @@ import {
   handleGetMessages,
 } from "./src/space/space";
 import { handleGetLayout, handleSaveLayout } from "./src/space/layout";
-import { makeSocketData, onMessage, onClose } from "./src/ws/ws-handler";
+import {
+  makeSocketData,
+  onMessage,
+  onClose,
+  startPresenceRenewal,
+  stopPresenceRenewal,
+} from "./src/ws/ws-handler";
 import type { SocketData } from "./src/ws/room-manager";
 import { stopAllRoomEventSubscriptions } from "./src/ws/pubsub";
 import { handleAgentActivity } from "./src/agent/agent-activity";
@@ -85,6 +91,7 @@ function withCors(handler: RouteHandler) {
 export function startServer(port: number) {
   jwtSecret(); // Enforced for every entry point, including direct imports of startServer.
   activeServers += 1;
+  startPresenceRenewal();
   const authBudget = requestBudget(60, 60_000);
   const limitedAuth = (handler: RouteHandler) => {
     const run = withCors(handler);
@@ -214,6 +221,7 @@ export function startServer(port: number) {
       activeServers -= 1;
 
       if (activeServers === 0) {
+        stopPresenceRenewal();
         void stopAllRoomEventSubscriptions();
       }
     }

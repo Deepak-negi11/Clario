@@ -1,10 +1,12 @@
-import { describe, test, expect } from "bun:test";
+import { afterEach, describe, test, expect, setSystemTime } from "bun:test";
 import {
+  PRESENCE_LEASE_MS,
   setUserOnline,
   setUserPosition,
   getUserPosition,
   getRoomUsers,
   removeUser,
+  renewLeases,
   isUserOnline,
 } from "./presence";
 
@@ -76,5 +78,54 @@ describe("presence", () => {
   test("getRoomUsers returns empty for an empty space", async () => {
     const users = await getRoomUsers(freshSpace());
     expect(users).toEqual([]);
+  });
+});
+
+describe("presence leases", () => {
+  afterEach(() => {
+    setSystemTime();
+  });
+
+  // Moves the clock to just past the lease of anyone last renewed `fromMs`.
+  const leaseRunsOut = (fromMs: number) => setSystemTime(new Date(fromMs + PRESENCE_LEASE_MS + 1));
+
+  test("someone whose lease isn't renewed drops out", async () => {
+    const spaceId = freshSpace();
+    const userId = `u-${crypto.randomUUID()}`;
+    const start = Date.now();
+    await setUserOnline(spaceId, userId, { x: 1, y: 1 });
+
+    setSystemTime(new Date(start + PRESENCE_LEASE_MS - 1_000));
+    expect(await isUserOnline(spaceId, userId)).toBe(true);
+
+    leaseRunsOut(start);
+    expect(await isUserOnline(spaceId, userId)).toBe(false);
+    expect(await getRoomUsers(spaceId)).toEqual([]);
+  });
+
+  test("renewLeases keeps the people given and ends run-out leases, once", async () => {
+    const spaceId = freshSpace();
+    const [stays, gone] = [`stays-${crypto.randomUUID()}`, `gone-${crypto.randomUUID()}`];
+    const start = Date.now();
+    await setUserOnline(spaceId, stays, { x: 1, y: 1 });
+    await setUserOnline(spaceId, gone, { x: 2, y: 2 });
+
+    leaseRunsOut(start);
+    expect(await renewLeases(spaceId, [stays])).toEqual({ lapsed: [stays], expired: [gone] });
+    expect((await getRoomUsers(spaceId)).map((user) => user.userId)).toEqual([stays]);
+    expect(await renewLeases(spaceId, [stays])).toEqual({ lapsed: [], expired: [] });
+
+    await removeUser(spaceId, stays);
+  });
+
+  test("renewLeases says who had no lease, and gives them one", async () => {
+    const spaceId = freshSpace();
+    const userId = `u-${crypto.randomUUID()}`;
+    await setUserPosition(spaceId, userId, { x: 3, y: 4 });
+
+    expect(await renewLeases(spaceId, [userId])).toEqual({ lapsed: [userId], expired: [] });
+    expect(await getRoomUsers(spaceId)).toEqual([{ userId, x: 3, y: 4 }]);
+
+    await removeUser(spaceId, userId);
   });
 });

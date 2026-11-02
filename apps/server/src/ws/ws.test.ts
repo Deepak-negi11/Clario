@@ -120,6 +120,18 @@ describe("WebSocket", () => {
   });
 
   describe("join", () => {
+    test("a socket cannot race two joins into different spaces", async () => {
+      const first = await setupUserAndSpace(), second = await setupUserAndSpace();
+      const ws = new TestSocket(WS_URL);
+      await ws.waitForOpen();
+      ws.send({ type: "join", payload: { spaceId: first.spaceId, token: first.token } });
+      ws.send({ type: "join", payload: { spaceId: second.spaceId, token: first.token } });
+      const replies = [await ws.nextMessage(), await ws.nextMessage()];
+      expect(replies.filter((reply) => reply.type === "space-joined")).toHaveLength(1);
+      expect(replies.find((reply) => reply.type === "error")?.message).toContain("joining");
+      ws.close();
+    });
+
     test("returns the spawn point and current room users", async () => {
       const { token, spaceId } = await setupUserAndSpace();
 
@@ -340,6 +352,11 @@ describe("WebSocket", () => {
       await expect(wsB.nextMessage(300)).rejects.toThrow("timed out");
       wsB.send({ type: "prop", payload: { prop: { kind: "bike", bike: "orange" } } });
       expect((await wsA2.nextMessage()).payload?.prop).toEqual({ kind: "bike", bike: "orange" });
+
+      // A replaced tab must also lose its ability to chat or signal under the user's identity.
+      wsA.send({ type: "chat", payload: { text: "stale socket", scope: "general" } });
+      wsA.send({ type: "reaction", payload: { emoji: "👍" } });
+      await expect(wsB.nextMessage(200)).rejects.toThrow("timed out");
 
       wsA.close();
       wsA2.close();

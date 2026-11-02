@@ -17,21 +17,27 @@ import {
   addToRoom,
   broadcast,
   broadcastWhere,
+  membersOf,
   removeFromRoom,
   roomSize,
+  spacesHere,
   updatePosition,
 } from "./room-manager";
 import {
   clearAgentActivity,
   clearCurrentSpace,
   getAgentActivities,
+  getCurrentSpace,
   getRoomUsers,
+  PRESENCE_RENEW_MS,
   removeUser,
+  renewLeases,
   setCurrentSpace,
   setUserOnline,
   setUserPosition,
   getUserPosition,
 } from "./presence";
+import { oneAtATime } from "../utils/one-at-a-time";
 import {
   publishRoomEvent,
   subscribeToSpaceEvents,
@@ -65,6 +71,11 @@ export function makeSocketData(): SocketData {
   return { x: 0, y: 0 };
 }
 
+// A person's join, their leave, and letting go of them when their presence lease runs out, run
+// one at a time per space. Otherwise a reconnect's join and the old connection's close overlap,
+// and the close's leave (presence, "user-left") can land after the join: connected, but gone.
+const onePersonAtATime = oneAtATime();
+
 
 function send(ws: Socket, message: unknown) {
   ws.send(JSON.stringify(message));
@@ -94,15 +105,19 @@ export async function onMessage(ws: Socket, raw: string | Buffer) {
   if (!parsed.success) {
     return send(ws, { type: "error", message: "Invalid message" });
   }
+  const { userId, spaceId } = ws.data;
+  if (parsed.data.type !== "join" && userId && spaceId && !isCurrentSocket(spaceId, userId, ws)) return;
 
   switch (parsed.data.type) {
     case "join":
+      if (ws.data.joining) return send(ws, { type: "error", message: "Already joining a space" });
       // If the database or Redis is down, the join fails without an answer and the browser would
       // wait on "Loading your space…" forever. Closing the socket makes it retry with backoff.
-      return handleJoin(ws, parsed.data.payload).catch((error) => {
+      ws.data.joining = handleJoin(ws, parsed.data.payload).catch((error) => {
         console.error("[ws] join failed:", error);
         ws.close(1011, "Could not join the space");
-      });
+      }).finally(() => { ws.data.joining = undefined; });
+      return ws.data.joining;
     case "move": {
       // Each step is checked against the last accepted one, so a player's steps are handled one
       // at a time, in the order they arrive. Otherwise a step that arrives while the one before
@@ -161,6 +176,11 @@ async function handleJoin(ws: Socket, payload: JoinPayload) {
   const lastPos = await getUserPosition(payload.spaceId, userId);
   const isRememberedPositionValid = lastPos && isInsideMap(map, lastPos);
   const spawn = isRememberedPositionValid ? lastPos : mapSpawn(map);
+  await onePersonAtATime(`${payload.spaceId}:${userId}`, () => enterSpace(ws, payload, userId, spawn));
+}
+
+async function enterSpace(ws: Socket, payload: JoinPayload, userId: string, spawn: { x: number; y: number }) {
+  if (ws.data.closed) return;
 
   ws.data.userId = userId;
   ws.data.spaceId = payload.spaceId;
@@ -435,9 +455,16 @@ async function handleLook(ws: Socket, look: LookPayload) {
 
 
 export async function onClose(ws: Socket) {
+  ws.data.closed = true;
+  // A close while Redis/database work was pending must finish joining before removing its
+  // presence, otherwise the unfinished join could add a disconnected player back afterwards.
+  await ws.data.joining;
   const { spaceId, userId } = ws.data;
   if (!spaceId || !userId) return;
+  await onePersonAtATime(`${spaceId}:${userId}`, () => leaveSpace(ws, spaceId, userId));
+}
 
+async function leaveSpace(ws: Socket, spaceId: string, userId: string) {
   const removed = removeFromRoom(spaceId, userId, ws);
   if (!removed) return;
 
@@ -461,4 +488,64 @@ export async function onClose(ws: Socket) {
     forgetRemoteProps(spaceId);
     await unsubscribeFromSpaceEvents(spaceId);
   }
+}
+
+
+// Presence in Redis is a lease (presence.ts). Every few seconds this server renews it for the people
+// connected here, and lets go of anyone in those spaces whose lease ran out: their server went away
+// without running onClose (a crash or a `bun --watch` restart), so nobody told the others.
+export async function renewPresence() {
+  for (const spaceId of spacesHere()) {
+    // Read right before renewing, so someone whose leave already ended their lease isn't renewed.
+    const members = membersOf(spaceId);
+    const { lapsed, expired } = await renewLeases(spaceId, members.map((member) => member.userId));
+
+    // Connected here but their lease was gone or out of time, so others may have been told they
+    // left (say their old connection on another server closed after this one joined).
+    for (const member of members) {
+      if (!lapsed.includes(member.userId) || !isCurrentSocket(spaceId, member.userId, member.socket)) continue;
+      const message = { type: "user-join", payload: { userId: member.userId, x: member.x, y: member.y } } as const;
+      broadcast(spaceId, member.userId, message);
+      await publishRoomEvent(spaceId, member.userId, message);
+    }
+
+    for (const userId of expired) {
+      await onePersonAtATime(`${spaceId}:${userId}`, () => letGoOf(spaceId, userId));
+    }
+  }
+}
+
+// What onClose would have done for them, as far as it reaches past their own server.
+async function letGoOf(spaceId: string, userId: string) {
+  // Back on this server already: their join started a new lease.
+  if (isInRoom(spaceId, userId)) return;
+  setRemoteProp(spaceId, userId, null);
+  await clearAgentActivity(spaceId, userId);
+  // Unless they are in another space by now.
+  if ((await getCurrentSpace(userId)) === spaceId) await clearCurrentSpace(userId);
+
+  const message = { type: "user-left", payload: { userId } } as const;
+  broadcast(spaceId, userId, message);
+  await publishRoomEvent(spaceId, userId, message);
+}
+
+let renewal: ReturnType<typeof setInterval> | undefined;
+
+export function startPresenceRenewal() {
+  if (renewal) return;
+  let running = false;
+  renewal = setInterval(() => {
+    if (running) return;
+    running = true;
+    renewPresence()
+      .catch((error) => console.error("[presence] renewing leases failed:", error))
+      .finally(() => { running = false; });
+  }, PRESENCE_RENEW_MS);
+  // Doesn't keep the process (or a test run) alive.
+  renewal.unref?.();
+}
+
+export function stopPresenceRenewal() {
+  clearInterval(renewal);
+  renewal = undefined;
 }
