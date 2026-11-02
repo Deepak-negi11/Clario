@@ -349,6 +349,19 @@ function LiveSpace({
 
   // Errands (Clario HQ only): timed runs to rooms that end with choosing the best message.
   const errands = useErrands(selfId, currentRoom?.id ?? null, isHq);
+  const performErrand = errands.perform;
+  const lastInteraction = useRef<{ id: string | null; prop: PlayerProp | null }>({ id: null, prop: null });
+  useEffect(() => {
+    const current = selfId ? props[selfId] ?? null : null;
+    const previous = lastInteraction.current;
+    lastInteraction.current = { id: selfId, prop: current };
+    if (previous.id !== selfId) return;
+    if (current?.kind === "book" && previous.prop?.kind === "book" && current.book === previous.prop.book && current.page !== previous.prop.page) performErrand("read");
+    // A sip of a can or a coffee.
+    const sipped = (current?.kind === "can" && previous.prop?.kind === "can" && current.drink === previous.prop.drink && current.sips > previous.prop.sips)
+      || (current?.kind === "cup" && previous.prop?.kind === "cup" && current.coffee === previous.prop.coffee && current.sips > previous.prop.sips);
+    if (sipped) performErrand("sip");
+  }, [props, selfId, performErrand]);
   const errandRunning = !!errands.run && errands.run.arrivedAt === null;
   const errandRoomId = errandRunning && errands.errand && errands.run ? errands.errand.steps[errands.run.step]?.room ?? null : null;
   const errandTarget = useMemo(() => (errandRoomId ? getChatRoom(mapTemplate, errandRoomId)?.bounds ?? null : null), [errandRoomId, mapTemplate]);
@@ -616,6 +629,16 @@ function LiveSpace({
           now={errands.now}
           self={self}
           raised={show3d}
+          onNavigate={() => {
+            const bridge = bridgeRef.current, map = bridge.map;
+            if (!map || !errandTarget) return;
+            const step = errands.errand?.steps[errands.run?.step ?? 0];
+            const held = props[selfId ?? ""]?.kind;
+            const needsDrink = step?.action === "sip" && held !== "can" && held !== "cup";
+            const spot = microSpotsFor(HQ_ITEMS).find(s => needsDrink ? s.kind === "vending" : step?.action === "read" && s.kind === "shelf" && s.x >= errandTarget.x && s.x < errandTarget.x + errandTarget.width && s.y >= errandTarget.y && s.y < errandTarget.y + errandTarget.height);
+            const at = spot ? microApproach(spot, self, new Set(map.blocked), map.cols, map.rows) : { x: errandTarget.x + Math.floor(errandTarget.width / 2), y: errandTarget.y + Math.floor(errandTarget.height / 2) };
+            if (at) bridge.walkTo?.(at.x, at.y);
+          }}
           onCancel={errands.cancel}
         />
       ) : (
