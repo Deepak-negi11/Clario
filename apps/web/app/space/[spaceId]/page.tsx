@@ -38,6 +38,7 @@ import { useProximityVideo } from "../../../hooks/use-proximity-video";
 import { useLocalMedia, type LocalMediaController } from "../../../hooks/use-local-media";
 import { useSwipeRight } from "../../../hooks/use-swipe-right";
 import { useErrands } from "../../../hooks/use-errands";
+import { useProjector } from "../../../hooks/use-projector";
 import { ControlBar } from "../../../components/game-ui/control-bar";
 import { ChatPanel, type ChatChannel } from "../../../components/game-ui/chat-panel";
 import { EmailComposer } from "../../../components/game-ui/email-composer";
@@ -62,6 +63,8 @@ import { createSceneBridge } from "../../../components/phaser/scene-bridge";
 import { PixelPet } from "../../../components/game-ui/pixel-pet";
 import { AgentWorkspace } from "../../../components/game-ui/agent-workspace";
 import { MediaDock } from "../../../components/game-ui/video-tile";
+import { ProjectorView } from "../../../components/game-ui/projector-view";
+import type { ProjectorFeed } from "../../../components/space-3d/projector-3d";
 import { PrejoinScreen } from "../../../components/game-ui/prejoin-screen";
 import { getSpace, getSpaceLayout, getUsersMetadata, saveSpaceLayout } from "../../../lib/space-api";
 import { MapBuilder } from "../../../components/game-ui/map-builder";
@@ -557,6 +560,9 @@ function LiveSpace({
         names={names}
         lowered={show3d}
       />
+      {projector && (
+        <ProjectorView key={projector.userId} show={projector} in3d={show3d} onStopSharing={() => void toggleScreen()} />
+      )}
       {/* The 3D view zooms with the scroll wheel; these zoom the 2D map. */}
       {!show3d && <MapControls bridgeRef={bridgeRef} onOpen3d={can3d && !only3d ? () => setView3d(true) : undefined} />}
       <ControlBar
@@ -590,6 +596,7 @@ function LiveSpace({
           nearbyRef={nearbyRef}
           reactionsRef={reactionsRef}
           activitiesRef={activitiesRef}
+          projectorRef={projectorRef}
           onPlayerClick={(userId) => playerClickRef.current?.(userId)}
         />
       )}

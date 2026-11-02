@@ -26,6 +26,11 @@ import { coworkerPlaces } from "../../lib/companions/coworker-places";
 import { makeWorld } from "./world";
 import type { SceneBridge, SceneMapInfo } from "../phaser/scene-bridge";
 import { attachTvScreen } from "../tv/tv-screen-3d";
+import { attachProjectors, type ProjectorFeed } from "./projector-3d";
+import { attachNoticeBoard3d, isNoticeBoard } from "./notice-board-3d";
+import { attachBadgeReaders3d, isBadgeReader } from "./badge-reader-3d";
+import { badgeReadersFor } from "../../lib/maps/badge-reader-spot";
+import { microApproach, microSpotsFor } from "../../lib/maps/micro-spots";
 
 type Position = { x: number; y: number };
 
@@ -540,6 +545,7 @@ export function Office3D({
   nearbyRef,
   reactionsRef,
   activitiesRef,
+  projectorRef,
   onPlayerClick,
 }: {
   selfId: string | null;
@@ -571,6 +577,8 @@ export function Office3D({
   nearbyRef?: RefObject<Set<string>>;
   reactionsRef?: RefObject<{ id: string; userId: string; emoji: string; at: number }[]>;
   activitiesRef?: RefObject<Record<string, { state: "cooking" | "done" }>>;
+  // What the meeting-room projector shows, for the room you're in (hooks/use-projector.ts).
+  projectorRef?: RefObject<ProjectorFeed | null>;
   // Clicking someone opens their card, as on the 2D map.
   onPlayerClick?: (userId: string) => void;
 }) {
@@ -874,6 +882,11 @@ export function Office3D({
 
     // The Lounge TV plays what's on (the TV's remote, components/tv) on its screen.
     const tvScreen = attachTvScreen({ scene, camera, mount, canvas: renderer.domElement, bridgeRef });
+    const projectors = attachProjectors(scene);
+    const noticeBoard = attachNoticeBoard3d(scene, bridgeRef);
+    // Clario HQ's badge reader by its main door, or a built map's own (else the 2D map's extra one).
+    const hqReaders = badgeReadersFor(HQ_ITEMS);
+    const badgeReaders = attachBadgeReaders3d(scene, bridgeRef, () => (customMapRef.current ? badgeReadersFor(customMapRef.current.items) : hqReaders));
 
     const resize = new ResizeObserver(() => {
       const { clientWidth, clientHeight } = mount;
@@ -1257,6 +1270,9 @@ export function Office3D({
         label.material.opacity += ((covered ? 0.15 : 1) - label.material.opacity) * (1 - Math.exp(-dt * 10));
       }
       world.update(dt, camera);
+      projectors.update(projectorRef?.current ?? null);
+      noticeBoard.update(clock.getElapsed());
+      badgeReaders.update();
       renderer.render(scene, camera);
       tvScreen.render(selfRef.current);
     };
@@ -1302,6 +1318,9 @@ export function Office3D({
       renderer.domElement.removeEventListener("pointercancel", onPointerCancel);
       controls.dispose();
       tvScreen.dispose();
+      projectors.dispose();
+      noticeBoard.dispose();
+      badgeReaders.dispose();
       world.dispose();
       disposeScene(scene);
       environment.dispose();
