@@ -1,7 +1,7 @@
 import type { ClientMessage } from "@repo/shared";
 import type { Socket } from "./room-manager";
 import { broadcast, isInRoom, sendToUser } from "./room-manager";
-import { allowPlayMessage, answerPlay, arePlaying, forgetPlay, invitePlay, leavePlay, pauseTv, setTv, tvState } from "./play";
+import { allowPlayMessage, answerPlay, arePlaying, forgetPlay, invitePlay, leavePlay, pauseTv, setTv, tvStates } from "./play";
 
 // Messages for Game Room play and the Lounge TV (rules in play.ts).
 export type PlayMessage = Extract<ClientMessage, { type: "play-invite" | "play-answer" | "play-leave" | "play-data" | "tv" }>;
@@ -58,12 +58,13 @@ export function handlePlay(ws: Socket, message: PlayMessage) {
 
     case "tv": {
       const request = message.payload;
-      const now = () => ({ type: "tv", payload: { state: tvState(spaceId), at: Date.now() } }) as const;
+      // Every update carries what's on every screen in the space, so nobody keeps a stale one.
+      const now = () => ({ type: "tv", payload: { screens: tvStates(spaceId), at: Date.now() } }) as const;
       if (request.action === "sync") return send(ws, now());
       const changed =
         request.action === "pause" || request.action === "resume"
-          ? pauseTv(spaceId, userId, request.action === "pause")
-          : setTv(spaceId, userId, request.action === "play" ? { videoId: request.videoId, start: request.start, title: request.title?.trim() || undefined } : null);
+          ? pauseTv(spaceId, request.screen, userId, request.action === "pause")
+          : setTv(spaceId, request.screen, userId, request.action === "play" ? { videoId: request.videoId, start: request.start, title: request.title?.trim() || undefined } : null);
       // Too soon to change it again: just put this person back in step with everyone.
       if (!changed) return send(ws, now());
       const update = now();

@@ -1,9 +1,10 @@
 import type { YouTubeVideo } from "@repo/shared";
 
-// The Lounge TV's channel for one page: what's on, whether it's paused, and how loud it is here.
-// ArcadeOnMap owns it and keeps it in step with the space (or plays on its own without one); the
-// big TV overlay, the remote and the 3D office's TV screen all read it. It lives on the scene
-// bridge (bridge.tv) so the 3D view can reach it.
+// One TV's channel for one page: what's on, whether it's paused, and how loud it is here. Each
+// screen on the map (the Lounge TV, the Demo Stage screen...) has its own. ArcadeOnMap owns them and
+// keeps them in step with the space (or plays on its own without one); the big TV overlay, the
+// remote and the 3D office's screens all read them. The scene bridge hands them out (bridge.tv) so
+// the 3D view can reach them.
 
 export type TvChannel = {
   videoId: string;
@@ -24,6 +25,9 @@ export type TvActions = {
 };
 
 export type TvStore = TvActions & {
+  // The screen's id ("tv:x,y", lib/maps/play-spots.ts) and name ("Demo Stage TV").
+  id: string;
+  name: string;
   channel: () => TvChannel | null;
   // 0 to 100, this viewer only.
   volume: () => number;
@@ -34,6 +38,10 @@ export type TvStore = TvActions & {
   setMuted: (muted: boolean) => void;
   // True while the 3D view shows the TV on its screen: then the TV opens the remote, not the overlay.
   onScreen: boolean;
+  // Turned on with nothing playing, for this viewer: the page of suggestions its screen shows
+  // (components/tv/tv-home.ts), or null when it's off. Going off (stop) turns it off.
+  home: () => number | null;
+  setHome: (page: number | null) => void;
 };
 
 const VOLUME_KEY = "tv:volume";
@@ -47,16 +55,19 @@ function readVolume() {
   }
 }
 
-export function createTvStore(actions: TvActions): TvStore {
+export function createTvStore(actions: TvActions, screen: { id: string; name: string }): TvStore {
   let channel: TvChannel | null = null;
   let volume = readVolume();
   let muted = false;
+  let home: number | null = null;
   const listeners = new Set<() => void>();
   const notify = () => {
     for (const listener of listeners) listener();
   };
   return {
     ...actions,
+    id: screen.id,
+    name: screen.name,
     channel: () => channel,
     volume: () => volume,
     muted: () => muted,
@@ -67,7 +78,14 @@ export function createTvStore(actions: TvActions): TvStore {
       };
     },
     setChannel(next) {
+      // Something that was playing went off: the TV is off, not back on its home screen.
+      if (channel && !next) home = null;
       channel = next;
+      notify();
+    },
+    home: () => home,
+    setHome(page) {
+      home = page;
       notify();
     },
     setVolume(next) {

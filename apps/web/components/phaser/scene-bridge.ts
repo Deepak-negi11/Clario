@@ -2,7 +2,7 @@
 // The scene fills it in; the minimap and zoom buttons read and call it.
 
 import type { BookId, Coffee, CoworkerId, Dir, Drink, Fabric, ItemKind, MentorState, PlayerProp } from "@repo/shared";
-import type { SpotGame } from "../../lib/maps/play-spots";
+import type { SpotGame, TvScreenRef } from "../../lib/maps/play-spots";
 import type { TvStore } from "../tv/tv-store";
 
 export type MinimapFloor = { x: number; y: number; w: number; h: number; color: number };
@@ -58,14 +58,15 @@ export type SceneBridge = {
   // coworkerGoTo: walks a coworker to a room by name; false when this view can't.
   coworkerPlace?: () => { map: string; room: string | null; rooms: string[]; peopleOnline?: number };
   coworkerGoTo?: (id: CoworkerId, room: string) => boolean;
-  // Game Room and Lounge (components/games/arcade-on-map.tsx): the scene calls openGame when the
-  // player uses an arcade machine or the ping-pong table, openTv at the Lounge TV. The overlay
-  // turns the game keyboard off while it is open.
+  // Game Room and TVs (components/games/arcade-on-map.tsx): the scene calls openGame when the
+  // player uses an arcade machine or the ping-pong table, openTv at a TV (which one: its spot's
+  // screen). The overlay turns the game keyboard off while it is open.
   openGame?: (kind?: SpotGame) => void;
-  openTv?: () => void;
-  // The Lounge TV's channel (components/tv/tv-store.ts), set by ArcadeOnMap, so the 3D view can
-  // play it on its TV (components/tv/tv-screen-3d.ts). While it does, openTv opens the TV's remote.
-  tv?: TvStore;
+  openTv?: (screen?: TvScreenRef) => void;
+  // A screen's channel by its id (components/tv/tv-store.ts), set by ArcadeOnMap, so the 3D view
+  // can play it on that screen (components/tv/tv-screen-3d.ts). While it does, openTv opens the
+  // TV's remote.
+  tv?: (screenId: string) => TvStore;
   // Books, bikes and drinks (phaser/scenes/props-on-map.ts): everyone's current prop, yours included,
   // kept up to date by the page, and how to change yours.
   props?: Record<string, PlayerProp>;

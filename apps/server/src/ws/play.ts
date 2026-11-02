@@ -10,8 +10,10 @@ export const TABLE_SEATS = 4;
 export const INVITE_TTL_MS = 60_000;
 // Game traffic one person may send another per second (the games send about 30).
 export const PLAY_MESSAGES_PER_SECOND = 70;
-// How often one person may change what's on the TV.
+// How often one person may change what's on a TV.
 export const TV_CHANGE_EVERY_MS = 1_500;
+// TVs one space may have on at once (each screen on the map has its own channel).
+export const MAX_TVS_PER_SPACE = 12;
 
 // players[0] is the host.
 type Table = { game: PlayGame; players: string[]; invites: Map<string, number> };
@@ -20,7 +22,7 @@ type Table = { game: PlayGame; players: string[]; invites: Map<string, number> }
 export type TvNow = { videoId: string; start: number; startedAt: number; byUserId: string; pausedAt?: number; title?: string };
 
 const spaces = new Map<string, Map<string, Table>>(); // space -> host -> table
-const tvs = new Map<string, TvNow>();
+const tvs = new Map<string, Map<string, TvNow>>(); // space -> screen -> what's on
 const sent = new Map<string, { windowStart: number; count: number }>();
 const tvChangedAt = new Map<string, number>();
 
@@ -155,10 +157,19 @@ export function allowPlayMessage(fromUserId: string, toUserId: string, now = Dat
   return window.count <= PLAY_MESSAGES_PER_SECOND;
 }
 
-// The TV. position is how far into the video it is now (or where it was paused), in seconds.
-export function tvState(spaceId: string, now = Date.now()) {
-  const tv = tvs.get(spaceId);
+// A screen's TV. position is how far into the video it is now (or where it was paused), in seconds.
+export function tvState(spaceId: string, screen: string, now = Date.now()) {
+  const tv = tvs.get(spaceId)?.get(screen);
   if (!tv) return null;
+  return stateOf(tv, now);
+}
+
+// What's on every screen in the space that has something on.
+export function tvStates(spaceId: string, now = Date.now()) {
+  return Object.fromEntries([...(tvs.get(spaceId) ?? [])].map(([screen, tv]) => [screen, stateOf(tv, now)]));
+}
+
+function stateOf(tv: TvNow, now: number) {
   const until = tv.pausedAt ?? now;
   return {
     videoId: tv.videoId,
@@ -169,20 +180,28 @@ export function tvState(spaceId: string, now = Date.now()) {
   };
 }
 
-// Put a video on (or switch it off with null). False when this person changed it too recently.
-export function setTv(spaceId: string, userId: string, video: { videoId: string; start: number; title?: string } | null, now = Date.now()) {
+// Put a video on a screen (or switch it off with null). False when this person changed a TV too
+// recently, or the space already has as many TVs on as it may.
+export function setTv(spaceId: string, screen: string, userId: string, video: { videoId: string; start: number; title?: string } | null, now = Date.now()) {
   const last = tvChangedAt.get(userId);
   if (last !== undefined && now - last < TV_CHANGE_EVERY_MS) return false;
+  let screens = tvs.get(spaceId);
+  if (video && !screens?.has(screen) && (screens?.size ?? 0) >= MAX_TVS_PER_SPACE) return false;
   tvChangedAt.set(userId, now);
-  if (video) tvs.set(spaceId, { ...video, startedAt: now, byUserId: userId });
-  else tvs.delete(spaceId);
+  if (video) {
+    if (!screens) tvs.set(spaceId, (screens = new Map()));
+    screens.set(screen, { ...video, startedAt: now, byUserId: userId });
+  } else {
+    screens?.delete(screen);
+    if (screens?.size === 0) tvs.delete(spaceId);
+  }
   return true;
 }
 
-// Pause the TV for everyone, or carry on from where it was paused. False when nothing's on, it's
-// already that way, or this person changed it too recently.
-export function pauseTv(spaceId: string, userId: string, paused: boolean, now = Date.now()) {
-  const tv = tvs.get(spaceId);
+// Pause a screen's TV for everyone, or carry on from where it was paused. False when nothing's on,
+// it's already that way, or this person changed a TV too recently.
+export function pauseTv(spaceId: string, screen: string, userId: string, paused: boolean, now = Date.now()) {
+  const tv = tvs.get(spaceId)?.get(screen);
   if (!tv || (tv.pausedAt !== undefined) === paused) return false;
   const last = tvChangedAt.get(userId);
   if (last !== undefined && now - last < TV_CHANGE_EVERY_MS) return false;
@@ -196,7 +215,7 @@ export function pauseTv(spaceId: string, userId: string, paused: boolean, now = 
   return true;
 }
 
-// The last person left the space: the tables go and the TV goes off.
+// The last person left the space: the tables go and the TVs go off.
 export function forgetSpacePlay(spaceId: string) {
   spaces.delete(spaceId);
   tvs.delete(spaceId);

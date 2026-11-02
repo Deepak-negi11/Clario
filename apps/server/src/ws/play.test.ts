@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   allowPlayMessage, answerPlay, arePlaying, forgetPlay, forgetSpacePlay, INVITE_TTL_MS, invitePlay, leavePlay,
-  PLAY_MESSAGES_PER_SECOND, pauseTv, setTv, TABLE_SEATS, TV_CHANGE_EVERY_MS, tvState,
+  MAX_TVS_PER_SPACE, PLAY_MESSAGES_PER_SECOND, pauseTv, setTv, TABLE_SEATS, TV_CHANGE_EVERY_MS, tvState, tvStates,
 } from "./play";
 
 const space = () => `space-${crypto.randomUUID()}`;
@@ -101,42 +101,68 @@ describe("game room tables", () => {
   });
 });
 
-describe("lounge tv", () => {
+describe("tvs", () => {
+  const LOUNGE = "tv:31,15";
+  const STAGE = "tv:50,12";
+
   test("everyone gets the same video at the same point", () => {
     const s = space();
     const u = user();
-    expect(tvState(s)).toBeNull();
-    expect(setTv(s, u, { videoId: "arj7oStGLkU", start: 30 }, 10_000)).toBe(true);
-    expect(tvState(s, 25_000)).toEqual({ videoId: "arj7oStGLkU", position: 45, byUserId: u, paused: false });
+    expect(tvState(s, LOUNGE)).toBeNull();
+    expect(setTv(s, LOUNGE, u, { videoId: "arj7oStGLkU", start: 30 }, 10_000)).toBe(true);
+    expect(tvState(s, LOUNGE, 25_000)).toEqual({ videoId: "arj7oStGLkU", position: 45, byUserId: u, paused: false });
   });
 
   test("pausing holds the picture for everyone, and resuming carries on from there", () => {
     const s = space();
     const owner = user();
     const other = user();
-    setTv(s, owner, { videoId: "arj7oStGLkU", start: 10 }, 0);
-    expect(pauseTv(s, other, true, 5_000)).toBe(true);
-    expect(tvState(s, 60_000)).toMatchObject({ position: 15, paused: true });
-    expect(pauseTv(s, other, true, 61_000)).toBe(false); // already paused
-    expect(pauseTv(s, other, false, 62_000)).toBe(true);
-    expect(tvState(s, 72_000)).toMatchObject({ position: 25, paused: false, byUserId: owner });
-    expect(pauseTv(space(), other, true, 80_000)).toBe(false); // nothing on
+    setTv(s, LOUNGE, owner, { videoId: "arj7oStGLkU", start: 10 }, 0);
+    expect(pauseTv(s, LOUNGE, other, true, 5_000)).toBe(true);
+    expect(tvState(s, LOUNGE, 60_000)).toMatchObject({ position: 15, paused: true });
+    expect(pauseTv(s, LOUNGE, other, true, 61_000)).toBe(false); // already paused
+    expect(pauseTv(s, LOUNGE, other, false, 62_000)).toBe(true);
+    expect(tvState(s, LOUNGE, 72_000)).toMatchObject({ position: 25, paused: false, byUserId: owner });
+    expect(pauseTv(space(), LOUNGE, other, true, 80_000)).toBe(false); // nothing on
   });
 
   test("one person can't flip channels faster than the limit; off clears it", () => {
     const s = space();
     const u = user();
-    setTv(s, u, { videoId: "arj7oStGLkU", start: 0 }, 0);
-    expect(setTv(s, u, null, TV_CHANGE_EVERY_MS - 1)).toBe(false);
-    expect(tvState(s, TV_CHANGE_EVERY_MS)).not.toBeNull();
-    expect(setTv(s, u, null, TV_CHANGE_EVERY_MS)).toBe(true);
-    expect(tvState(s, TV_CHANGE_EVERY_MS)).toBeNull();
+    setTv(s, LOUNGE, u, { videoId: "arj7oStGLkU", start: 0 }, 0);
+    expect(setTv(s, LOUNGE, u, null, TV_CHANGE_EVERY_MS - 1)).toBe(false);
+    expect(tvState(s, LOUNGE, TV_CHANGE_EVERY_MS)).not.toBeNull();
+    expect(setTv(s, LOUNGE, u, null, TV_CHANGE_EVERY_MS)).toBe(true);
+    expect(tvState(s, LOUNGE, TV_CHANGE_EVERY_MS)).toBeNull();
   });
 
-  test("the TV goes off when the space empties", () => {
+  test("each screen has its own channel", () => {
     const s = space();
-    setTv(s, user(), { videoId: "arj7oStGLkU", start: 0 }, 0);
+    setTv(s, LOUNGE, user(), { videoId: "arj7oStGLkU", start: 0 }, 0);
+    setTv(s, STAGE, user(), { videoId: "aqz-KE-bpKQ", start: 60 }, 0);
+    pauseTv(s, STAGE, user(), true, 10_000);
+    expect(tvStates(s, 20_000)).toEqual({
+      [LOUNGE]: expect.objectContaining({ videoId: "arj7oStGLkU", position: 20, paused: false }),
+      [STAGE]: expect.objectContaining({ videoId: "aqz-KE-bpKQ", position: 70, paused: true }),
+    });
+    setTv(s, STAGE, user(), null, 30_000);
+    expect(Object.keys(tvStates(s, 30_000))).toEqual([LOUNGE]);
+    expect(tvStates(space())).toEqual({});
+  });
+
+  test("a space can't fill up with screens", () => {
+    const s = space();
+    for (let i = 0; i < MAX_TVS_PER_SPACE; i++) expect(setTv(s, `tv:${i},1`, user(), { videoId: "arj7oStGLkU", start: 0 }, 0)).toBe(true);
+    expect(setTv(s, "tv:99,1", user(), { videoId: "arj7oStGLkU", start: 0 }, 0)).toBe(false);
+    // A screen that's already on can still change.
+    expect(setTv(s, "tv:0,1", user(), { videoId: "aqz-KE-bpKQ", start: 0 }, 0)).toBe(true);
+  });
+
+  test("the TVs go off when the space empties", () => {
+    const s = space();
+    setTv(s, LOUNGE, user(), { videoId: "arj7oStGLkU", start: 0 }, 0);
+    setTv(s, STAGE, user(), { videoId: "arj7oStGLkU", start: 0 }, 0);
     forgetSpacePlay(s);
-    expect(tvState(s)).toBeNull();
+    expect(tvStates(s)).toEqual({});
   });
 });

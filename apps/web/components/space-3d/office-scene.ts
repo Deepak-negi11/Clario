@@ -8,6 +8,7 @@ import {
   type Dir, type Fabric, type FloorKind, type HqItem, type RugStyle, type ThinWallStyle, type WallStyle,
 } from "../../lib/maps/clario-hq";
 import { drawFloorPattern } from "../../lib/maps/floor-patterns";
+import { tvScreenId } from "../../lib/maps/play-spots";
 import { makeBeanbag } from "./beanbag";
 import { batchStaticSeating, makeSeating, seatingResources } from "./seating";
 import { makeBookcase } from "./bookcase";
@@ -485,7 +486,10 @@ function buildWalls(scene: THREE.Object3D, models: ModelSet) {
       }
       case "tv": {
         scene.add(box(decor.w * 0.95, 0.7, 0.06, standard("#2a2e38"), cx, mid, faceZ + 0.03));
-        scene.add(box(decor.w * 0.88, 0.6, 0.02, standard("#3c55a0", { emissive: "#3c55a0", emissiveIntensity: 0.6 }), cx, mid, faceZ + 0.07));
+        const panel = box(decor.w * 0.88, 0.6, 0.02, standard("#3c55a0", { emissive: "#3c55a0", emissiveIntensity: 0.6 }), cx, mid, faceZ + 0.07);
+        // Its own channel plays on the panel's face (components/tv/tv-screen-3d.ts).
+        panel.userData.tvScreen = { id: tvScreenId(Math.floor(decor.x), decor.wallY), face: "box" };
+        scene.add(panel);
         break;
       }
       case "whiteboard":
@@ -613,8 +617,8 @@ export function buildItem(item: HqItem, models: ModelSet): THREE.Object3D | null
       break;
     case "tv-console":
       add(fit(models.cabinetTelevision, 2.6, 0.48, 0.6));
-      // Tagged so the Lounge TV's video plays on its screen (components/tv/tv-screen-3d.ts).
-      add(fit(models.televisionModern, 2.1, 1.0, 0.2), 0, 0.48, -0.1).userData.tvScreen = true;
+      // Tagged so this TV's channel plays on its screen (components/tv/tv-screen-3d.ts).
+      add(fit(models.televisionModern, 2.1, 1.0, 0.2), 0, 0.48, -0.1).userData.tvScreen = { id: tvScreenId(item.x, item.y) };
       break;
     case "bookshelf":
       add(makeBookcase(item.variant === 1), 0, 0, -0.12);

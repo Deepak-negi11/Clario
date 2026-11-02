@@ -42,11 +42,18 @@ export function takeSearch(visitor: string, now = Date.now()): "ok" | "visitor" 
     visitors.set(visitor, recent);
     return "visitor";
   }
-  const day = new Date(now).toISOString().slice(0, 10);
-  if (budget.day !== day) budget = { day, used: 0 };
-  if (budget.used >= DAILY_CALLS) return "site";
-  budget.used++;
+  if (!takeSiteCall(now)) return "site";
   recent.push(now);
   visitors.set(visitor, recent);
   return "ok";
+}
+
+// One call to YouTube for the site itself (the TVs' suggestions, lib/tv/tech-suggestions.ts), if
+// today's calls aren't used up.
+export function takeSiteCall(now = Date.now()) {
+  const day = new Date(now).toISOString().slice(0, 10);
+  if (budget.day !== day) budget = { day, used: 0 };
+  if (budget.used >= DAILY_CALLS) return false;
+  budget.used++;
+  return true;
 }

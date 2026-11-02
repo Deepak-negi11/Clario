@@ -65,17 +65,26 @@ export const PlayDataBroadcast = z.object({
   payload: z.object({ fromUserId: z.string(), data: z.unknown() }),
 });
 
-// The Lounge TV: one per space, the same YouTube video for everyone. "sync" asks for what's on;
-// "pause" and "resume" pause it for everyone (the TV's remote).
+// The TVs: each screen on the map (the Lounge TV, the Demo Stage screen...) has its own channel,
+// the same YouTube video for everyone in the space. A screen is named by its tile, "tv:x,y"
+// (tvScreenId in apps/web/lib/maps/play-spots.ts). "sync" asks for what's on every screen;
+// "pause" and "resume" pause one for everyone (the TV's remote).
 const YouTubeVideoId = z.string().regex(/^[A-Za-z0-9_-]{11}$/);
+export const TvScreenId = z.string().regex(/^tv:\d{1,3},\d{1,3}$/);
 
 export const TvMessage = z.object({
   type: z.literal("tv"),
   payload: z.discriminatedUnion("action", [
-    z.object({ action: z.literal("play"), videoId: YouTubeVideoId, start: z.number().int().min(0).max(86_400).default(0), title: z.string().max(200).optional() }),
-    z.object({ action: z.literal("stop") }),
-    z.object({ action: z.literal("pause") }),
-    z.object({ action: z.literal("resume") }),
+    z.object({
+      action: z.literal("play"),
+      screen: TvScreenId,
+      videoId: YouTubeVideoId,
+      start: z.number().int().min(0).max(86_400).default(0),
+      title: z.string().max(200).optional(),
+    }),
+    z.object({ action: z.literal("stop"), screen: TvScreenId }),
+    z.object({ action: z.literal("pause"), screen: TvScreenId }),
+    z.object({ action: z.literal("resume"), screen: TvScreenId }),
     z.object({ action: z.literal("sync") }),
   ]),
 });
@@ -89,9 +98,10 @@ export const TvState = z.object({
   title: z.string().max(200).optional(),
 });
 
+// What's on every screen that has something on; a screen that isn't listed is off.
 export const TvBroadcast = z.object({
   type: z.literal("tv"),
-  payload: z.object({ state: TvState.nullable(), at: z.number() }),
+  payload: z.object({ screens: z.record(TvScreenId, TvState), at: z.number() }),
 });
 
 export const PlayClientMessage = z.discriminatedUnion("type", [

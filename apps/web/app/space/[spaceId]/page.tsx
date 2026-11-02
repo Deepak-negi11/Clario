@@ -613,7 +613,7 @@ function LiveSpace({
           looksRef={looksRef}
           onUpdateLook={handleUpdateLook}
           onTalk={(id) => (id === "maya" ? bridgeRef.current.openMentor?.() : bridgeRef.current.openCoworker?.(id))}
-          onPlay={(action) => (action.kind === "tv" ? bridgeRef.current.openTv?.() : bridgeRef.current.openGame?.(action.game))}
+          onPlay={(action) => (action.kind === "tv" ? bridgeRef.current.openTv?.(action.screen) : bridgeRef.current.openGame?.(action.game))}
           bridgeRef={bridgeRef}
           nearbyRef={nearbyRef}
           reactionsRef={reactionsRef}

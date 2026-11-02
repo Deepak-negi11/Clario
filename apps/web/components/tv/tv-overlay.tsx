@@ -5,13 +5,16 @@ import { ExternalLink, Pause, Play, Power, Search, UsersRound, X } from "lucide-
 import { parseYouTubeUrl, youTubeWatchUrl } from "@repo/shared";
 import { OverlayDialog } from "../games/overlay-dialog";
 import { TV_SUGGESTIONS } from "./tv-channels";
+import { drawTvHome, loadSuggestions, type SuggestionsPage } from "./tv-home";
 import { useTvPlayer } from "./tv-player";
 import { TvSearchResults, useTvSearch } from "./tv-search";
 import { positionNow, type TvStore } from "./tv-store";
 
-// The Lounge TV, big: search YouTube, paste a link, or pick a suggestion, and it plays in YouTube's
-// own embedded player from youtube-nocookie.com. It's an HTML overlay because a cross-origin iframe
-// can't be painted into the Phaser scene (the 3D office shows it on its TV instead, with a remote).
+// A TV, big (the Lounge TV, the Demo Stage screen...): search YouTube, paste a link, or pick a
+// suggestion, and it plays in YouTube's own embedded player from youtube-nocookie.com. With nothing
+// playing, the screen shows the TV's home screen of tech videos to pick from (tv-home.ts). It's an
+// HTML overlay because a cross-origin iframe can't be painted into the Phaser scene (the 3D office
+// shows it on its TV instead, with a remote).
 // Nothing here touches the player: its ads, controls and branding stay as YouTube serves them.
 //
 // `shared`: what one person puts on, everyone in the space sees, from the same point in the video.
@@ -23,7 +26,8 @@ export function useTvStore(store: TvStore) {
   const channel = useSyncExternalStore(store.subscribe, store.channel, () => null);
   const volume = useSyncExternalStore(store.subscribe, store.volume, () => 70);
   const muted = useSyncExternalStore(store.subscribe, store.muted, () => false);
-  return { channel, volume, muted };
+  const home = useSyncExternalStore(store.subscribe, store.home, () => null);
+  return { channel, volume, muted, home };
 }
 
 export function TvOverlay({ store, shared = false, onDismiss, banner }: { store: TvStore; shared?: boolean; onDismiss: () => void; banner?: ReactNode }) {
@@ -33,7 +37,7 @@ export function TvOverlay({ store, shared = false, onDismiss, banner }: { store:
   const inputRef = useRef<HTMLInputElement>(null);
   const screenRef = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState("");
-  const { channel, volume, muted } = useTvStore(store);
+  const { channel, volume, muted, home } = useTvStore(store);
   const { searchOn, search, error, setError, submit, clear } = useTvSearch();
   useTvPlayer(screenRef, channel, muted ? 0 : volume);
   const suggestion = channel ? TV_SUGGESTIONS.find((item) => item.id === channel.videoId) : undefined;
@@ -56,7 +60,7 @@ export function TvOverlay({ store, shared = false, onDismiss, banner }: { store:
         {banner}
         <header className="mb-3 flex items-center justify-between gap-3">
           <h2 id={titleId} className={`${pixelFont} text-lg`}>
-            Lounge TV
+            {store.name}
           </h2>
           <button
             type="button"
@@ -77,7 +81,7 @@ export function TvOverlay({ store, shared = false, onDismiss, banner }: { store:
             >
               <div className="relative aspect-video overflow-hidden rounded-[6px] bg-black">
                 <div ref={screenRef} className="absolute inset-0" />
-                {!channel && <TvTestCard note={searchOn ? "Search, paste a link or pick a video." : undefined} />}
+                {!channel && <TvHomeScreen key={home ?? 0} store={store} page={home ?? 0} />}
                 {channel?.paused && (
                   <span className="pointer-events-none absolute left-3 top-3 rounded-md bg-black/70 px-2 py-0.5 text-[12px] font-semibold text-white">{shared ? "Paused for everyone" : "Paused"}</span>
                 )}
@@ -209,38 +213,54 @@ export function TvOverlay({ store, shared = false, onDismiss, banner }: { store:
   );
 }
 
-// SMPTE colour bars, the test card a real set shows with no signal: seven 75% bars, the reversed
-// strip under them, and the bottom row (-I, white, +Q, black).
-const BARS = ["#c0c0c0", "#c0c000", "#00c0c0", "#00c000", "#c000c0", "#c00000", "#0000c0"];
-const STRIP = ["#0000c0", "#131313", "#c000c0", "#131313", "#00c0c0", "#131313", "#c0c0c0"];
+// The home screen on the big TV: drawn at the 3D screens' size and scaled to fit, its tiles real
+// buttons. Keyed by page, so each page starts loading.
+const HOME_WIDTH = 1280;
+const HOME_HEIGHT = 720;
 
-export function TvTestCard({ label = "No signal", note = "Paste a YouTube link or pick a video." }: { label?: string; note?: string }) {
+function TvHomeScreen({ store, page }: { store: TvStore; page: number }) {
+  const frameRef = useRef<HTMLDivElement>(null);
+  const homeRef = useRef<HTMLDivElement>(null);
+  const [state, setState] = useState<SuggestionsPage | "loading" | "error">("loading");
+
+  useEffect(() => {
+    let current = true;
+    loadSuggestions(page).then(
+      (loaded) => current && setState(loaded),
+      () => current && setState("error"),
+    );
+    return () => {
+      current = false;
+    };
+  }, [page]);
+
+  useEffect(() => {
+    const home = homeRef.current;
+    if (!home) return;
+    drawTvHome(home, {
+      width: HOME_WIDTH,
+      height: HOME_HEIGHT,
+      state,
+      onPick: (action) => (action.kind === "play" ? store.play({ id: action.video.id, title: action.video.title }) : store.setHome(page + 1)),
+    });
+  }, [state, store, page]);
+
+  useEffect(() => {
+    const frame = frameRef.current;
+    const home = homeRef.current;
+    if (!frame || !home) return;
+    const fit = () => {
+      home.style.transform = `scale(${frame.clientWidth / HOME_WIDTH})`;
+    };
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(frame);
+    return () => observer.disconnect();
+  }, []);
+
   return (
-    <div className="absolute inset-0">
-      <div className="grid h-[67%] grid-cols-7">
-        {BARS.map((color) => (
-          <div key={color} style={{ background: color }} />
-        ))}
-      </div>
-      <div className="grid h-[8%] grid-cols-7">
-        {STRIP.map((color, index) => (
-          <div key={index} style={{ background: color }} />
-        ))}
-      </div>
-      <div className="grid h-[25%] grid-cols-[5fr_5fr_5fr_13fr]">
-        <div className="bg-[#00214c]" />
-        <div className="bg-white" />
-        <div className="bg-[#32006a]" />
-        <div className="bg-[#131313]" />
-      </div>
-      {label && (
-        <div className="absolute inset-0 grid place-items-center p-3">
-          <div className="rounded-lg bg-[#111214]/85 px-4 py-2 text-center">
-            <p className={`${pixelFont} text-xl text-white sm:text-2xl`}>{label}</p>
-            {note && <p className="mt-0.5 text-[12px] text-white/80">{note}</p>}
-          </div>
-        </div>
-      )}
+    <div ref={frameRef} className="absolute inset-0" aria-label="Suggested tech videos" role="group">
+      <div ref={homeRef} style={{ width: HOME_WIDTH, height: HOME_HEIGHT, transformOrigin: "0 0" }} />
     </div>
   );
 }

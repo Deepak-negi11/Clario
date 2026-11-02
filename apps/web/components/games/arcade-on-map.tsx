@@ -7,6 +7,7 @@ import type { SceneBridge } from "../phaser/scene-bridge";
 import { TvOverlay } from "../tv/tv-overlay";
 import { TvRemote } from "../tv/tv-remote";
 import { createTvStore, type TvStore } from "../tv/tv-store";
+import type { TvScreenRef } from "../../lib/maps/play-spots";
 import { getArcadeGame, isArcadeGameKind, type ArcadeGameKind } from "./arcade-games";
 import { ArcadeOverlay, type JoinedGame } from "./arcade-overlay";
 import type { PlayLink } from "./play-link";
@@ -17,58 +18,84 @@ import { TetrisOverlay } from "./tetris-overlay";
 type Open =
   | { kind: "game"; game: ArcadeGameKind; joined?: JoinedGame; joinedAt?: number }
   | { kind: "tetris"; joined?: { hostId: string; hostName: string }; joinedAt?: number }
-  | { kind: "tv" }
+  | { kind: "tv"; screen: TvScreenRef }
   | null;
 type Invite = { fromUserId: string; game: ArcadeGameKind | "tetris"; at: number };
 type TvPayload = Extract<PlayClientMessage, { type: "tv" }>["payload"];
 type TvNow = { videoId: string; position: number; byUserId: string; receivedAt: number; paused: boolean; title?: string };
+type TvChannels = Record<string, TvNow>; // screen id -> what's on it
+
+// A TV opened without saying which (nothing does that now): the first one on Clario HQ's list.
+const SOME_TV: TvScreenRef = { id: "tv:31,15", name: "Lounge TV" };
 
 const INVITE_SHOWN_MS = 60_000;
 const focusRing = "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#12151c]";
 
-// Opens the Game Room when the player uses an arcade machine or the ping-pong table, and the TV in
-// the Lounge. The game keyboard is off while either is open. With `link` (the space's socket),
-// people can invite each other to play, and the TV is shared by everyone in the space.
-// The TV's channel lives in a store on the bridge (bridge.tv): on the 2D map the TV opens big; in
-// the 3D office, where the video plays on the TV itself, it opens the TV's remote instead.
+// Opens the Game Room when the player uses an arcade machine or the ping-pong table, and a TV when
+// they use one (the Lounge TV, the Demo Stage screen...). The game keyboard is off while either is
+// open. With `link` (the space's socket), people can invite each other to play, and each TV's
+// channel is shared by everyone in the space.
+// Each TV's channel lives in its own store, which the bridge hands out (bridge.tv): on the 2D map a
+// TV opens big; in the 3D office, where the video plays on the screen itself, it opens the remote.
 export function ArcadeOnMap({ bridgeRef, link }: { bridgeRef: RefObject<SceneBridge>; link?: PlayLink }) {
   const [open, setOpen] = useState<Open>(null);
-  const [remote, setRemote] = useState(false);
+  const [remote, setRemote] = useState<TvScreenRef | null>(null);
   const [invites, setInvites] = useState<Invite[]>([]);
-  const [tv, setTv] = useState<TvNow | null>(null);
+  const [tvs, setTvs] = useState<TvChannels>({});
   const linkRef = useRef(link);
   linkRef.current = link;
 
-  // Remote and overlay buttons go to the space when there is one; otherwise the TV is just yours.
-  const storeRef = useRef<TvStore | null>(null);
-  if (!storeRef.current) {
+  // One store per screen, made the first time something asks for it. Remote and overlay buttons go
+  // to the space when there is one; otherwise the TVs are just yours.
+  const storesRef = useRef(new Map<string, TvStore>());
+  const channelOfRef = useRef<(id: string) => Parameters<TvStore["setChannel"]>[0]>(() => null);
+  const storeFor = useCallback((screen: TvScreenRef) => {
+    const known = storesRef.current.get(screen.id);
+    if (known) {
+      // The 3D view asks by id only; a spot knows the name.
+      if (screen.name !== "TV") known.name = screen.name;
+      return known;
+    }
+    const id = screen.id;
     const tvSend = (payload: TvPayload) => {
       const out = linkRef.current;
       if (!out) return false;
       out.send({ type: "tv", payload });
       return true;
     };
-    const local = (update: (current: TvNow | null) => TvNow | null) => setTv((current) => update(current));
-    storeRef.current = createTvStore({
-      play: (video) => {
-        if (tvSend({ action: "play", videoId: video.id, start: video.start ?? 0, ...(video.title ? { title: video.title.slice(0, 200) } : {}) })) return;
-        local(() => ({ videoId: video.id, position: video.start ?? 0, byUserId: "", receivedAt: Date.now(), paused: false, title: video.title }));
+    const local = (update: (current: TvNow | undefined) => TvNow | undefined) =>
+      setTvs((current) => {
+        const next = { ...current };
+        const value = update(current[id]);
+        if (value) next[id] = value;
+        else delete next[id];
+        return next;
+      });
+    const store = createTvStore(
+      {
+        play: (video) => {
+          if (tvSend({ action: "play", screen: id, videoId: video.id, start: video.start ?? 0, ...(video.title ? { title: video.title.slice(0, 200) } : {}) })) return;
+          local(() => ({ videoId: video.id, position: video.start ?? 0, byUserId: "", receivedAt: Date.now(), paused: false, title: video.title }));
+        },
+        pause: () => {
+          if (tvSend({ action: "pause", screen: id })) return;
+          local((current) => (current && !current.paused ? { ...current, position: current.position + (Date.now() - current.receivedAt) / 1000, receivedAt: Date.now(), paused: true } : current));
+        },
+        resume: () => {
+          if (tvSend({ action: "resume", screen: id })) return;
+          local((current) => (current?.paused ? { ...current, receivedAt: Date.now(), paused: false } : current));
+        },
+        stop: () => {
+          if (tvSend({ action: "stop", screen: id })) return;
+          local(() => undefined);
+        },
       },
-      pause: () => {
-        if (tvSend({ action: "pause" })) return;
-        local((current) => (current && !current.paused ? { ...current, position: current.position + (Date.now() - current.receivedAt) / 1000, receivedAt: Date.now(), paused: true } : current));
-      },
-      resume: () => {
-        if (tvSend({ action: "resume" })) return;
-        local((current) => (current?.paused ? { ...current, receivedAt: Date.now(), paused: false } : current));
-      },
-      stop: () => {
-        if (tvSend({ action: "stop" })) return;
-        local(() => null);
-      },
-    });
-  }
-  const store = storeRef.current;
+      screen,
+    );
+    store.setChannel(channelOfRef.current(id));
+    storesRef.current.set(id, store);
+    return store;
+  }, []);
 
   const show = useCallback(
     (next: Exclude<Open, null>) => {
@@ -83,27 +110,27 @@ export function ArcadeOnMap({ bridgeRef, link }: { bridgeRef: RefObject<SceneBri
     const bridge = bridgeRef.current;
     // The arcade machines play Tetris on the cabinet; everything else opens the Game Room.
     bridge.openGame = (game = "pong") => show(game === "tetris" ? { kind: "tetris" } : { kind: "game", game: isArcadeGameKind(game) ? game : "pong" });
-    // In the 3D office the TV is on its screen: pick up the remote instead of opening it big.
-    bridge.openTv = () => {
-      if (store.onScreen) {
+    // In the 3D office the TV is on its screen: pick up its remote instead of opening it big.
+    bridge.openTv = (screen = SOME_TV) => {
+      if (storeFor(screen).onScreen) {
         linkRef.current?.send({ type: "tv", payload: { action: "sync" } });
-        setRemote(true);
-      } else show({ kind: "tv" });
+        setRemote(screen);
+      } else show({ kind: "tv", screen });
     };
-    bridge.tv = store;
+    bridge.tv = (screenId) => storeFor({ id: screenId, name: "TV" });
     return () => {
       bridge.openGame = undefined;
       bridge.openTv = undefined;
       bridge.tv = undefined;
     };
-  }, [bridgeRef, show, store]);
+  }, [bridgeRef, show, storeFor]);
 
   const close = useCallback(() => {
     bridgeRef.current.setKeyboardEnabled?.(true);
     setOpen(null);
   }, [bridgeRef]);
 
-  // Invites to play, people taking them back, and what's on the TV.
+  // Invites to play, people taking them back, and what's on the TVs.
   const subscribe = link?.subscribe;
   useEffect(() => {
     if (!subscribe) return;
@@ -115,22 +142,29 @@ export function ArcadeOnMap({ bridgeRef, link }: { bridgeRef: RefObject<SceneBri
       } else if (message.type === "play-leave") {
         setInvites((current) => current.filter((invite) => invite.fromUserId !== message.payload.fromUserId));
       } else if (message.type === "tv") {
-        const state = message.payload.state;
+        // Every screen's state; one that isn't listed is off.
         const receivedAt = Date.now();
-        setTv((current) => {
-          if (!state) return null;
-          // Same video on the same timeline (a sync): keep it, so the player doesn't reload.
-          if (current && current.videoId === state.videoId && current.byUserId === state.byUserId && current.paused === state.paused) {
-            const expected = current.paused ? current.position : current.position + (receivedAt - current.receivedAt) / 1000;
-            if (Math.abs(expected - state.position) < 3) return current;
+        setTvs((current) => {
+          const next: TvChannels = {};
+          for (const [screen, state] of Object.entries(message.payload.screens)) {
+            const kept = current[screen];
+            // Same video on the same timeline (a sync): keep it, so the player doesn't reload.
+            if (kept && kept.videoId === state.videoId && kept.byUserId === state.byUserId && kept.paused === state.paused) {
+              const expected = kept.paused ? kept.position : kept.position + (receivedAt - kept.receivedAt) / 1000;
+              if (Math.abs(expected - state.position) < 3) {
+                next[screen] = kept;
+                continue;
+              }
+            }
+            next[screen] = { ...state, receivedAt };
           }
-          return { ...state, receivedAt };
+          return next;
         });
       }
     });
   }, [subscribe]);
 
-  // Find out what's on the TV once connected.
+  // Find out what's on the TVs once connected.
   const selfId = link?.selfId ?? null;
   const send = link?.send;
   useEffect(() => {
@@ -165,11 +199,23 @@ export function ArcadeOnMap({ bridgeRef, link }: { bridgeRef: RefObject<SceneBri
     }
   };
 
-  // Keep the store's channel in step with what's on (and who put it on, by name).
-  const tvByName = tv ? (tv.byUserId ? nameOf(tv.byUserId) : "you") : "";
+  // Keep each store's channel in step with what's on (and who put it on, by name).
+  const channelOf = useCallback(
+    (id: string) => {
+      const tv = tvs[id];
+      return tv ? { videoId: tv.videoId, position: tv.position, paused: tv.paused, receivedAt: tv.receivedAt, byName: tv.byUserId ? nameOf(tv.byUserId) : "you", title: tv.title } : null;
+    },
+    [tvs, nameOf],
+  );
   useEffect(() => {
-    store.setChannel(tv ? { videoId: tv.videoId, position: tv.position, paused: tv.paused, receivedAt: tv.receivedAt, byName: tvByName, title: tv.title } : null);
-  }, [store, tv, tvByName]);
+    channelOfRef.current = channelOf;
+    for (const [id, store] of storesRef.current) {
+      const next = channelOf(id);
+      const now = store.channel();
+      // Only when something changed, so the screens don't reload.
+      if (JSON.stringify(next) !== JSON.stringify(now)) store.setChannel(next);
+    }
+  }, [channelOf]);
 
   const cards = invites.length > 0 ? <InviteCards invites={invites} nameOf={nameOf} onAnswer={answer} /> : null;
 
@@ -195,15 +241,16 @@ export function ArcadeOnMap({ bridgeRef, link }: { bridgeRef: RefObject<SceneBri
           onMoreGames={() => show({ kind: "game", game: "pong" })}
         />
       )}
-      {open?.kind === "tv" && <TvOverlay store={store} shared={!!send} banner={cards} onDismiss={close} />}
+      {open?.kind === "tv" && <TvOverlay key={open.screen.id} store={storeFor(open.screen)} shared={!!send} banner={cards} onDismiss={close} />}
       {remote && (
         <TvRemote
-          store={store}
+          key={remote.id}
+          store={storeFor(remote)}
           shared={!!send}
-          onClose={() => setRemote(false)}
+          onClose={() => setRemote(null)}
           onWatchBig={() => {
-            setRemote(false);
-            show({ kind: "tv" });
+            setRemote(null);
+            show({ kind: "tv", screen: remote });
           }}
         />
       )}

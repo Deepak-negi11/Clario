@@ -1,21 +1,46 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { Expand, Minus, Pause, Play, Plus, Power, Search, Square, Volume2, VolumeX, X } from "lucide-react";
+import { useEffect, useId, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent } from "react";
+import { Expand, Minus, MoveDiagonal2, Pause, Play, Plus, Power, Search, Square, Volume2, VolumeX, X } from "lucide-react";
 import { parseYouTubeUrl } from "@repo/shared";
 import { TV_SUGGESTIONS } from "./tv-channels";
 import { useTvStore } from "./tv-overlay";
 import { TvSearchResults, useTvSearch } from "./tv-search";
 import type { TvStore } from "./tv-store";
 
-// The Lounge TV's remote, for the 3D office where the video plays on the TV itself. It docks in a
-// corner and doesn't cover the room, so you watch the TV while you use it: search YouTube (or paste
-// a link), the four preset channels, play/pause, stop, and volume for you alone. What you put on or
-// pause, everyone in the space sees. Escape closes it; the TV keeps playing.
+// A TV's remote (the Lounge TV, the Demo Stage screen...), for the 3D office where the video plays
+// on the TV itself. It docks in a corner and doesn't cover the room, so you watch the TV while you
+// use it: search YouTube (or paste a link), the four preset channels, play/pause, stop, and volume
+// for you alone. What you put on or pause, everyone in the space sees. Escape closes it; the TV
+// keeps playing. The power button turns the TV on to its home screen of suggestions (picked on the
+// screen itself, components/tv/tv-home.ts) or off. The grip in the corner makes the remote bigger or
+// smaller, and it stays that size.
 
 const pixelFont = "font-[family-name:var(--font-pixel)]";
 const focusRing = "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white";
 // Rubber buttons: a soft top highlight and a little shadow under them, pressed in when tapped.
+// How big the remote can be made, and where its size is kept.
+const MIN_SCALE = 0.75;
+const MAX_SCALE = 1.6;
+const SCALE_KEY = "tv:remote-scale";
+
+function readScale() {
+  try {
+    const stored = Number(localStorage.getItem(SCALE_KEY));
+    return Number.isFinite(stored) && stored > 0 ? Math.min(MAX_SCALE, Math.max(MIN_SCALE, stored)) : 1;
+  } catch {
+    return 1;
+  }
+}
+
+function saveScale(scale: number) {
+  try {
+    localStorage.setItem(SCALE_KEY, String(scale));
+  } catch {
+    // Not remembered: fine.
+  }
+}
+
 const rubber = `grid cursor-pointer place-items-center rounded-full bg-[#2c2f35] text-[#e9eaec] shadow-[inset_0_1px_0_rgba(255,255,255,0.09),0_2px_3px_rgba(0,0,0,0.45)] transition hover:bg-[#363940] active:translate-y-px active:shadow-[inset_0_1px_2px_rgba(0,0,0,0.5)] disabled:cursor-default disabled:opacity-40 disabled:hover:bg-[#2c2f35] disabled:active:translate-y-0 motion-reduce:transition-none ${focusRing}`;
 
 export function TvRemote({ store, shared, onClose, onWatchBig }: { store: TvStore; shared: boolean; onClose: () => void; onWatchBig: () => void }) {
@@ -24,7 +49,8 @@ export function TvRemote({ store, shared, onClose, onWatchBig }: { store: TvStor
   const errorId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState("");
-  const { channel, volume, muted } = useTvStore(store);
+  const { channel, volume, muted, home } = useTvStore(store);
+  const on = !!channel || home !== null;
   const { searchOn, search, error, setError, submit, clear } = useTvSearch();
   const playing = TV_SUGGESTIONS.find((item) => item.id === channel?.videoId);
   const linkInDraft = parseYouTubeUrl(draft);
@@ -47,31 +73,88 @@ export function TvRemote({ store, shared, onClose, onWatchBig }: { store: TvStor
 
   const level = muted ? 0 : volume;
 
+  // Resizing: drag the grip up and left to make the remote bigger (it's pinned bottom right), or
+  // use the arrow keys on it; a double click puts it back. It never grows past the window.
+  const panelRef = useRef<HTMLElement>(null);
+  // Only ever rendered in the browser (it opens from the 3D view), so storage can be read at once.
+  const [scale, setScale] = useState(readScale);
+  const drag = useRef<{ x: number; y: number; scale: number } | null>(null);
+  const fit = (next: number) => {
+    const panel = panelRef.current;
+    const room = panel ? Math.min((window.innerHeight - 24) / panel.offsetHeight, (window.innerWidth - 24) / panel.offsetWidth) : MAX_SCALE;
+    return Math.round(Math.max(MIN_SCALE, Math.min(MAX_SCALE, room, next)) * 100) / 100;
+  };
+  const resizeTo = (next: number) => {
+    const scaled = fit(next);
+    setScale(scaled);
+    saveScale(scaled);
+  };
+  const onGripDown = (event: PointerEvent<HTMLButtonElement>) => {
+    event.currentTarget.setPointerCapture(event.pointerId);
+    drag.current = { x: event.clientX, y: event.clientY, scale };
+  };
+  const onGripMove = (event: PointerEvent<HTMLButtonElement>) => {
+    const start = drag.current;
+    const panel = panelRef.current;
+    if (!start || !panel) return;
+    const pulled = (start.x - event.clientX + (start.y - event.clientY)) / 2;
+    setScale(fit(start.scale + pulled / panel.offsetWidth));
+  };
+  const onGripUp = () => {
+    if (!drag.current) return;
+    drag.current = null;
+    saveScale(scale);
+  };
+
   return (
     <section
+      ref={panelRef}
       role="dialog"
       aria-modal="false"
       aria-labelledby={titleId}
+      style={{ "--remote-scale": scale } as CSSProperties}
       onKeyDown={onKeyDown}
       onKeyUp={(event) => event.stopPropagation()}
-      className="pointer-events-auto fixed bottom-3 left-3 right-3 z-[90] flex max-h-[calc(100dvh-1.5rem)] flex-col overflow-hidden rounded-[30px] bg-gradient-to-b from-[#27292e] to-[#16171a] p-3.5 text-[#e9eaec] shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_24px_50px_-18px_rgba(0,0,0,0.75)] ring-1 ring-black/60 [color-scheme:dark] starting:translate-y-3 starting:opacity-0 transition-[opacity,translate] duration-200 sm:left-auto sm:w-[18.5rem] motion-reduce:transition-none"
+      className="pointer-events-auto fixed bottom-3 left-3 right-3 z-[90] flex max-h-[calc(100dvh-1.5rem)] flex-col overflow-hidden rounded-[30px] bg-gradient-to-b from-[#27292e] to-[#16171a] p-3.5 text-[#e9eaec] shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_24px_50px_-18px_rgba(0,0,0,0.75)] ring-1 ring-black/60 [color-scheme:dark] starting:translate-y-3 starting:opacity-0 transition-[opacity,translate] duration-200 sm:left-auto sm:w-[18.5rem] sm:origin-bottom-right sm:[scale:var(--remote-scale)] motion-reduce:transition-none"
     >
+      <button
+        type="button"
+        onPointerDown={onGripDown}
+        onPointerMove={onGripMove}
+        onPointerUp={onGripUp}
+        onPointerCancel={onGripUp}
+        onDoubleClick={() => resizeTo(1)}
+        onKeyDown={(event) => {
+          const step = event.key === "ArrowUp" || event.key === "ArrowLeft" ? 0.05 : event.key === "ArrowDown" || event.key === "ArrowRight" ? -0.05 : 0;
+          if (!step) return;
+          event.preventDefault();
+          resizeTo(scale + step);
+        }}
+        aria-label={`Resize the remote (${Math.round(scale * 100)}%)`}
+        title="Drag to resize. Double-click for the usual size."
+        className={`absolute left-2 top-2 hidden h-6 w-6 cursor-nwse-resize touch-none place-items-center rounded-full text-white/45 transition hover:bg-white/10 hover:text-white sm:grid motion-reduce:transition-none ${focusRing}`}
+      >
+        <MoveDiagonal2 size={13} aria-hidden="true" />
+      </button>
       {/* The infrared window along the top edge. */}
       <span aria-hidden="true" className="mx-auto mb-3 block h-1.5 w-14 rounded-full bg-[#0b0b0d] shadow-[inset_0_1px_1px_rgba(255,255,255,0.12)]" />
 
       <header className="flex items-center justify-between gap-2">
         <button
           type="button"
-          onClick={store.stop}
-          disabled={!channel}
-          aria-label="Turn the TV off"
-          title="Turn off"
+          onClick={() => {
+            if (channel) store.stop();
+            store.setHome(on ? null : (home ?? 0));
+          }}
+          aria-label={on ? "Turn the TV off" : "Turn the TV on"}
+          aria-pressed={on}
+          title={on ? "Turn off" : "Turn on"}
           className={`grid h-9 w-9 cursor-pointer place-items-center rounded-full bg-[#c4302b] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.25),0_2px_3px_rgba(0,0,0,0.5)] transition hover:bg-[#d63a34] active:translate-y-px disabled:cursor-default disabled:opacity-50 motion-reduce:transition-none ${focusRing}`}
         >
           <Power size={16} aria-hidden="true" />
         </button>
         <h2 id={titleId} className={`${pixelFont} text-[15px] tracking-wide text-white/90`}>
-          Lounge TV
+          {store.name}
         </h2>
         <button type="button" onClick={onClose} aria-label="Put the remote down" title="Close (Esc)" className={`${rubber} h-8 w-8`}>
           <X size={15} aria-hidden="true" />
@@ -81,11 +164,17 @@ export function TvRemote({ store, shared, onClose, onWatchBig }: { store: TvStor
       {/* What's on, like the info line on a set-top box. */}
       <div className="mt-3 rounded-xl bg-[#0d0e10] px-3 py-2 shadow-[inset_0_1px_2px_rgba(0,0,0,0.7)]" aria-live="polite">
         <p className="truncate text-[12.5px] font-semibold">
-          {channel ? (channel.paused ? "Paused" : "On now") : "TV is off"}
+          {channel ? (channel.paused ? "Paused" : "On now") : on ? "TV is on" : "TV is off"}
           {channel && (channel.title ?? playing?.title) ? `: ${channel.title ?? playing?.title}` : ""}
         </p>
         <p className="truncate text-[11px] text-white/55">
-          {channel ? `Put on by ${channel.byName}${shared ? ", for everyone here" : ""}` : shared ? "What you put on, everyone here sees." : "Pick something to watch."}
+          {channel
+            ? `Put on by ${channel.byName}${shared ? ", for everyone here" : ""}`
+            : on
+              ? `Pick a video on the screen${shared ? ". Everyone here sees it." : "."}`
+              : shared
+                ? "What you put on, everyone here sees."
+                : "Pick something to watch."}
         </p>
       </div>
 

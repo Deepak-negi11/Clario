@@ -28,7 +28,7 @@ export function addPlaySpots(scene: Phaser.Scene, { spots: first, font, bridge, 
     let inReach: PlaySpot | null = null;
 
     const use = (spot: PlaySpot) => {
-        if (spot.action.kind === "tv") bridge?.openTv?.();
+        if (spot.action.kind === "tv") bridge?.openTv?.(spot.action.screen);
         else bridge?.openGame?.(spot.action.game);
     };
     // Furniture is drawn taller than the tiles it stands on, so its click area reaches a tile up.
