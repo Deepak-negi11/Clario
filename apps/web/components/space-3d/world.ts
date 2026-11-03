@@ -8,6 +8,8 @@ import { NIGHT_GLSL, sway, weather } from "./wind";
 
 // Where the sun is worked out for (degrees north): about Dehradun's.
 const LATITUDE = 30;
+// Late morning: the sun is 35° to 75° up all year (full day from 20°), so it's always bright.
+const DAYLIGHT_HOUR = 11;
 const SKY_RADIUS = 300; // inside the camera's far plane (office-3d.tsx)
 const BIRDS = 9;
 // About this many tufts of grass are scattered round the lawn, thickest near the map's edge, where
@@ -67,9 +69,11 @@ export function makeWorld({ scene, sun, inside }: { scene: THREE.Scene; sun: THR
   const fogColor = new THREE.Color();
 
   // Light for this moment: where the sun (or, at night, the moon) is, and the colours of the sky,
-  // the light and the fog.
+  // the light and the fog. The map is always in daylight: the sun stands where it does at
+  // DAYLIGHT_HOUR today, whatever the time.
   const relight = () => {
-    const { elevation, direction } = sunAt(new Date());
+    const now = new Date();
+    const { elevation, direction } = sunAt(new Date(now.getFullYear(), now.getMonth(), now.getDate(), DAYLIGHT_HOUR));
     Object.assign(look, blendLook(elevation));
     const night = THREE.MathUtils.smoothstep(-elevation, -2, 8);
     weather.night.value = night;
