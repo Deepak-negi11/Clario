@@ -54,9 +54,6 @@ npx clario-agent uninstall --global  # remove every Clario hook and stop sharing
 It uses the live server at `https://api.clario.games`. Running Clario yourself? The Agent
 button on your own site adds `--api-url` to the command for you.
 
-Used the older `viora-agent` package? Run `npx clario-agent@latest setup` once: it reuses the key
-from `~/.viora` and replaces the old hook. You can delete `~/.viora` afterwards.
-
 > Keep the setup command private: anyone with your key can post activity as your agent (and
 > nothing else). If it leaks, delete `~/.clario/agent.json`; the server's owner can cancel
 > every key by changing `JWT_SECRET` (this signs everyone out).

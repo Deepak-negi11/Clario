@@ -82,13 +82,13 @@ export const metadata: Metadata = {
     siteName: SITE_NAME,
     locale: "en_US",
     type: "website",
-    images: [{ url: "/opengraph-image.png", width: 1200, height: 630, alt: `${SITE_NAME} spatial workspace for remote teams` }],
+    images: [{ url: "/og-clario.png", width: 1200, height: 630, alt: `${SITE_NAME} spatial workspace for remote teams` }],
   },
   twitter: {
     card: "summary_large_image",
     title: siteTitle,
     description: siteDescription,
-    images: ["/opengraph-image.png"],
+    images: ["/og-clario.png"],
   },
 };
 
