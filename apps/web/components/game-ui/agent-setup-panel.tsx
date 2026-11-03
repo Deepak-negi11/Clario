@@ -3,19 +3,19 @@
 import { Check, CircleCheck, Copy, LoaderCircle, X } from "lucide-react";
 import { useCallback, useEffect, useId, useState } from "react";
 import { useDraggablePanel } from "../../hooks/use-draggable-panel";
-import { agentSetupCommand, createAgentKey, getAgentStatus, type SetupAgent } from "../../lib/agent-api";
+import { agentSetupCommand, createAgentKey, getAgentStatus } from "../../lib/agent-api";
 import { getAuthToken } from "../../lib/auth-token";
 import { PixelPet } from "./pixel-pet";
 import { PanelDragHandle, draggableHeader } from "./panel-drag-handle";
 
 const POLL_MS = 3000;
 
-// The agents setup can register with; the note is what's left to do after the command.
-const AGENT_CHOICES: { id: SetupAgent; label: string; note?: string }[] = [
+// The agents the one setup command finds and registers.
+const AGENTS = [
   { id: "claude", label: "Claude Code" },
-  { id: "codex", label: "Codex", note: "Then open Codex, run /hooks and trust the Clario hook." },
-  { id: "cursor", label: "Cursor", note: "If Cursor is open, restart it afterwards." },
-];
+  { id: "codex", label: "Codex" },
+  { id: "cursor", label: "Cursor" },
+] as const;
 
 /**
  * Whether this user's Claude Code hook (clario-agent) has connected: null while unknown.
@@ -52,12 +52,11 @@ export function AgentSetupPanel({ onClose, onConnected }: { onClose: () => void;
   const titleId = useId();
   const drag = useDraggablePanel("agent");
   const [key, setKey] = useState<string | null>(null);
-  const [agent, setAgent] = useState<SetupAgent>("claude");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [connected, setConnected] = useState(false);
-  const command = key ? agentSetupCommand(key, agent) : null;
+  const command = key ? agentSetupCommand(key) : null;
 
   const makeCommand = async () => {
     const token = getAuthToken();
@@ -152,23 +151,17 @@ export function AgentSetupPanel({ onClose, onConnected }: { onClose: () => void;
           </button>
         ) : (
           <div className="space-y-2.5">
-            <div role="group" aria-label="Your coding agent" className="grid grid-cols-3 gap-1 rounded-[10px] bg-[#f1f2f5] p-1">
-              {AGENT_CHOICES.map((choice) => (
-                <button
-                  key={choice.id}
-                  type="button"
-                  aria-pressed={agent === choice.id}
-                  onClick={() => setAgent(choice.id)}
-                  className={`flex min-h-11 cursor-pointer items-center justify-center gap-1 rounded-lg text-[12px] font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#12151c] motion-reduce:transition-none ${
-                    agent === choice.id ? "bg-white text-[#12151c] shadow-[0_1px_2px_rgba(18,21,28,0.12)]" : "text-[#5c6371] hover:text-[#12151c]"
-                  }`}
-                >
-                  <PixelPet agent={choice.id} size={28}/>
-                  {choice.label}
-                </button>
+            <p className="font-medium text-[#12151c]">
+              Run this once in the terminal, inside the project you want to share. It sets up every agent you have:
+            </p>
+            <ul aria-label="Agents it sets up" className="flex flex-wrap gap-x-3 gap-y-1 text-[12px] font-medium text-[#3f4552]">
+              {AGENTS.map((agent) => (
+                <li key={agent.id} className="flex items-center gap-1">
+                  <PixelPet agent={agent.id} size={24} />
+                  {agent.label}
+                </li>
               ))}
-            </div>
-            <p className="font-medium text-[#12151c]">Run this in the terminal, inside the project you want to share:</p>
+            </ul>
             <div className="flex items-stretch gap-1.5">
               <code
                 translate="no"
@@ -185,9 +178,9 @@ export function AgentSetupPanel({ onClose, onConnected }: { onClose: () => void;
                 {copied ? <Check size={16} aria-hidden="true" /> : <Copy size={16} aria-hidden="true" />}
               </button>
             </div>
-            {AGENT_CHOICES.find((choice) => choice.id === agent)?.note && (
-              <p className="text-[12px] font-medium text-[#3f4552]">{AGENT_CHOICES.find((choice) => choice.id === agent)?.note}</p>
-            )}
+            <p className="text-[12px] text-[#3f4552]">
+              Using Codex? Open it, run <code className="font-mono">/hooks</code> and trust the Clario hook. Using Cursor? Restart it if it&apos;s open.
+            </p>
             <p className="text-[12px] text-[#5c6371]">
               This is your own key and it stays the same. Keep it private: anyone with it can post as your agent.
             </p>

@@ -4,6 +4,7 @@
  * your Clario avatar.
  *
  *   npx clario-agent setup --key KEY [--agent claude|codex|cursor|all] [--api-url URL] [--global]
+ *                                                 every agent on this computer unless --agent picks
  *   npx clario-agent status                       what is set up
  *   npx clario-agent uninstall [--global]         stop sharing from this project (or everywhere)
  *
@@ -47,6 +48,8 @@ const quote = (path) => `"${path.replace(/(["\\$`])/g, "\\$1")}"`;
 const AGENT_TARGETS = {
   claude: {
     name: "Claude Code",
+    // Each agent makes its home folder the first time it runs: that's how setup finds it.
+    installed: () => existsSync(join(homedir(), ".claude")),
     file: (global) => (global ? join(homedir(), ".claude", "settings.json") : join(process.cwd(), ".claude", "settings.local.json")),
     events: ["PreToolUse", "PostToolUse", "Stop", "SessionEnd"],
     command: () => `node ${quote(HOOK_PATH)}`,
@@ -54,6 +57,7 @@ const AGENT_TARGETS = {
   codex: {
     name: "Codex",
     shared: true, // one file for every project
+    installed: () => existsSync(process.env.CODEX_HOME || join(homedir(), ".codex")),
     file: () => join(process.env.CODEX_HOME || join(homedir(), ".codex"), "hooks.json"),
     events: ["UserPromptSubmit", "PostToolUse", "Stop", "SessionEnd"],
     // The full path to node: Codex and Cursor can start hooks without your shell's PATH.
@@ -63,6 +67,7 @@ const AGENT_TARGETS = {
     name: "Cursor",
     shared: true,
     flat: true, // { version: 1, hooks: { event: [{ command }] } }
+    installed: () => existsSync(join(homedir(), ".cursor")),
     file: () => join(homedir(), ".cursor", "hooks.json"),
     events: ["beforeSubmitPrompt", "afterFileEdit", "stop"],
     command: () => `${quote(process.execPath)} ${quote(HOOK_PATH)} --agent cursor-agent`,
@@ -219,7 +224,10 @@ function gitIgnored(file) {
   }
 }
 
-/** --agent claude|codex|cursor|all, repeatable or comma separated; Claude Code when left out. */
+/**
+ * --agent claude|codex|cursor|all, repeatable or comma separated. Left out: every agent on
+ * this computer (Claude Code when none is found), so one command sets up all of them.
+ */
 function parseAgents(args) {
   const values = args
     .flatMap((arg, i) => (arg === "--agent" ? [args[i + 1] ?? ""] : arg.startsWith("--agent=") ? [arg.slice("--agent=".length)] : []))
@@ -230,7 +238,9 @@ function parseAgents(args) {
   const names = values.includes("all") ? Object.keys(AGENT_TARGETS) : values.map((value) => aliases[value] ?? value);
   const unknown = names.find((name) => !(name in AGENT_TARGETS));
   if (unknown !== undefined) fail(`Unknown agent "${unknown}". Use claude, codex, cursor or all.`);
-  return names.length ? [...new Set(names)] : ["claude"];
+  if (names.length) return [...new Set(names)];
+  const found = Object.keys(AGENT_TARGETS).filter((name) => AGENT_TARGETS[name].installed());
+  return found.length ? found : ["claude"];
 }
 
 // ---- Commands -----------------------------------------------------------------------
@@ -265,6 +275,10 @@ async function setup(opts) {
     }
     if (agent === "codex") console.log("  Codex asks before it runs a new hook: open Codex, run /hooks and trust the Clario hook.");
     if (agent === "cursor") console.log("  If Cursor is open, restart it so it loads the hook.");
+  }
+  const missing = Object.keys(AGENT_TARGETS).filter((agent) => !opts.agents.includes(agent));
+  if (!opts.picked && missing.length) {
+    console.log(`Not found on this computer: ${missing.map((agent) => AGENT_TARGETS[agent].name).join(", ")}. Run setup again after installing one.`);
   }
   console.log("Open your Clario space and give your agent a task: your avatar's card shows what it's doing.");
 }
@@ -323,7 +337,8 @@ const HELP = `clario-agent: show what your coding agent is doing on your Clario 
   clario-agent uninstall [--global] stop sharing from this project (or everywhere)
 
 Get the setup command (with your key) from the Agent button in your Clario space.
---agent picks which agents to set up (default claude; comma separated or repeated).
+Setup registers every agent it finds on this computer; --agent picks them yourself
+(comma separated or repeated).
 Without --global only the project you run it in is shared. Without --key, setup reuses
 the key you saved before. The server is ${DEFAULT_API_URL} unless you pass --api-url.`;
 
@@ -334,7 +349,7 @@ export async function run(argv) {
     return i > -1 ? rest[i + 1] : undefined;
   };
   try {
-    const opts = { global: rest.includes("--global"), apiUrl: value("--api-url"), key: value("--key"), agents: parseAgents(rest) };
+    const opts = { global: rest.includes("--global"), apiUrl: value("--api-url"), key: value("--key"), agents: parseAgents(rest), picked: rest.some((arg) => arg.startsWith("--agent")) };
     if (command === "setup") await setup(opts);
     else if (command === "status") status();
     else if (command === "uninstall") uninstall(opts);

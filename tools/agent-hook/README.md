@@ -9,14 +9,13 @@ clears when the agent finishes.
 ## Setup (one command)
 
 1. Open your space on [clario.games](https://www.clario.games) and click **Agent** in the
-   left menu. Pick your agent; it shows your setup command, with your key in it:
+   left menu. It shows your setup command, with your key in it:
    ```bash
-   npx clario-agent setup --key YOUR_KEY                 # Claude Code
-   npx clario-agent setup --key YOUR_KEY --agent codex   # Codex
-   npx clario-agent setup --key YOUR_KEY --agent cursor  # Cursor
+   npx clario-agent@latest setup --key YOUR_KEY
    ```
-2. Copy it and run it in the terminal, inside the project you want to share.
-   `--agent all` sets up all three; `--agent codex,cursor` works too.
+2. Copy it and run it in the terminal, inside the project you want to share. It sets up
+   every agent it finds on your computer (Claude Code, Codex, Cursor). To pick them
+   yourself, add `--agent codex`, `--agent claude,cursor` or `--agent all`.
 
 That's it: the Agent button disappears once your agent has connected. Setup:
 
@@ -41,7 +40,7 @@ That's it: the Agent button disappears once your agent has connected. Setup:
 Then give your agent a task in that project and click your avatar. Teammates who do the same
 and join your space show up on their avatars too.
 
-To add another project later, run `npx clario-agent setup --agent …` there: it reuses your
+To add another project or a newly installed agent later, run `npx clario-agent@latest setup` there: it reuses your
 saved key. Setup never registers the hook twice, leaves your other settings and hooks as they
 are, and saves the previous file next to it as `*.clario-backup`.
 
