@@ -1,6 +1,21 @@
 import { describe, expect, test } from "bun:test";
 import { AgentActivityBroadcastMessage } from "@repo/shared";
-import { parseAgentGitInfo } from "./git-info";
+import { parseAgentGitInfo, parseAgentName } from "./git-info";
+
+describe("parseAgentName", () => {
+  test("keeps the three agents clario-agent reports for", () => {
+    expect(["claude-code", "codex", "cursor-agent"].map(parseAgentName)).toEqual(["claude-code", "codex", "cursor-agent"]);
+  });
+
+  test("drops anything else, so the card never shows made-up names", () => {
+    for (const value of [undefined, "", "Codex", "vim", "claude-code ", 42, { name: "codex" }]) expect(parseAgentName(value)).toBeUndefined();
+  });
+
+  test("the broadcast schema keeps the agent for the client", () => {
+    const parsed = AgentActivityBroadcastMessage.parse({ type: "agent-activity", payload: { userId: "u1", text: "Codex is thinking", state: "cooking", at: 1, agent: "codex" } });
+    expect(parsed.payload.agent).toBe("codex");
+  });
+});
 
 describe("parseAgentGitInfo", () => {
   test("keeps project, branch and a 7-character commit", () => {

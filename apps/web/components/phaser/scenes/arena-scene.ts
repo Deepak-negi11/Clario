@@ -1,4 +1,6 @@
 import Phaser from "phaser";
+import { reducedAgentMotion } from "../../../lib/agents/motion";
+import { AGENT_KINDS, agentArtPath, agentKind } from "../../../lib/agents/identity";
 import { customRoomAt, floorAt, getChatRoomAtPosition, getMapTemplate, isClarioHq, WALK_STEP_MS, type ChatRoomZone, type CoworkerId, type CustomMap, type MapTemplateId } from "@repo/shared";
 import { HQ_COLS, HQ_COWORKERS, HQ_FLOORS, HQ_ITEMS, HQ_MENTOR } from "../../../lib/maps/clario-hq";
 import { hqPlaySpots, playSpotsFor } from "../../../lib/maps/play-spots";
@@ -79,7 +81,7 @@ export class ArenaScene extends Phaser.Scene{
     private reactionsRef?: {current:{id:string;userId:string;emoji:string;at:number}[]}
     private shownReactions = new Set<string>();
 
-    private activitiesRef?: {current:Record<string,{text:string;state:"cooking"|"done";at:number}>}
+    private activitiesRef?: {current:Record<string,{text:string;state:"cooking"|"done";at:number;agent?:string}>}
     private playerClickRef?: {current:((userId:string|null)=>void)|null}
     private agentPets: Record<string, Phaser.GameObjects.Sprite> = {};
 
@@ -136,6 +138,7 @@ export class ArenaScene extends Phaser.Scene{
     }
 
     preload(){
+        for (const kind of [...AGENT_KINDS, "agent"] as const) this.load.svg(`agent-pet-${kind}`, agentArtPath(kind), { width: 48, height: 48 });
         preloadMentorNpc(this);
         preloadSeatingArt(this);
         preloadOfficePropsArt(this);
@@ -232,24 +235,6 @@ export class ArenaScene extends Phaser.Scene{
         this.makeFurnitureTextures();
         makeLoungeTextures(this);
         makeSeatingTextures(this);
-        this.makeClaudePetTextures();
-        if (!this.anims.exists("claude-pet-walk")) {
-            this.anims.create({
-                key: "claude-pet-walk",
-                frames: [
-                    { key: "claude-pet-0" },
-                    { key: "claude-pet-1" },
-                    { key: "claude-pet-2" },
-                    { key: "claude-pet-3" },
-                ],
-                frameRate: 10,
-                repeat: -1,
-            });
-        }
-
-
-
-
         this.add.tileSprite(0, 0, worldWidth, worldHeight, "grass").setOrigin(0, 0).setDepth(-1010);
         if (isClarioHq(mapTemplate)) {
             makeHqTextures(this);
@@ -1713,43 +1698,7 @@ export class ArenaScene extends Phaser.Scene{
 
 
 
-    // Recreates the Claude Code terminal mascot (orange pixel critter) as four
-    // 14x12 canvas textures — alternating leg pairs plus a body dip make the
-    // scamper read as running, not sliding.
-    private makeClaudePetTextures() {
-        const BODY = 0xe8896b;
-        const EYE = 0x141414;
-        const W = 14;
-        const H = 12;
-        const BOB = [0, 1, 1, 0];
-
-        const draw = (g: Phaser.GameObjects.Graphics, step: number) => {
-            const bob = BOB[step] ?? 0;
-            g.fillStyle(BODY, 1);
-            g.fillRect(3, 1 + bob, 8, 8);
-            g.fillRect(0, 3 + bob, 3, 3);
-            g.fillRect(11, 3 + bob, 3, 3);
-
-            g.fillStyle(EYE, 1);
-            g.fillRect(4, 3 + bob, 2, 2);
-            g.fillRect(8, 3 + bob, 2, 2);
-
-            g.fillStyle(BODY, 1);
-            [4, 6, 8, 10].forEach((lx, i) => {
-                const lifted = (i % 2 === 0) === (step % 2 === 0);
-                g.fillRect(lx, 9, 1, lifted ? 2 : 3);
-            });
-        };
-
-        for (let step = 0; step < 4; step++) {
-            const g = this.add.graphics();
-            draw(g, step);
-            g.generateTexture(`claude-pet-${step}`, W, H);
-            g.destroy();
-        }
-    }
-
-    // The Claude pet hovers above a player's head while their agent reports
+    // The connected agent companion hovers above a player's head while their agent reports
     // activity. Your own pet is always visible; other players' pets appear
     // only when they are close to you.
     private updateAgentPets() {
@@ -1765,14 +1714,32 @@ export class ArenaScene extends Phaser.Scene{
             if (!sprite) continue;
             if (!isSelf && !(nearby?.has(userId) ?? false)) continue;
 
+            const texture = `agent-pet-${agentKind(activity.agent)}`;
             if (!this.agentPets[userId]) {
-                const pet = this.add.sprite(0, 0, "claude-pet-0").setScale(2);
-                pet.play("claude-pet-walk");
+                const pet = this.add.sprite(0, 0, texture).setScale(0.9);
+                pet.texture.setFilter(Phaser.Textures.FilterMode.LINEAR);
+                pet.setInteractive({ cursor: "pointer" });
+                pet.on("pointerover", () => pet.setData("hover", true));
+                pet.on("pointerout", () => pet.setData("hover", false));
+                pet.on("pointerdown", (_pointer: Phaser.Input.Pointer, _lx: number, _ly: number, event: Phaser.Types.Input.EventData) => {
+                    event.stopPropagation();
+                    pet.setData("reactedAt", this.time.now);
+                    this.playerClickRef?.current?.(userId);
+                });
                 this.agentPets[userId] = pet;
             }
             const pet = this.agentPets[userId];
-            const hop = Math.abs(Math.sin(this.time.now / 130 + userId.length)) * 2;
-            pet.setPosition(sprite.x, sprite.y - 62 - hop);
+            if (pet.texture.key !== texture) pet.setTexture(texture);
+            const hop = reducedAgentMotion() ? 0 : Math.sin(this.time.now / 650 + userId.length) * 1.5;
+            const elapsed = (this.time.now - (pet.getData("reactedAt") ?? -10000)) / 800;
+            const playing = elapsed >= 0 && elapsed < 1 && !reducedAgentMotion();
+            const bounce = playing ? Math.sin(elapsed * Math.PI) : 0;
+            const hover = pet.getData("hover") ? 0.08 : 0;
+            const hoverAmount = reducedAgentMotion() ? hover : Phaser.Math.Linear(pet.getData("hoverAmount") ?? 0, hover, 0.15);
+            pet.setData("hoverAmount", hoverAmount);
+            pet.setScale(0.9 * (1 + hoverAmount + bounce * 0.16));
+            pet.rotation = playing ? agentKind(activity.agent) === "cursor-agent" ? Math.sin(elapsed * Math.PI * 4) * bounce * 0.25 : Math.sin(elapsed * Math.PI * 4) * bounce * 0.14 : 0;
+            pet.setPosition(sprite.x, sprite.y - 62 - hop - bounce * 7);
             pet.setDepth(10001);
             pet.setAlpha(sprite.alpha);
         }

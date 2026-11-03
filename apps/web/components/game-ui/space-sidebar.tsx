@@ -56,7 +56,7 @@ export function SpaceSidebar({
         <ClipboardList size={20} aria-hidden="true" />
       </RailButton>
       {agentSetup && (
-        <RailButton label="Agent" title="Show your Claude Code in this space" active={panel === "agent"} onClick={() => toggle("agent")}>
+        <RailButton label="Agent" title="Show your coding agent in this space" active={panel === "agent"} onClick={() => toggle("agent")}>
           <Bot size={20} aria-hidden="true" />
         </RailButton>
       )}

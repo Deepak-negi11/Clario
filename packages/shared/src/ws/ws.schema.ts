@@ -24,10 +24,12 @@ export const AgentActivityState = z.enum(["cooking", "done"]);
 
 // Where the agent is working: project folder, git branch, short commit. Optional:
 // older hooks don't send them and users can turn them off ("shareGit": false).
+// `agent` says which one ("claude-code", "codex", "cursor-agent"); older hooks leave it out.
 const AgentGitFields = {
   project: z.string().optional(),
   branch: z.string().optional(),
   commit: z.string().optional(),
+  agent: z.string().optional(),
 };
 
 export const AgentActivityInfo = z.object({

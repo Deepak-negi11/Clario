@@ -8,9 +8,9 @@ import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.j
 // One unit is one tile; it faces +z, like a chair turned "down".
 
 const ORANGE = "#d97757";
-const W = 0.54; // body width, height and depth
+const W = 0.62; // body width, height and depth
 const H = 0.36;
-const D = 0.34;
+const D = 0.27;
 const SEAT = 0.44; // top of the office chair's cushion
 
 function sparkTexture() {
@@ -40,7 +40,7 @@ function sparkTexture() {
 // `phase` (seconds) keeps several of them from typing in step.
 export function makeClaude3d(phase = 0) {
   const group = new THREE.Group();
-  const skin = new THREE.MeshStandardMaterial({ color: ORANGE, roughness: 0.62 });
+  const skin = new THREE.MeshStandardMaterial({ color: ORANGE, roughness: 0.82 });
   const dark = new THREE.MeshStandardMaterial({ color: "#1f1a17", roughness: 0.4 });
   const part = (geometry: THREE.BufferGeometry, material: THREE.Material, x: number, y: number, z: number) => {
     const mesh = new THREE.Mesh(geometry, material);
@@ -51,15 +51,15 @@ export function makeClaude3d(phase = 0) {
   };
 
   const bodyY = SEAT + H / 2;
-  const body = part(new RoundedBoxGeometry(W, H, D, 2, 0.025), skin, 0, bodyY, 0);
-  const eye = new THREE.BoxGeometry(0.035, 0.09, 0.01);
+  const body = part(new RoundedBoxGeometry(W, H, D, 3, 0.012), skin, 0, bodyY, 0);
+  const eye = new THREE.BoxGeometry(0.048, 0.115, 0.012);
   for (const x of [-0.145, 0.145]) part(eye, dark, x, bodyY + H * 0.12, D / 2 + 0.005).castShadow = false;
   const arm = new THREE.BoxGeometry(0.09, 0.08, 0.14);
   const armY = bodyY - H * 0.08;
   const left = part(arm, skin, -W / 2 - 0.04, armY, 0.06);
   const right = part(arm, skin, W / 2 + 0.04, armY, 0.06);
   // Seated, the legs hang over the front of the cushion.
-  const leg = new THREE.BoxGeometry(0.05, 0.12, 0.05);
+  const leg = new THREE.BoxGeometry(0.055, 0.13, 0.07);
   for (const x of [-0.19, -0.1, 0.1, 0.19]) part(leg, skin, x, SEAT - 0.04, D / 2 - 0.03);
 
   const spark = new THREE.Sprite(new THREE.SpriteMaterial({ map: sparkTexture(), transparent: true, depthWrite: false }));
@@ -69,16 +69,17 @@ export function makeClaude3d(phase = 0) {
   spark.position.y = sparkY;
   group.add(spark);
 
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
   // Typing in bursts with pauses to think, and the spark spinning and pulsing.
   body.onBeforeRender = () => {
     const t = performance.now() / 1000 + phase;
-    const typing = t % 3.6 < 2.4;
+    const typing = !reduced.matches && t % 3.6 < 2.4;
     const beat = Math.floor(t / 0.14) % 2 === 0;
     left.position.y = armY - (typing && beat ? 0.03 : 0);
     right.position.y = armY - (typing && !beat ? 0.03 : 0);
-    spark.material.rotation = t * 1.6;
-    spark.scale.setScalar(0.23 + 0.05 * Math.abs(Math.sin(t * 2.2)));
-    spark.position.y = sparkY + 0.02 * Math.sin(t * 2.5);
+    spark.material.rotation = reduced.matches ? 0 : Math.floor(t * 5) * Math.PI / 4;
+    spark.scale.setScalar(reduced.matches ? 0.24 : 0.23 + 0.03 * Math.abs(Math.sin(t * 2.2)));
+    spark.position.y = sparkY + (reduced.matches ? 0 : 0.02 * Math.sin(t * 2.5));
   };
   return group;
 }

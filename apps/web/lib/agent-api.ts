@@ -14,8 +14,11 @@ export function createAgentKey(token: string) {
   return apiRequest<{ key: string }>("/api/v1/agent-key", { method: "POST", token });
 }
 
-/** The terminal command that sets up clario-agent with this key. */
-export function agentSetupCommand(key: string) {
+/** Agents clario-agent can set up; Claude Code is its default. */
+export type SetupAgent = "claude" | "codex" | "cursor";
+
+/** The terminal command that sets up clario-agent with this key for one agent. */
+export function agentSetupCommand(key: string, agent: SetupAgent = "claude") {
   const apiUrl = API_BASE_URL.replace(/\/+$/, "");
-  return `npx clario-agent setup --key ${key}${apiUrl === LIVE_API ? "" : ` --api-url ${apiUrl}`}`;
+  return `npx clario-agent setup --key ${key}${agent === "claude" ? "" : ` --agent ${agent}`}${apiUrl === LIVE_API ? "" : ` --api-url ${apiUrl}`}`;
 }

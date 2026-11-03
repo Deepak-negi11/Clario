@@ -195,6 +195,8 @@ export type AgentActivity = {
   project?: string;
   branch?: string;
   commit?: string;
+  /** "claude-code", "codex" or "cursor-agent"; missing from older hooks (Claude Code). */
+  agent?: string;
 };
 
 function activityKey(spaceId: string): string {

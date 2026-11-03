@@ -6,7 +6,7 @@ import {
   getCurrentSpace,
   setAgentActivity,
 } from "../ws/presence";
-import { parseAgentGitInfo } from "./git-info";
+import { parseAgentGitInfo, parseAgentName } from "./git-info";
 import { markAgentConnected } from "./agent-key";
 
 type AgentActivityBody = {
@@ -15,6 +15,7 @@ type AgentActivityBody = {
   project?: unknown;
   branch?: unknown;
   commit?: unknown;
+  agent?: unknown;
 };
 
 const MAX_TEXT_LENGTH = 200;
@@ -62,8 +63,9 @@ export async function handleAgentActivity(req: Request): Promise<Response> {
     return Response.json({ delivered: false, reason: "not-in-space" });
   }
 
-  // Project, branch and commit only describe a running agent; "done" clears them.
-  const git = state === "cooking" ? parseAgentGitInfo(body) : {};
+  // Which agent, and its project, branch and commit, only describe a running agent; "done" clears them.
+  const agent = state === "cooking" ? parseAgentName(body.agent) : undefined;
+  const git = state === "cooking" ? { ...parseAgentGitInfo(body), ...(agent ? { agent } : {}) } : {};
 
   if (state === "done") {
     await clearAgentActivity(spaceId, userId);

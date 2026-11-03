@@ -3,11 +3,19 @@
 import { Check, CircleCheck, Copy, LoaderCircle, X } from "lucide-react";
 import { useCallback, useEffect, useId, useState } from "react";
 import { useDraggablePanel } from "../../hooks/use-draggable-panel";
-import { agentSetupCommand, createAgentKey, getAgentStatus } from "../../lib/agent-api";
+import { agentSetupCommand, createAgentKey, getAgentStatus, type SetupAgent } from "../../lib/agent-api";
 import { getAuthToken } from "../../lib/auth-token";
+import { PixelPet } from "./pixel-pet";
 import { PanelDragHandle, draggableHeader } from "./panel-drag-handle";
 
 const POLL_MS = 3000;
+
+// The agents setup can register with; the note is what's left to do after the command.
+const AGENT_CHOICES: { id: SetupAgent; label: string; note?: string }[] = [
+  { id: "claude", label: "Claude Code" },
+  { id: "codex", label: "Codex", note: "Then open Codex, run /hooks and trust the Clario hook." },
+  { id: "cursor", label: "Cursor", note: "If Cursor is open, restart it afterwards." },
+];
 
 /**
  * Whether this user's Claude Code hook (clario-agent) has connected: null while unknown.
@@ -43,11 +51,13 @@ export function useAgentSetup(selfAgentActive: boolean) {
 export function AgentSetupPanel({ onClose, onConnected }: { onClose: () => void; onConnected: () => void }) {
   const titleId = useId();
   const drag = useDraggablePanel("agent");
-  const [command, setCommand] = useState<string | null>(null);
+  const [key, setKey] = useState<string | null>(null);
+  const [agent, setAgent] = useState<SetupAgent>("claude");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [connected, setConnected] = useState(false);
+  const command = key ? agentSetupCommand(key, agent) : null;
 
   const makeCommand = async () => {
     const token = getAuthToken();
@@ -55,8 +65,7 @@ export function AgentSetupPanel({ onClose, onConnected }: { onClose: () => void;
     setCreating(true);
     setError(null);
     try {
-      const { key } = await createAgentKey(token);
-      setCommand(agentSetupCommand(key));
+      setKey((await createAgentKey(token)).key);
     } catch {
       setError("Couldn't make your setup command. Try again.");
     } finally {
@@ -75,9 +84,9 @@ export function AgentSetupPanel({ onClose, onConnected }: { onClose: () => void;
     }
   };
 
-  // Once the command exists, wait for setup to reach the server.
+  // Once there's a command to run, wait for setup to reach the server.
   useEffect(() => {
-    if (!command || connected) return;
+    if (!key || connected) return;
     const token = getAuthToken();
     if (!token) return;
     const timer = window.setInterval(() => {
@@ -90,7 +99,7 @@ export function AgentSetupPanel({ onClose, onConnected }: { onClose: () => void;
         .catch(() => {});
     }, POLL_MS);
     return () => window.clearInterval(timer);
-  }, [command, connected, onConnected]);
+  }, [key, connected, onConnected]);
 
   return (
     <section
@@ -106,7 +115,7 @@ export function AgentSetupPanel({ onClose, onConnected }: { onClose: () => void;
       <header {...drag.headerProps} className={`${draggableHeader} flex items-center justify-between border-b border-[#eceef1] px-4 py-3`}>
         <PanelDragHandle label="Move agent setup panel" {...drag.handleProps} />
         <h2 id={titleId} className="text-sm font-semibold">
-          Show your Claude Code
+          Show your coding agent
         </h2>
         <button
           type="button"
@@ -120,15 +129,15 @@ export function AgentSetupPanel({ onClose, onConnected }: { onClose: () => void;
 
       <div className="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-4 py-4 text-[13px] leading-5 text-[#3f4552]">
         <p>
-          People in your space see what Claude is doing on your avatar: the project, branch and commit, and the
-          current step. Never your code or prompts.
+          People in your space see what your Claude Code, Codex or Cursor agent is doing on your avatar: the
+          project, branch and commit, and the current step. Never your code or prompts.
         </p>
 
         {connected ? (
           <p role="status" className="flex items-start gap-2 rounded-xl bg-[#ecfdf3] px-3 py-2.5 text-[#106b3a]">
             <CircleCheck size={18} className="mt-px shrink-0" aria-hidden="true" />
             <span>
-              <span className="font-semibold">Your agent is connected.</span> Give Claude a task and click your avatar to see it.
+              <span className="font-semibold">Your agent is connected.</span> Give it a task and click your avatar to see it.
             </span>
           </p>
         ) : !command ? (
@@ -143,6 +152,22 @@ export function AgentSetupPanel({ onClose, onConnected }: { onClose: () => void;
           </button>
         ) : (
           <div className="space-y-2.5">
+            <div role="group" aria-label="Your coding agent" className="grid grid-cols-3 gap-1 rounded-[10px] bg-[#f1f2f5] p-1">
+              {AGENT_CHOICES.map((choice) => (
+                <button
+                  key={choice.id}
+                  type="button"
+                  aria-pressed={agent === choice.id}
+                  onClick={() => setAgent(choice.id)}
+                  className={`flex min-h-11 cursor-pointer items-center justify-center gap-1 rounded-lg text-[12px] font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#12151c] motion-reduce:transition-none ${
+                    agent === choice.id ? "bg-white text-[#12151c] shadow-[0_1px_2px_rgba(18,21,28,0.12)]" : "text-[#5c6371] hover:text-[#12151c]"
+                  }`}
+                >
+                  <PixelPet agent={choice.id} size={28}/>
+                  {choice.label}
+                </button>
+              ))}
+            </div>
             <p className="font-medium text-[#12151c]">Run this in the terminal, inside the project you want to share:</p>
             <div className="flex items-stretch gap-1.5">
               <code
@@ -160,6 +185,9 @@ export function AgentSetupPanel({ onClose, onConnected }: { onClose: () => void;
                 {copied ? <Check size={16} aria-hidden="true" /> : <Copy size={16} aria-hidden="true" />}
               </button>
             </div>
+            {AGENT_CHOICES.find((choice) => choice.id === agent)?.note && (
+              <p className="text-[12px] font-medium text-[#3f4552]">{AGENT_CHOICES.find((choice) => choice.id === agent)?.note}</p>
+            )}
             <p className="text-[12px] text-[#5c6371]">
               This is your own key and it stays the same. Keep it private: anyone with it can post as your agent.
             </p>

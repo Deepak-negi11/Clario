@@ -67,6 +67,8 @@ export type AgentActivityEntry = {
   project?: string;
   branch?: string;
   commit?: string;
+  /** Which agent: "claude-code", "codex" or "cursor-agent"; absent from older hooks (Claude Code). */
+  agent?: string;
 };
 export type AgentActivities = Record<string, AgentActivityEntry>;
 /** `failed`: a message from them that couldn't be decrypted, or one of yours that wasn't sent. */
@@ -288,7 +290,7 @@ export function useSpaceSocket(spaceId: string, mapTemplate: MapTemplateId, cust
           break;
         }
         case "agent-activity": {
-          const { userId, text, state, at, project, branch, commit } = message.payload;
+          const { userId, text, state, at, project, branch, commit, agent } = message.payload;
           setAgentActivities((current) => {
             if (state === "done") {
               if (!(userId in current)) return current;
@@ -296,7 +298,7 @@ export function useSpaceSocket(spaceId: string, mapTemplate: MapTemplateId, cust
               delete next[userId];
               return next;
             }
-            return { ...current, [userId]: { text, state, at, project, branch, commit } };
+            return { ...current, [userId]: { text, state, at, project, branch, commit, agent } };
           });
           break;
         }

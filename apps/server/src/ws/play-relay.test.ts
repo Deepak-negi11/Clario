@@ -155,18 +155,19 @@ describe("game room play over the socket", () => {
   test("the lounge TV plays the same video for everyone in the space", async () => {
     const { a, b, c, idA } = await joinThree();
 
-    a.send({ type: "tv", payload: { action: "play", videoId: "arj7oStGLkU", start: 30 } });
+    const screen = "tv:6,8";
+    a.send({ type: "tv", payload: { action: "play", screen, videoId: "arj7oStGLkU", start: 30 } });
     for (const ws of [a, b, c]) {
       const update = await ws.next();
-      expect(update).toMatchObject({ type: "tv", payload: { state: { videoId: "arj7oStGLkU", byUserId: idA } } });
-      expect((update.payload?.state as { position: number }).position).toBeGreaterThanOrEqual(30);
+      expect(update).toMatchObject({ type: "tv", payload: { screens: { [screen]: { videoId: "arj7oStGLkU", byUserId: idA } } } });
+      expect((update.payload?.screens as Record<string, { position: number }>)[screen]!.position).toBeGreaterThanOrEqual(30);
     }
 
     c.send({ type: "tv", payload: { action: "sync" } });
-    expect(await c.next()).toMatchObject({ type: "tv", payload: { state: { videoId: "arj7oStGLkU" } } });
+    expect(await c.next()).toMatchObject({ type: "tv", payload: { screens: { [screen]: { videoId: "arj7oStGLkU" } } } });
 
-    b.send({ type: "tv", payload: { action: "stop" } });
-    for (const ws of [a, b, c]) expect(await ws.next()).toMatchObject({ type: "tv", payload: { state: null } });
+    b.send({ type: "tv", payload: { action: "stop", screen } });
+    for (const ws of [a, b, c]) expect(await ws.next()).toMatchObject({ type: "tv", payload: { screens: {} } });
 
     for (const ws of [a, b, c]) ws.close();
   }, SLOW);

@@ -16,6 +16,13 @@ function cleanText(value: unknown, max: number): string | undefined {
   return text && text.length <= max ? text : undefined;
 }
 
+// The agents clario-agent reports for; the card shows which one. Older hooks send none (Claude Code).
+const AGENT_NAMES = new Set(["claude-code", "codex", "cursor-agent"]);
+
+export function parseAgentName(value: unknown): string | undefined {
+  return typeof value === "string" && AGENT_NAMES.has(value) ? value : undefined;
+}
+
 export function parseAgentGitInfo(body: Record<string, unknown>): AgentGitInfo {
   const info: AgentGitInfo = {};
   const project = cleanText(body.project, MAX_PROJECT_LENGTH);

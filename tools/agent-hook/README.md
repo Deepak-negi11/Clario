@@ -1,18 +1,22 @@
 # clario-agent: show your AI agent's activity in Clario 🧑‍🍳
 
-A Claude Code hook that shows what your agent is working on to everyone in your current
-Clario space. Others see a pulsing badge above your avatar while the agent works, and
-clicking your avatar shows your agent card: what Claude is doing plus the project, branch
-and commit (e.g. `graphite · feat/missions · a1b2c3d`). The badge clears when Claude finishes.
+A hook for **Claude Code, Codex and Cursor** that shows what your coding agent is working on
+to everyone in your current Clario space. Others see a pulsing badge above your avatar while
+the agent works, and clicking your avatar shows your agent card: which agent, what it's doing,
+and the project, branch and commit (e.g. `graphite · feat/missions · a1b2c3d`). The badge
+clears when the agent finishes.
 
 ## Setup (one command)
 
 1. Open your space on [clario.games](https://www.clario.games) and click **Agent** in the
-   left menu. It shows your setup command, with a key made for you:
+   left menu. Pick your agent; it shows your setup command, with your key in it:
    ```bash
-   npx clario-agent setup --key YOUR_KEY
+   npx clario-agent setup --key YOUR_KEY                 # Claude Code
+   npx clario-agent setup --key YOUR_KEY --agent codex   # Codex
+   npx clario-agent setup --key YOUR_KEY --agent cursor  # Cursor
    ```
 2. Copy it and run it in the terminal, inside the project you want to share.
+   `--agent all` sets up all three; `--agent codex,cursor` works too.
 
 That's it: the Agent button disappears once your agent has connected. Setup:
 
@@ -21,19 +25,30 @@ That's it: the Agent button disappears once your agent has connected. Setup:
   same command for you. It can only post agent activity: it can't sign in, open a space or
   change anything else. No password is ever typed in the terminal.
 - **Installs the hook** at `~/.clario/hook.mjs`.
-- **Registers it with Claude Code** for this project only, in `.claude/settings.local.json`.
-  Add `--global` to use it in every project (`~/.claude/settings.json`) instead.
+- **Registers it with your agent:**
 
-Then give Claude a task in that project and click your avatar. Teammates who do the same and
-join your space show up on their avatars too.
+  | Agent | Hook file | Shared from |
+  |---|---|---|
+  | Claude Code | `.claude/settings.local.json` in this project (`~/.claude/settings.json` with `--global`) | this project |
+  | Codex | `~/.codex/hooks.json` (or `$CODEX_HOME/hooks.json`) | the projects you ran setup in |
+  | Cursor | `~/.cursor/hooks.json` | the projects you ran setup in |
 
-To add another project later, run `npx clario-agent setup` there: it reuses your saved key.
-Setup never registers the hook twice, leaves your other Claude Code settings and hooks as
-they are, and saves the previous file next to it as `*.clario-backup`.
+  Codex and Cursor read one hook file for every project, so the hook itself only reports
+  from the projects you ran setup in; add `--global` to share from all of them.
+- **Codex** asks before it runs a new hook: open Codex, run `/hooks` and trust the Clario
+  hook. **Cursor**: restart it if it was open.
+
+Then give your agent a task in that project and click your avatar. Teammates who do the same
+and join your space show up on their avatars too.
+
+To add another project later, run `npx clario-agent setup --agent …` there: it reuses your
+saved key. Setup never registers the hook twice, leaves your other settings and hooks as they
+are, and saves the previous file next to it as `*.clario-backup`.
 
 ```bash
-npx clario-agent status      # server, key expiry, where the hook is registered
-npx clario-agent uninstall   # remove the hook from this project (add --global for all)
+npx clario-agent status              # server, key, which agents are set up and where
+npx clario-agent uninstall           # stop sharing from this project, for every agent
+npx clario-agent uninstall --global  # remove every Clario hook and stop sharing everywhere
 ```
 
 It uses the live server at `https://api.clario.games`. Running Clario yourself? The Agent
@@ -48,12 +63,12 @@ from `~/.viora` and replaces the old hook. You can delete `~/.viora` afterwards.
 
 ## How it behaves
 
-- While Claude runs tools (edits, bash commands…) your badge shows "cooking" with a short
-  description of the current tool (e.g. `Claude is using Edit page.tsx` or
-  `Claude is using Bash $ bun, git`)
+- While your agent works your badge shows "cooking" with a short description of what it's
+  doing, e.g. `Claude is using Edit page.tsx`, `Codex is using Shell $ bun, git` or
+  `Cursor is editing page.tsx`, and the card says which agent it is
 - Your agent card also shows the project folder, git branch and short commit the agent is
   working in
-- When Claude finishes, the badge clears automatically
+- When the agent finishes, the badge clears automatically
 - If you're not inside a Clario space, updates are silently dropped
 - Updates are throttled (2s) so fast tool bursts don't spam the room
 - The hook never blocks or fails your agent session: all errors are swallowed

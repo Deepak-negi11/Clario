@@ -2,6 +2,13 @@ import { FolderGit2, GitBranch, GitCommitHorizontal } from "lucide-react";
 
 type Workspace = { project?: string; branch?: string; commit?: string };
 
+const AGENT_LABELS: Record<string, string> = { "claude-code": "Claude Code", codex: "Codex", "cursor-agent": "Cursor" };
+
+/** The agent's name for the card; older hooks don't say which, and they're all Claude Code. */
+export function agentLabel(agent?: string) {
+  return (agent && AGENT_LABELS[agent]) || "Claude Code";
+}
+
 /**
  * Where a player's agent is working: project folder, git branch and short commit,
  * shown in their agent card. Renders nothing when the hook doesn't share them.

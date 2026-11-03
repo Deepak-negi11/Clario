@@ -16,7 +16,9 @@ import { readSavedLook } from "../../lib/avatar/saved-look";
 import { AvatarPicker } from "../game-ui/avatar-picker";
 import { HQ_CLAUDE_SEATS, HQ_COLS, HQ_COWORKERS, HQ_ITEMS, HQ_MENTOR, HQ_PATH, HQ_ROWS, type Dir, type HqItem } from "../../lib/maps/clario-hq";
 import { hqPlaySpots, playSpotsFor, spotFront, spotInReach, type PlayAction } from "../../lib/maps/play-spots";
-import { makeClaude3d } from "./claude-3d";
+import { makeAgent3d } from "./agent-3d";
+import { reducedAgentMotion } from "../../lib/agents/motion";
+import { agentKind } from "../../lib/agents/identity";
 import { buildCustomOffice } from "./custom-scene";
 import { buildOffice, clearOffice, disposeScene, loadModels, seatMap, textSprite, type DeskSpot, type ModelSet, type SwivelChair } from "./office-scene";
 import { loadPeople, makePerson, type Doing, type Keyboard, type PeopleKit, type Person } from "./people";
@@ -448,15 +450,20 @@ function freeObject(object: THREE.Object3D) {
 }
 
 // The 2D map's cues on a person, in 3D: a green ring while they're in your call, their name faded
-// while they're out of earshot (the 2D map fades them), and Claude hovering over them, typing,
-// while their agent works. `facing` turns Claude to the camera.
-function showCues(avatar: Avatar, cue: { inCall: boolean; heard: boolean; busy: boolean }, dt: number, time: number, facing: number) {
+// while they're out of earshot (the 2D map fades them), and their companion hovering above them,
+// while their agent works. `facing` turns the companion to the camera.
+function showCues(avatar: Avatar, cue: { inCall: boolean; heard: boolean; busy: boolean; agent?: string }, dt: number, time: number, facing: number) {
   avatar.callRing.visible = cue.inCall;
   avatar.label.position.y = 1.95 - 0.38 * avatar.sit;
   avatar.label.material.opacity = cue.heard ? 1 : 0.5;
+  const kind = agentKind(cue.agent);
+  if (avatar.helper && cue.busy && avatar.helper.userData.agentKind !== kind) {
+    avatar.group.remove(avatar.helper); freeObject(avatar.helper); avatar.helper = null;
+  }
   if (cue.busy && !avatar.helper) {
-    avatar.helper = makeClaude3d(avatar.offset);
+    avatar.helper = makeAgent3d(kind, avatar.offset);
     avatar.helper.scale.setScalar(HELPER_SCALE);
+    avatar.helper.userData.agentCompanion = true;
     avatar.group.add(avatar.helper);
   } else if (!cue.busy && avatar.helper) {
     avatar.group.remove(avatar.helper);
@@ -464,8 +471,17 @@ function showCues(avatar: Avatar, cue: { inCall: boolean; heard: boolean; busy: 
     avatar.helper = null;
   }
   if (avatar.helper) {
-    avatar.helper.position.y = HELPER_Y + Math.abs(Math.sin(time * 7.7 + avatar.offset)) * 0.04;
-    avatar.helper.rotation.y = facing;
+    avatar.helper.position.y = HELPER_Y + (reducedAgentMotion() ? 0 : Math.sin(time * 2.4 + avatar.offset) * 0.025);
+    const helper = avatar.helper;
+    const progress = (performance.now() - (helper.userData.reactedAt ?? -10000)) / 800;
+    const playing = progress >= 0 && progress < 1 && !reducedAgentMotion();
+    const bounce = playing ? Math.sin(progress * Math.PI) : 0;
+    const hover = helper.userData.hovered ? 0.08 : 0;
+    helper.userData.hoverAmount = reducedAgentMotion() ? hover : THREE.MathUtils.damp(helper.userData.hoverAmount ?? 0, hover, 14, dt);
+    helper.scale.setScalar(HELPER_SCALE * (1 + helper.userData.hoverAmount + bounce * 0.16));
+    helper.position.y += bounce * 0.12;
+    helper.rotation.y = facing + (playing && kind === "cursor-agent" ? Math.sin(progress * Math.PI * 4) * bounce * 0.34 : 0);
+    helper.rotation.z = playing ? Math.sin(progress * Math.PI * 4) * bounce * (kind === "cursor-agent" ? 0.1 : 0.14) : 0;
   }
   // Reactions rise from just over their name, or over Claude, easing out as they fade.
   for (let i = avatar.reactions.length - 1; i >= 0; i--) {
@@ -569,7 +585,7 @@ export function Office3D({
   // send, and whose agent is working (Claude hovers over them).
   nearbyRef?: RefObject<Set<string>>;
   reactionsRef?: RefObject<{ id: string; userId: string; emoji: string; at: number }[]>;
-  activitiesRef?: RefObject<Record<string, { state: "cooking" | "done" }>>;
+  activitiesRef?: RefObject<Record<string, { state: "cooking" | "done"; agent?: string }>>;
   // What the meeting-room projector shows, for the room you're in (hooks/use-projector.ts).
   projectorRef?: RefObject<ProjectorFeed | null>;
   // Clicking someone opens their card, as on the 2D map.
@@ -779,6 +795,10 @@ export function Office3D({
         else walkTo(talker.x, talker.y + 1);
         return;
       }
+      // A companion reacts locally and opens the same activity card as its person.
+      node = hit.object;
+      while (node && !node.userData.agentCompanion) node = node.parent;
+      if (node) node.userData.reactedAt = performance.now();
       // A person: their card.
       node = hit.object;
       while (node && !node.userData.player) node = node.parent;
@@ -819,6 +839,30 @@ export function Office3D({
       marker.visible = true;
       walkTo(x, y);
     };
+    let hoveredCompanion: THREE.Object3D | null = null;
+    let hoverCheckedAt = 0;
+    const clearCompanionHover = () => {
+      if (hoveredCompanion) hoveredCompanion.userData.hovered = false;
+      hoveredCompanion = null;
+      renderer.domElement.style.cursor = "";
+    };
+    const onCompanionHover = (event: PointerEvent) => {
+      if (event.buttons || event.pointerType !== "mouse") { clearCompanionHover(); return; }
+      if (performance.now() - hoverCheckedAt < 50) return;
+      hoverCheckedAt = performance.now();
+      const rect = renderer.domElement.getBoundingClientRect();
+      pointer.set(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
+      raycaster.setFromCamera(pointer, camera);
+      const helpers = [...avatars.values()].flatMap(avatar => avatar.helper ? [avatar.helper] : []);
+      const object = raycaster.intersectObjects(helpers, true)[0]?.object;
+      let node: THREE.Object3D | null = object ?? null;
+      while (node && !node.userData.agentCompanion) node = node.parent;
+      if (node === hoveredCompanion) return;
+      clearCompanionHover();
+      if (node) { hoveredCompanion = node; node.userData.hovered = true; renderer.domElement.style.cursor = "pointer"; }
+    };
+    renderer.domElement.addEventListener("pointermove", onCompanionHover);
+    renderer.domElement.addEventListener("pointerleave", clearCompanionHover);
     renderer.domElement.addEventListener("pointerdown", onPointerDown);
     renderer.domElement.addEventListener("pointerup", onPointerUp);
     renderer.domElement.addEventListener("pointercancel", onPointerCancel);
@@ -1173,6 +1217,7 @@ export function Office3D({
           inCall: !isSelf && !!nearby?.has(id),
           heard,
           busy: heard && activitiesRef?.current?.[id]?.state === "cooking",
+          agent: activitiesRef?.current?.[id]?.agent,
         }, dt, clock.getElapsed(), Math.atan2(camera.position.x - x, camera.position.z - z));
       }
       const reactions = reactionsRef?.current ?? [];
@@ -1331,6 +1376,9 @@ export function Office3D({
       companions.setOpen(false);
       resize.disconnect();
       window.removeEventListener("keydown", onArrow, true);
+      renderer.domElement.removeEventListener("pointermove", onCompanionHover);
+      renderer.domElement.removeEventListener("pointerleave", clearCompanionHover);
+      clearCompanionHover();
       renderer.domElement.removeEventListener("pointerdown", onPointerDown);
       renderer.domElement.removeEventListener("pointerup", onPointerUp);
       renderer.domElement.removeEventListener("pointercancel", onPointerCancel);

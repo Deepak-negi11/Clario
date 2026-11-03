@@ -1,0 +1,212 @@
+.wrapper {
+  position: relative;
+  width: 76px;
+  flex-shrink: 0;
+  padding-bottom: 12px;
+}
+.emblem {
+  position: relative;
+  display: grid;
+  width: 76px;
+  height: 76px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid var(--edge);
+  border-radius: 20px;
+  background: var(--wash);
+  color: var(--accent);
+  cursor: pointer;
+  perspective: 300px;
+  box-shadow: inset 0 1px 0 #ffffffeb;
+  transition:
+    box-shadow 0.2s,
+    border-color 0.2s;
+  touch-action: manipulation;
+}
+.emblem:hover,
+.emblem:focus-visible {
+  border-color: var(--accent);
+  box-shadow:
+    0 5px 16px -8px var(--accent),
+    inset 0 1px 0 #fff;
+}
+.emblem:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.tilt {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: inherit;
+  transform: rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg));
+  transition: transform 0.15s ease-out;
+}
+.art,
+.reaction {
+  display: block;
+}
+.sheen {
+  pointer-events: none;
+  position: absolute;
+  inset: -50%;
+  background: linear-gradient(
+    115deg,
+    transparent 40%,
+    #ffffff6b 50%,
+    transparent 60%
+  );
+  transform: translateX(-75%);
+}
+.emblem:hover .sheen,
+.emblem:focus-visible .sheen {
+  animation: shine 0.65s ease-out;
+}
+.reaction {
+  animation: wave 0.85s ease-in-out;
+}
+.emblem[data-agent="codex"] .reaction {
+  animation-name: launch;
+}
+.emblem[data-agent="cursor-agent"] .reaction {
+  animation-name: sway;
+}
+.sparks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.sparks i {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0;
+  --x: -44px;
+  --y: -30px;
+  animation: spark 0.75s ease-out both;
+}
+.sparks i:nth-child(2) {
+  --x: 43px;
+  --y: -33px;
+}
+.sparks i:nth-child(3) {
+  --x: 40px;
+  --y: 36px;
+}
+.sparks i:nth-child(4) {
+  --x: -42px;
+  --y: 34px;
+}
+.hint,
+.greeting {
+  position: absolute;
+  top: 80px;
+  left: -10px;
+  right: -10px;
+  text-align: center;
+  font-size: 9px;
+  line-height: 12px;
+  color: #78837c;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.hint {
+  opacity: 0.7;
+}
+.greeting {
+  animation: reveal 0.25s ease-out;
+}
+@keyframes shine {
+  to {
+    transform: translateX(75%);
+  }
+}
+@keyframes wave {
+  0%,
+  100% {
+    transform: rotate(0);
+  }
+  22% {
+    transform: translateY(-5px) rotate(-12deg);
+  }
+  45% {
+    transform: translateY(-5px) rotate(12deg);
+  }
+  68% {
+    transform: translateY(-2px) rotate(-6deg);
+  }
+}
+@keyframes launch {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  25% {
+    transform: translateY(3px) scale(0.94);
+  }
+  55% {
+    transform: translateY(-9px) scale(1.08);
+  }
+  78% {
+    transform: translateY(1px) scale(0.99);
+  }
+}
+@keyframes sway {
+  0%,
+  100% {
+    transform: translateX(0) rotateY(0) rotateZ(0);
+  }
+  22% {
+    transform: translateX(-3px) rotateY(-24deg) rotateZ(-7deg);
+  }
+  45% {
+    transform: translateX(3px) rotateY(22deg) rotateZ(6deg);
+  }
+  68% {
+    transform: translateX(-2px) rotateY(-14deg) rotateZ(-4deg);
+  }
+  85% {
+    transform: translateX(1px) rotateY(6deg) rotateZ(2deg);
+  }
+}
+@keyframes spark {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.5);
+  }
+  20% {
+    opacity: 0.8;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--x), var(--y)) scale(0);
+  }
+}
+@keyframes reveal {
+  from {
+    opacity: 0.3;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .emblem,
+  .tilt {
+    transition: none;
+    transform: none;
+  }
+  .wrapper * {
+    animation: none !important;
+  }
+  .sparks {
+    display: none;
+  }
+}

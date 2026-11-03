@@ -1,7 +1,7 @@
 {
   "name": "clario-agent",
-  "version": "0.2.0",
-  "description": "Show what your Claude Code agent is doing (project, branch, commit) on your Clario avatar.",
+  "version": "0.3.0",
+  "description": "Show what your Claude Code, Codex or Cursor agent is doing (project, branch, commit) on your Clario avatar.",
   "type": "module",
   "bin": {
     "clario-agent": "cli.mjs"
@@ -18,6 +18,8 @@
   "keywords": [
     "clario",
     "claude-code",
+    "codex",
+    "cursor",
     "hooks",
     "agent",
     "metaverse"

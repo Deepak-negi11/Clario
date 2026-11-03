@@ -1,27 +1,43 @@
 #!/usr/bin/env node
 /**
- * Clario agent hook for Claude Code
+ * Clario agent hook for Claude Code, Codex and Cursor
  *
  * Broadcasts what your AI agent is doing to everyone in your current Clario space.
  * Setup guide: tools/agent-hook/README.md
  *
- * Reads Claude Code hook events from stdin and POSTs activity to
+ *   node hook.mjs [--agent claude-code|codex|cursor-agent]   (hook JSON on stdin)
+ *
+ * Reads the agent's hook events from stdin and POSTs activity to
  * POST /api/v1/agent-activity on your Clario server. Exits 0 silently on any
- * failure so it never blocks your agent session.
+ * failure so it never blocks your agent session. Without --agent it's Claude Code.
  *
  * Sent: a short status line (tool name, edited file name, or the programs a shell
- * command runs, never its arguments) plus the project folder, git branch and short
- * commit. `"shareGit": false` in ~/.clario/agent.json (or CLARIO_SHARE_GIT=0) keeps
- * project, branch and commit on this machine.
+ * command runs, never its arguments), which agent it is, and the project folder,
+ * git branch and short commit. `"shareGit": false` in ~/.clario/agent.json (or
+ * CLARIO_SHARE_GIT=0) keeps project, branch and commit on this machine.
+ *
+ * Codex and Cursor read their hooks from one file for every project, so for them this
+ * only reports from the projects setup was run in (`projects` in the config), unless
+ * setup was run with --global (`everyProject`). Cursor reads each hook's stdout as its
+ * reply, so it always gets the neutral one: carry on, change nothing.
  */
 
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 
 const CONFIG_PATH = join(homedir(), ".clario", "agent.json");
 const THROTTLE_MS = 2000;
 const STATE_PATH = join(homedir(), ".clario", ".agent-hook-state");
+
+/** Agents this hook understands, by the --agent value setup registers, with the name shown in Clario. */
+const AGENTS = { "claude-code": "Claude", codex: "Codex", "cursor-agent": "Cursor" };
+
+function agentFromArgs(argv) {
+  const i = argv.indexOf("--agent");
+  const value = i > -1 ? argv[i + 1] : argv.find((a) => a.startsWith("--agent="))?.slice("--agent=".length);
+  return value in AGENTS ? value : "claude-code";
+}
 
 function readStdin() {
   return new Promise((resolve) => {
@@ -36,7 +52,7 @@ function readStdin() {
 function loadConfig() {
   try {
     const config = JSON.parse(readFileSync(CONFIG_PATH, "utf8"));
-    // agentKey (setup.mjs, lasts 180 days) wins over a pasted 7-day login token.
+    // agentKey (from setup) wins over a pasted 7-day login token.
     const credential = config?.agentKey || config?.token;
     if (credential && config?.apiUrl) return { ...config, credential };
   } catch {
@@ -50,6 +66,28 @@ function lastSentAt() {
   } catch {
     return 0;
   }
+}
+
+/** Working directory of a hook event. Claude Code and Codex send `cwd`; Cursor sends `workspace_roots`. */
+function eventCwd(event) {
+  const roots = Array.isArray(event.workspace_roots) ? event.workspace_roots.filter((r) => typeof r === "string" && r) : [];
+  return (typeof event.cwd === "string" && event.cwd) || roots[0] || process.env.CURSOR_PROJECT_DIR || process.cwd();
+}
+
+function realPath(path) {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
+}
+
+/** Codex and Cursor: only from the projects setup was run in, or every project after setup --global. */
+function sharedHere(config, agent, cwd) {
+  if (agent === "claude-code" || config.everyProject === true) return true; // Claude Code's hook is per project already
+  const here = realPath(cwd);
+  const projects = Array.isArray(config.projects) ? config.projects : [];
+  return projects.some((p) => typeof p === "string" && (here === p || here.startsWith(p.endsWith(sep) ? p : p + sep)));
 }
 
 // Git: project, branch and commit, read from .git directly (no git CLI).
@@ -118,10 +156,9 @@ function readRef(gitDir, name) {
 }
 
 /** Project folder, branch and short commit for the agent card; nothing when sharing is off. */
-function gitInfo(event, config) {
+function gitInfo(cwd, config) {
   const env = process.env.CLARIO_SHARE_GIT;
   if (env !== undefined ? env === "0" : config.shareGit === false) return {};
-  const cwd = typeof event.cwd === "string" && event.cwd ? event.cwd : process.cwd();
   const root = findGitRoot(cwd);
   if (!root) return { project: basename(resolve(cwd)) };
   const { branch, commit } = readHead(root);
@@ -152,42 +189,89 @@ function programNames(command) {
   return names.slice(0, 3);
 }
 
-function describe(event) {
-  const tool = typeof event.tool_name === "string" ? event.tool_name : "";
-  if (event.hook_event_name === "Stop") return { state: "done", text: "" };
-  if (event.hook_event_name === "SessionEnd") return { state: "done", text: "" };
+/** A shell tool's command line. Codex often sends it as ["bash", "-lc", "the command"]. */
+function commandText(input) {
+  const command = input?.command ?? input?.cmd;
+  if (typeof command === "string") return command;
+  if (!Array.isArray(command) || !command.every((part) => typeof part === "string")) return "";
+  const flag = command.findIndex((part) => part === "-c" || part === "-lc");
+  return flag > -1 && command[flag + 1] ? command[flag + 1] : command.join(" ");
+}
 
-  const toolLabel = tool.replace(/^(mcp__|LambdaResponse)/, "").slice(0, 40);
-  let detail = "";
-  if (tool === "Edit" || tool === "Write" || tool === "MultiEdit") {
-    const filePath = event?.tool_input?.file_path;
-    if (typeof filePath === "string") {
-      const parts = filePath.split("/");
-      detail = ` ${parts[parts.length - 1]}`;
-    }
+/** The first file a Codex apply_patch names ("*** Update File: path"), wherever the patch sits in the input. */
+function patchFile(value, depth = 0) {
+  if (depth > 3 || value == null) return undefined;
+  if (typeof value === "string") return /^\*\*\* (?:Update|Add|Delete) File:\s*(.+?)\s*$/m.exec(value)?.[1];
+  const values = Array.isArray(value) ? value : typeof value === "object" ? Object.values(value) : [];
+  for (const v of values) {
+    const found = patchFile(v, depth + 1);
+    if (found) return found;
   }
-  if (tool === "Bash" && typeof event?.tool_input?.command === "string") {
-    const names = programNames(event.tool_input.command);
+  return undefined;
+}
+
+const fileName = (path) => (typeof path === "string" && path.trim() ? basename(path.trim()) : "");
+
+const DONE_EVENTS = new Set(["Stop", "SessionEnd", "stop", "sessionEnd"]);
+const PROMPT_EVENTS = new Set(["UserPromptSubmit", "beforeSubmitPrompt"]);
+const EDIT_TOOLS = new Set(["edit", "write", "multiedit", "notebookedit"]);
+const PATCH_TOOLS = new Set(["apply_patch", "applypatch"]);
+const SHELL_TOOLS = new Set(["bash", "shell", "local_shell", "exec_command"]);
+
+/** What the agent is doing, as the one line others see; no text means there's nothing to send. */
+function describe(event, agent) {
+  const name = AGENTS[agent];
+  const hookEvent = event.hook_event_name;
+  if (DONE_EVENTS.has(hookEvent)) return { state: "done", text: "" };
+  if (PROMPT_EVENTS.has(hookEvent)) return { state: "cooking", text: `${name} is thinking` };
+  // Cursor: one event per file its agent changes, with the file at the top level.
+  if (hookEvent === "afterFileEdit") {
+    const file = fileName(event.file_path);
+    return { state: "cooking", text: file ? `${name} is editing ${file}` : `${name} is editing` };
+  }
+  if (hookEvent !== "PreToolUse" && hookEvent !== "PostToolUse") return { state: "cooking", text: "" };
+
+  const tool = typeof event.tool_name === "string" ? event.tool_name : "";
+  const key = tool.toLowerCase();
+  let label = tool.replace(/^(mcp__|LambdaResponse)/, "").slice(0, 40) || "a tool";
+  let detail = "";
+  if (EDIT_TOOLS.has(key)) {
+    const file = fileName(event?.tool_input?.file_path ?? event?.tool_input?.notebook_path);
+    if (file) detail = ` ${file}`;
+  } else if (PATCH_TOOLS.has(key)) {
+    label = "Edit";
+    const file = fileName(patchFile(event?.tool_input));
+    if (file) detail = ` ${file}`;
+  } else if (SHELL_TOOLS.has(key)) {
+    if (key !== "bash") label = "Shell";
+    const names = programNames(commandText(event?.tool_input));
     if (names.length) detail = ` $ ${names.join(", ")}`;
   }
-  return { state: "cooking", text: `Claude is using ${toolLabel || "a tool"}${detail}` };
+  return { state: "cooking", text: `${name} is using ${label}${detail}` };
 }
 
 async function main() {
-  const config = loadConfig();
-  if (!config) process.exit(0);
-
+  const agent = agentFromArgs(process.argv.slice(2));
   const raw = await readStdin();
-  if (!raw.trim()) process.exit(0);
-
-  let event;
+  let event = {};
   try {
-    event = JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) event = parsed;
   } catch {
-    process.exit(0);
   }
 
-  const { state, text } = describe(event);
+  // Cursor waits for a reply on stdout before it goes on: give it first, whatever happens next.
+  if (agent === "cursor-agent") {
+    await new Promise((done) => process.stdout.write(event.hook_event_name === "beforeSubmitPrompt" ? '{"continue":true}' : "{}", done));
+  }
+
+  const config = loadConfig();
+  if (!config || !raw.trim()) process.exit(0);
+
+  const cwd = eventCwd(event);
+  if (!sharedHere(config, agent, cwd)) process.exit(0);
+
+  const { state, text } = describe(event, agent);
   if (state === "cooking" && !text) process.exit(0);
 
   // Client-side throttle: hook events fire per tool use and can be chatty.
@@ -204,7 +288,7 @@ async function main() {
         "Content-Type": "application/json",
         Authorization: `Bearer ${config.credential}`,
       },
-      body: JSON.stringify(state === "cooking" ? { text, state, ...gitInfo(event, config) } : { text, state }),
+      body: JSON.stringify(state === "cooking" ? { text, state, agent, ...gitInfo(cwd, config) } : { text, state, agent }),
       signal: controller.signal,
     });
     if (state === "cooking") {
