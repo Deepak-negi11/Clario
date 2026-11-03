@@ -1,6 +1,6 @@
 {
   "name": "clario-agent",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Show what your Claude Code, Codex or Cursor agent is doing (project, branch, commit) on your Clario avatar.",
   "type": "module",
   "bin": {
@@ -12,6 +12,9 @@
     "clario-agent-hook.mjs",
     "README.md"
   ],
+  "scripts": {
+    "test": "bun test"
+  },
   "engines": {
     "node": ">=18"
   },

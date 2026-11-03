@@ -4,6 +4,7 @@ import { publishRoomEvent } from "../ws/pubsub";
 import {
   clearAgentActivity,
   getCurrentSpace,
+  getAgentActivities,
   setAgentActivity,
 } from "../ws/presence";
 import { parseAgentGitInfo, parseAgentName } from "./git-info";
@@ -50,12 +51,14 @@ export async function handleAgentActivity(req: Request): Promise<Response> {
   // Only "cooking" updates are throttled, and only by earlier "cooking" ones. A "done" usually
   // arrives right after the last tool call (dropping it would leave the badge stuck on), and the
   // next turn's first update often comes right after a "done" (dropping it would hide the agent).
+  const agent = parseAgentName(body.agent);
+  const throttleKey = `${userId}:${agent ?? "claude-code"}`;
   const now = Date.now();
   if (state === "cooking") {
-    if (now - (lastActivityAt.get(userId) ?? 0) < THROTTLE_MS) {
+    if (now - (lastActivityAt.get(throttleKey) ?? 0) < THROTTLE_MS) {
       return Response.json({ delivered: false, reason: "throttled" });
     }
-    lastActivityAt.set(userId, now);
+    lastActivityAt.set(throttleKey, now);
   }
 
   const spaceId = await getCurrentSpace(userId);
@@ -64,10 +67,14 @@ export async function handleAgentActivity(req: Request): Promise<Response> {
   }
 
   // Which agent, and its project, branch and commit, only describe a running agent; "done" clears them.
-  const agent = state === "cooking" ? parseAgentName(body.agent) : undefined;
   const git = state === "cooking" ? { ...parseAgentGitInfo(body), ...(agent ? { agent } : {}) } : {};
 
   if (state === "done") {
+    lastActivityAt.delete(throttleKey);
+    const current = (await getAgentActivities(spaceId))[userId];
+    if (agent && current?.agent && current.agent !== agent) {
+      return Response.json({ delivered: false, reason: "different-agent-active" });
+    }
     await clearAgentActivity(spaceId, userId);
   } else {
     await setAgentActivity(spaceId, userId, { text, state, at: now, ...git });

@@ -501,7 +501,7 @@ function LiveSpace({
         newTaskCount={countNewTasks(spaceTasks.tasks)}
         errandsLeft={isHq ? ERRANDS.filter((errand) => !errands.progress.done[errand.id]).length : undefined}
         canBuild={isCustomMap && canBuild && !!customMap}
-        agentSetup={agentSetup.connected === false || panel === "agent"}
+        agentSetup={true}
         onLeave={onLeave}
       />
       {status === "reconnecting" && (

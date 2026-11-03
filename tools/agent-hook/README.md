@@ -26,16 +26,17 @@ That's it: the Agent button disappears once your agent has connected. Setup:
 - **Installs the hook** at `~/.clario/hook.mjs`.
 - **Registers it with your agent:**
 
-  | Agent | Hook file | Shared from |
-  |---|---|---|
-  | Claude Code | `.claude/settings.local.json` in this project (`~/.claude/settings.json` with `--global`) | this project |
-  | Codex | `~/.codex/hooks.json` (or `$CODEX_HOME/hooks.json`) | the projects you ran setup in |
-  | Cursor | `~/.cursor/hooks.json` | the projects you ran setup in |
+  | Agent       | Hook file                                                                                 | Shared from                   |
+  | ----------- | ----------------------------------------------------------------------------------------- | ----------------------------- |
+  | Claude Code | `.claude/settings.local.json` in this project (`~/.claude/settings.json` with `--global`) | this project                  |
+  | Codex       | `~/.codex/hooks.json` (or `$CODEX_HOME/hooks.json`)                                       | the projects you ran setup in |
+  | Cursor      | `~/.cursor/hooks.json`                                                                    | the projects you ran setup in |
 
   Codex and Cursor read one hook file for every project, so the hook itself only reports
   from the projects you ran setup in; add `--global` to share from all of them.
-- **Codex** asks before it runs a new hook: open Codex, run `/hooks` and trust the Clario
-  hook. **Cursor**: restart it if it was open.
+
+- **Codex** asks before it runs a new hook: open **Settings → Hooks** in the Codex app (or `/hooks` in the CLI) and trust the Clario
+  hooks. **Cursor**: restart it if it was open.
 
 Then give your agent a task in that project and click your avatar. Teammates who do the same
 and join your space show up on their avatars too.
@@ -53,7 +54,7 @@ npx clario-agent uninstall --global  # remove every Clario hook and stop sharing
 It uses the live server at `https://api.clario.games`. Running Clario yourself? The Agent
 button on your own site adds `--api-url` to the command for you.
 
-Used the older `viora-agent` package? Run `npx clario-agent setup` once: it reuses the key
+Used the older `viora-agent` package? Run `npx clario-agent@latest setup` once: it reuses the key
 from `~/.viora` and replaces the old hook. You can delete `~/.viora` afterwards.
 
 > Keep the setup command private: anyone with your key can post activity as your agent (and
@@ -84,3 +85,26 @@ To keep project, branch and commit on your machine, add `"shareGit": false` to
 broadcasting from a project.
 
 Requires Node.js 18 or newer. MIT licensed.
+
+## Multiple integrations
+
+Setup keeps other integrations' hooks, including Ember's own activity-tracking
+hooks. Re-running it replaces Clario entries without adding duplicates. An
+Ember tracking hook is separate from Clario's hook: both must be registered if
+you want activity in both services. Each user runs their own setup command with
+their own key. Never share one user's setup command with a team.
+
+Codex users review new or changed Clario hooks in **Settings → Hooks** in the
+desktop app, or `/hooks` in the CLI. Cursor users should restart Cursor after
+setup. Cursor prompt, tool, file-edit, stop and session-end events are handled.
+The local-home installation is for local agents; cloud VMs need setup in their
+own execution environment.
+
+The setup connection check confirms the key/server connection, not that every
+agent has approved or loaded its hooks. `clario-agent status` shows registration
+for each agent and the projects shared.
+
+Run `bun test tools/agent-hook/cli.test.ts` from the repository root to check
+isolated fresh users, mixed Ember/Clario hooks, repeat installation, privacy,
+retries and Cursor's event lifecycle. Tests never change real home settings.
+`CLARIO_HOME` can explicitly select a separate Clario configuration directory.
