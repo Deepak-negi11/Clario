@@ -45,6 +45,7 @@ import { EmailComposer } from "../../../components/game-ui/email-composer";
 import { SpaceSidebar, type SidePanel } from "../../../components/game-ui/space-sidebar";
 import { PeoplePanel, type PanelPerson } from "../../../components/game-ui/people-panel";
 import { TasksPanel, countNewTasks, useSpaceTasks } from "../../../components/game-ui/tasks-panel";
+import { AgentSetupPanel, useAgentSetup } from "../../../components/game-ui/agent-setup-panel";
 import { MapControls } from "../../../components/game-ui/map-controls";
 import { OfficePrinter } from "../../../components/game-ui/office-printer";
 import { ServerRackPanel } from "../../../components/game-ui/server-rack";
@@ -240,6 +241,8 @@ function LiveSpace({
   reactionsRef.current = reactions;
   const activitiesRef = useRef(agentActivities);
   activitiesRef.current = agentActivities;
+  // The sidebar's Agent setup shows until this user's Claude Code hook has connected.
+  const agentSetup = useAgentSetup(!!selfId && !!agentActivities[selfId]);
 
   const [names, setNames] = useState<Record<string, string>>({});
   const namesRef = useRef(names);
@@ -499,6 +502,7 @@ function LiveSpace({
         newTaskCount={countNewTasks(spaceTasks.tasks)}
         errandsLeft={isHq ? ERRANDS.filter((errand) => !errands.progress.done[errand.id]).length : undefined}
         canBuild={isCustomMap && canBuild && !!customMap}
+        agentSetup={agentSetup.connected === false || panel === "agent"}
         onLeave={onLeave}
       />
       {status === "reconnecting" && (
@@ -709,6 +713,7 @@ function LiveSpace({
           onClose={() => setPanel(null)}
         />
       )}
+      {panel === "agent" && <AgentSetupPanel onClose={() => setPanel(null)} onConnected={agentSetup.markConnected} />}
       <ChatPanel
         generalMessages={generalMessages}
         roomMessages={roomMessages}

@@ -7,6 +7,7 @@ import {
   setAgentActivity,
 } from "../ws/presence";
 import { parseAgentGitInfo } from "./git-info";
+import { markAgentConnected } from "./agent-key";
 
 type AgentActivityBody = {
   text?: unknown;
@@ -30,6 +31,9 @@ export async function handleAgentActivity(req: Request): Promise<Response> {
   if (auth instanceof Response) return auth;
 
   const userId = auth.userId;
+  // Any authenticated update means the hook is set up (setup's own check counts too).
+  // Never let this fail the update itself.
+  await markAgentConnected(userId).catch(() => {});
 
   const body = (await req.json().catch(() => null)) as AgentActivityBody | null;
   if (!body || typeof body.text !== "string" || typeof body.state !== "string") {
@@ -42,14 +46,16 @@ export async function handleAgentActivity(req: Request): Promise<Response> {
     return Response.json({ message: "text is required" }, { status: 400 });
   }
 
-  // Only "cooking" updates are throttled. A "done" usually arrives right after the
-  // last tool call; dropping it would leave the badge and card stuck on "cooking".
+  // Only "cooking" updates are throttled, and only by earlier "cooking" ones. A "done" usually
+  // arrives right after the last tool call (dropping it would leave the badge stuck on), and the
+  // next turn's first update often comes right after a "done" (dropping it would hide the agent).
   const now = Date.now();
-  const last = lastActivityAt.get(userId) ?? 0;
-  if (state === "cooking" && now - last < THROTTLE_MS) {
-    return Response.json({ delivered: false, reason: "throttled" });
+  if (state === "cooking") {
+    if (now - (lastActivityAt.get(userId) ?? 0) < THROTTLE_MS) {
+      return Response.json({ delivered: false, reason: "throttled" });
+    }
+    lastActivityAt.set(userId, now);
   }
-  lastActivityAt.set(userId, now);
 
   const spaceId = await getCurrentSpace(userId);
   if (!spaceId) {

@@ -34,7 +34,7 @@ import {
 import type { SocketData } from "./src/ws/room-manager";
 import { stopAllRoomEventSubscriptions } from "./src/ws/pubsub";
 import { handleAgentActivity } from "./src/agent/agent-activity";
-import { handleCreateAgentKey } from "./src/agent/agent-key";
+import { handleAgentKeyStatus, handleCreateAgentKey } from "./src/agent/agent-key";
 import { allowedOrigin, jwtSecret, requestBudget } from "./src/utils/security";
 import type { Server } from "bun";
 import { handleSendEmail } from "./src/email/email";
@@ -204,7 +204,11 @@ export function startServer(port: number) {
         POST: withCors(handleAgentActivity),
         OPTIONS: handleCorsPreflight,
       },
-      "/api/v1/agent-key": { POST: withCors(handleCreateAgentKey), OPTIONS: handleCorsPreflight },
+      "/api/v1/agent-key": {
+        GET: withCors(handleAgentKeyStatus),
+        POST: withCors(handleCreateAgentKey),
+        OPTIONS: handleCorsPreflight,
+      },
     },
     fetch(req, server) {
 

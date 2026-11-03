@@ -7,50 +7,44 @@ and commit (e.g. `graphite · feat/missions · a1b2c3d`). The badge clears when 
 
 ## Setup (one command)
 
-With your Clario server running, run this inside the project you want to share:
+1. Open your space on [clario.games](https://www.clario.games) and click **Agent** in the
+   left menu. It shows your setup command, with a key made for you:
+   ```bash
+   npx clario-agent setup --key YOUR_KEY
+   ```
+2. Copy it and run it in the terminal, inside the project you want to share.
 
-```bash
-npx clario-agent setup --api-url http://localhost:3001
-```
+That's it: the Agent button disappears once your agent has connected. Setup:
 
-It does three things:
+- **Checks the key** with the Clario server and saves it in `~/.clario/agent.json` (readable
+  only by you). It's your own key and it stays the same: the Agent button always shows the
+  same command for you. It can only post agent activity: it can't sign in, open a space or
+  change anything else. No password is ever typed in the terminal.
+- **Installs the hook** at `~/.clario/hook.mjs`.
+- **Registers it with Claude Code** for this project only, in `.claude/settings.local.json`.
+  Add `--global` to use it in every project (`~/.claude/settings.json`) instead.
 
-1. **Saves an agent key** in `~/.clario/agent.json` (readable only by you). It asks for your
-   Clario email and password once (sent only to that server). The key lasts 180 days and
-   can only post agent activity: it can't sign in, open a space or change anything else.
-2. **Installs the hook** at `~/.clario/hook.mjs`.
-3. **Registers it with Claude Code** for this project only, in `.claude/settings.local.json`.
-   Add `--global` to use it in every project (`~/.claude/settings.json`) instead.
+Then give Claude a task in that project and click your avatar. Teammates who do the same and
+join your space show up on their avatars too.
 
-Then open your Clario space, give Claude a task in that project, and click your avatar.
-
-Running `setup` again keeps a key that still has more than 14 days left, updates the hook
-and never registers it twice. Your other Claude Code settings and hooks are left as they
-are, and the previous file is saved next to it as `*.clario-backup`.
+To add another project later, run `npx clario-agent setup` there: it reuses your saved key.
+Setup never registers the hook twice, leaves your other Claude Code settings and hooks as
+they are, and saves the previous file next to it as `*.clario-backup`.
 
 ```bash
 npx clario-agent status      # server, key expiry, where the hook is registered
 npx clario-agent uninstall   # remove the hook from this project (add --global for all)
 ```
 
-Used the older `viora-agent` package? Run `setup` once: it reuses the key from `~/.viora` and
-replaces the old hook, so it never runs twice. You can delete `~/.viora` afterwards.
+It uses the live server at `https://api.clario.games`. Running Clario yourself? The Agent
+button on your own site adds `--api-url` to the command for you.
 
-From a checkout of this repo, `node tools/agent-hook/setup.mjs` does the same as `setup`.
-For scripts, `CLARIO_EMAIL` and `CLARIO_PASSWORD` are read instead of prompting.
+Used the older `viora-agent` package? Run `npx clario-agent setup` once: it reuses the key
+from `~/.viora` and replaces the old hook. You can delete `~/.viora` afterwards.
 
-<details>
-<summary>Manual alternative: a 7-day login token</summary>
-
-Sign in, open DevTools → Console on your Clario site and run
-`copy(localStorage.getItem("metaverse:token"))`, then save it as `"token"` in
-`~/.clario/agent.json` next to `"apiUrl"`. It expires after 7 days. If you then run
-`setup`, it uses that token to create the agent key without asking for your password.
-</details>
-
-> An agent key can't be cancelled on its own before it expires. If one leaks, delete it
-> from `~/.clario/agent.json` and change the server's `JWT_SECRET` (this signs everyone out).
-> The server needs the `/api/v1/agent-key` endpoint from this repo's `apps/server`.
+> Keep the setup command private: anyone with your key can post activity as your agent (and
+> nothing else). If it leaks, delete `~/.clario/agent.json`; the server's owner can cancel
+> every key by changing `JWT_SECRET` (this signs everyone out).
 
 ## How it behaves
 

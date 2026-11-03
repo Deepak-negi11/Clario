@@ -1,10 +1,10 @@
 "use client";
 
-import { ClipboardList, Gamepad2, Hammer, LogOut, Mail, Trophy, Users } from "lucide-react";
+import { Bot, ClipboardList, Gamepad2, Hammer, LogOut, Mail, Trophy, Users } from "lucide-react";
 
 // Chat is opened from its own button in the bottom-left corner, not from this rail,
 // but it still shares this state so only one panel is open at a time.
-export type SidePanel = "people" | "chat" | "email" | "tasks" | "errands" | "builder";
+export type SidePanel = "people" | "chat" | "email" | "tasks" | "errands" | "builder" | "agent";
 
 type SpaceSidebarProps = {
   panel: SidePanel | null;
@@ -16,6 +16,8 @@ type SpaceSidebarProps = {
   errandsLeft?: number;
   /** The space's owner on a map built in the map builder: shows the Build button. */
   canBuild?: boolean;
+  /** Claude Code isn't connected yet: shows the Agent setup button, which goes away once it is. */
+  agentSetup?: boolean;
   onLeave: () => void;
 };
 
@@ -28,6 +30,7 @@ export function SpaceSidebar({
   newTaskCount,
   errandsLeft,
   canBuild,
+  agentSetup,
   onLeave,
 }: SpaceSidebarProps) {
   const toggle = (next: SidePanel) => onPanelChange(panel === next ? null : next);
@@ -52,6 +55,11 @@ export function SpaceSidebar({
       >
         <ClipboardList size={20} aria-hidden="true" />
       </RailButton>
+      {agentSetup && (
+        <RailButton label="Agent" title="Show your Claude Code in this space" active={panel === "agent"} onClick={() => toggle("agent")}>
+          <Bot size={20} aria-hidden="true" />
+        </RailButton>
+      )}
       {errandsLeft !== undefined && (
         <RailButton
           label="Quests"

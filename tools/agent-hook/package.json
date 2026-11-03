@@ -1,6 +1,6 @@
 {
   "name": "clario-agent",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Show what your Claude Code agent is doing (project, branch, commit) on your Clario avatar.",
   "type": "module",
   "bin": {

@@ -7,10 +7,9 @@ export type AuthUser = {
   userId: string;
 };
 
-// Agent keys outlive login tokens (180 days vs 7), so they carry a scope and only
-// the agent-activity endpoint accepts them (requireAgentAuth).
+// Agent keys outlive login tokens, so they carry a scope and only the agent-activity
+// endpoint accepts them (requireAgentAuth).
 const AGENT_SCOPE = "agent";
-export const AGENT_KEY_TTL_DAYS = 180;
 
 type TokenPayload = { userId?: unknown; scope?: unknown };
 
@@ -29,11 +28,13 @@ export function getUserIdFromToken(token: string): string | null {
   return typeof payload.userId === "string" ? payload.userId : null;
 }
 
-/** A long-lived key for the Claude Code hook that can only post agent activity. */
-export function signAgentKey(userId: string): { key: string; expiresAt: Date } {
-  const key = jwt.sign({ userId, scope: AGENT_SCOPE }, JWT_SECRET, { expiresIn: `${AGENT_KEY_TTL_DAYS}d` });
-  const { exp } = jwt.decode(key) as { exp: number };
-  return { key, expiresAt: new Date(exp * 1000) };
+/**
+ * The user's key for the Claude Code hook; it can only post agent activity. One per user and
+ * always the same: no issue time and no expiry, so HS256 signs the same text every time.
+ * Changing JWT_SECRET cancels every key (and every login). Older keys with an expiry still work.
+ */
+export function signAgentKey(userId: string): string {
+  return jwt.sign({ userId, scope: AGENT_SCOPE }, JWT_SECRET, { algorithm: "HS256", noTimestamp: true });
 }
 
 /** Agent activity accepts a login token or an agent key. */

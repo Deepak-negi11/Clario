@@ -11,17 +11,22 @@ const withBearer = (token?: string) =>
 async function createKey(userId: string) {
   const res = handleCreateAgentKey(withBearer(loginToken(userId)));
   expect(res.status).toBe(200);
-  return (await res.json()) as { key: string; expiresAt: string; validDays: number };
+  return (await res.json()) as { key: string };
 }
 
 describe("agent keys", () => {
-  test("a signed-in user gets a key that lasts 180 days", async () => {
-    const { key, expiresAt, validDays } = await createKey("u-key");
-    expect(validDays).toBe(180);
-    const days = (Date.parse(expiresAt) - Date.now()) / 86_400_000;
-    expect(days).toBeGreaterThan(179.9);
-    expect(days).toBeLessThan(180.1);
+  test("each user has one key: the same every time, different from other users', no expiry", async () => {
+    const { key } = await createKey("u-key");
+    await Bun.sleep(1100); // a new issue time would show up as a different key
+    expect((await createKey("u-key")).key).toBe(key);
+    expect((await createKey("u-other")).key).not.toBe(key);
+    expect(jwt.decode(key)).toEqual({ userId: "u-key", scope: "agent" });
     expect(requireAgentAuth(withBearer(key))).toEqual({ userId: "u-key" });
+  });
+
+  test("older keys with an expiry keep working until they run out", () => {
+    const old = jwt.sign({ userId: "u-old", scope: "agent" }, SECRET, { expiresIn: "180d" });
+    expect(requireAgentAuth(withBearer(old))).toEqual({ userId: "u-old" });
   });
 
   test("an agent key is refused everywhere else: endpoints, the socket, making more keys", async () => {

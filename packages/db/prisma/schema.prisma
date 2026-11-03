@@ -35,6 +35,9 @@ model User {
   level             WorkLevel?
   // Coworker AI replies used on the site's NVIDIA key (FREE_AI_REPLIES in @repo/shared).
   freeAiRepliesUsed Int          @default(0)
+  // When this user's Claude Code hook (clario-agent) first reached the server; the space
+  // sidebar shows the agent setup until then.
+  agentConnectedAt  DateTime?
   spaces            Space[]
   tasksAssigned     Task[]       @relation("TasksAssigned")
   tasksReceived     Task[]       @relation("TasksReceived")

@@ -2,20 +2,21 @@
 /**
  * clario-agent: show what your Claude Code agent is doing on your Clario avatar.
  *
- *   npx clario-agent setup [--api-url URL] [--global]   agent key + hook, once
- *   npx clario-agent status                              what is set up
- *   npx clario-agent uninstall [--global]                remove the hook
+ *   npx clario-agent setup --key KEY [--api-url URL] [--global]   key + hook, once
+ *   npx clario-agent status                                        what is set up
+ *   npx clario-agent uninstall [--global]                          remove the hook
  *
- * setup saves a 180-day agent key in ~/.clario/agent.json (it can only post agent
- * activity), copies the hook to ~/.clario/hook.mjs and registers it in this project's
- * .claude/settings.local.json, or in ~/.claude/settings.json with --global.
+ * The key comes from the website: the Agent button in a Clario space shows the whole
+ * setup command. setup checks the key with the server, saves it in ~/.clario/agent.json
+ * (one key per user that stays the same; it can only post agent activity), copies the hook to
+ * ~/.clario/hook.mjs and registers it in this project's .claude/settings.local.json,
+ * or in ~/.claude/settings.json with --global.
  */
 
 import { execFileSync } from "node:child_process";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
 const DIR = join(homedir(), ".clario");
@@ -24,9 +25,11 @@ const HOOK_PATH = join(DIR, "hook.mjs");
 const HOOK_SOURCE = join(dirname(fileURLToPath(import.meta.url)), "clario-agent-hook.mjs");
 // Where this package kept its key before it was renamed: setup reuses that key instead of asking again.
 const OLD_CONFIG_PATH = join(homedir(), ".viora", "agent.json");
-const DEFAULT_API_URL = "http://localhost:3001";
+// The live Clario server; pass --api-url http://localhost:3001 for a local one.
+const DEFAULT_API_URL = "https://api.clario.games";
 const HOOK_EVENTS = ["PreToolUse", "PostToolUse", "Stop", "SessionEnd"];
-const RENEW_DAYS = 14; // setup makes a new key when the saved one has less time left than this
+const WARN_DAYS = 14; // setup reminds you to get a new key when the saved one has less time left than this
+const GET_A_KEY = "Open your Clario space at https://www.clario.games, click Agent in the left menu, and run the setup command it shows.";
 
 class CliError extends Error {}
 const fail = (message) => {
@@ -56,15 +59,25 @@ function writeJson(file, value, { mode } = {}) {
   if (mode) chmodSync(file, mode);
 }
 
-/** Days until a JWT expires, or null when it can't be read. */
-function daysLeft(token) {
+/** The readable part of a key (a JWT), or null. The server checks the signature. */
+function keyPayload(token) {
   try {
-    const { exp } = JSON.parse(Buffer.from(String(token).split(".")[1], "base64url").toString());
-    return typeof exp === "number" ? (exp * 1000 - Date.now()) / 86_400_000 : null;
+    const payload = JSON.parse(Buffer.from(String(token).split(".")[1], "base64url").toString());
+    return payload && typeof payload === "object" ? payload : null;
   } catch {
     return null;
   }
 }
+
+/** Days until a key expires: Infinity for one that doesn't (today's keys), null when it can't be read. */
+function daysLeft(token) {
+  const payload = keyPayload(token);
+  if (!payload) return null;
+  return typeof payload.exp === "number" ? (payload.exp * 1000 - Date.now()) / 86_400_000 : Infinity;
+}
+
+const expiryText = (days) =>
+  Number.isFinite(days) ? `works until ${new Date(Date.now() + days * 86_400_000).toDateString()}` : "it doesn't expire";
 
 async function post(apiUrl, path, body, token) {
   let res;
@@ -80,44 +93,25 @@ async function post(apiUrl, path, body, token) {
   return { status: res.status, json: await res.json().catch(() => null) };
 }
 
-/** Email and password from the terminal (the password isn't echoed), or CLARIO_EMAIL / CLARIO_PASSWORD. */
-async function askCredentials() {
-  if (process.env.CLARIO_EMAIL && process.env.CLARIO_PASSWORD) {
-    return { email: process.env.CLARIO_EMAIL, password: process.env.CLARIO_PASSWORD };
-  }
-  if (!process.stdin.isTTY) fail("No terminal to ask for your email and password; set CLARIO_EMAIL and CLARIO_PASSWORD.");
-  const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
-  const ask = (text) => new Promise((resolve) => rl.question(text, resolve));
-  const email = (await ask("Clario email: ")).trim();
-  const answer = ask("Password: ");
-  const write = rl._writeToOutput;
-  rl._writeToOutput = () => {}; // hide the password as it's typed
-  const password = await answer;
-  rl._writeToOutput = write;
-  rl.close();
-  process.stdout.write("\n");
-  return { email, password };
+/** A key from the website, checked with the server before it's saved. */
+async function checkKey(key, apiUrl) {
+  const payload = keyPayload(key);
+  if (!payload || typeof payload.userId !== "string") fail(`That isn't a Clario agent key. ${GET_A_KEY}`);
+  if (payload.scope !== "agent") fail(`That's a login token, not an agent key. ${GET_A_KEY}`);
+  const days = daysLeft(key);
+  if (days === null || days <= 0) fail(`That key has expired. ${GET_A_KEY}`);
+  // A "done" update changes nothing anyone sees, and tells the server the hook is set up.
+  const res = await post(apiUrl, "/agent-activity", { text: "", state: "done" }, key);
+  if (res.status === 403) fail(`The server at ${apiUrl} doesn't accept this key. ${GET_A_KEY}`);
+  if (res.status !== 200) fail(`Could not check the key with ${apiUrl} (HTTP ${res.status}).`);
+  return { key, days, reused: false };
 }
 
-/** A usable agent key: the saved one if it has time left, else a new one from the server. */
-async function ensureAgentKey(config, apiUrl) {
-  const left = daysLeft(config.agentKey);
-  if (config.agentKey && config.apiUrl === apiUrl && left !== null && left > RENEW_DAYS) {
-    return { key: config.agentKey, days: left, reused: true };
-  }
-  // A login token from the manual setup (README) is enough to create the key.
-  let res = config.token ? await post(apiUrl, "/agent-key", {}, config.token) : null;
-  if (!res || res.status !== 200) {
-    if (res?.status !== 404) {
-      const { email, password } = await askCredentials();
-      const signin = await post(apiUrl, "/signin", { email, password });
-      if (!signin.json?.token) fail("Sign-in failed. Check your email and password.");
-      res = await post(apiUrl, "/agent-key", {}, signin.json.token);
-    }
-  }
-  if (res.status === 404) fail(`The server at ${apiUrl} has no /api/v1/agent-key yet. Restart it so it runs the latest code.`);
-  if (res.status !== 200 || !res.json?.key) fail(`Could not create an agent key (HTTP ${res.status}).`);
-  return { key: res.json.key, days: daysLeft(res.json.key), reused: false };
+/** The key from an earlier setup, when it still works for this server (e.g. to add another project). */
+function savedKey(config, apiUrl) {
+  const days = daysLeft(config.agentKey);
+  if (config.agentKey && config.apiUrl === apiUrl && days !== null && days > 0) return { key: config.agentKey, days, reused: true };
+  fail(`No agent key yet. ${GET_A_KEY}`);
 }
 
 // ---- Claude Code settings -------------------------------------------------------
@@ -174,10 +168,11 @@ function gitIgnored(file) {
 
 async function setup(opts) {
   const { value: config = readJson(OLD_CONFIG_PATH).value ?? {} } = readJson(CONFIG_PATH);
-  const apiUrl = String(opts.apiUrl || config.apiUrl || DEFAULT_API_URL).replace(/\/+$/, "");
-  const { key, days, reused } = await ensureAgentKey(config, apiUrl);
+  // A new key comes from the live site unless --api-url says otherwise; re-running setup keeps the saved server.
+  const apiUrl = String(opts.apiUrl || (opts.key ? DEFAULT_API_URL : config.apiUrl) || DEFAULT_API_URL).replace(/\/+$/, "");
+  const { key, days, reused } = opts.key ? await checkKey(opts.key, apiUrl) : savedKey(config, apiUrl);
 
-  // The 7-day login token isn't needed any more; everything else (shareGit…) stays.
+  // An old 7-day login token isn't needed any more; everything else (shareGit…) stays.
   const { token: _loginToken, ...rest } = config;
   writeJson(CONFIG_PATH, { ...rest, apiUrl, agentKey: key }, { mode: 0o600 });
   mkdirSync(DIR, { recursive: true, mode: 0o700 });
@@ -186,8 +181,8 @@ async function setup(opts) {
   const file = settingsFile(opts.global);
   registerHooks(file);
 
-  const until = new Date(Date.now() + days * 86_400_000).toDateString();
-  console.log(`${reused ? "Kept your agent key" : "Saved a new agent key"} in ${CONFIG_PATH} (works until ${until}).`);
+  console.log(`${reused ? "Kept your agent key" : "Saved your agent key"} in ${CONFIG_PATH} (${expiryText(days)}).`);
+  if (reused && days < WARN_DAYS) console.log(`It runs out in ${Math.ceil(days)} days. ${GET_A_KEY}`);
   console.log(`Hook registered in ${file}${opts.global ? " for every project" : " for this project only"}.`);
   if (!opts.global && gitIgnored(file) === false) {
     console.log("Note: .claude/settings.local.json isn't git-ignored here. It holds no secrets, but you may want to ignore it.");
@@ -201,7 +196,7 @@ function status() {
   console.log(`Server:  ${config.apiUrl ?? "not set"}`);
   console.log(
     config.agentKey || config.token
-      ? `Key:     ${config.agentKey ? "agent key" : "7-day login token"}, ${left === null ? "unreadable" : left > 0 ? `${Math.floor(left)} days left` : "EXPIRED (run setup)"}`
+      ? `Key:     ${config.agentKey ? "agent key" : "7-day login token"}, ${left === null ? "unreadable" : left === Infinity ? "doesn't expire" : left > 0 ? `${Math.floor(left)} days left` : "EXPIRED (run setup)"}`
       : "Key:     none (run setup)",
   );
   console.log(`Hook:    ${existsSync(HOOK_PATH) ? HOOK_PATH : "not installed (run setup)"}`);
@@ -226,17 +221,22 @@ function uninstall(opts) {
 
 const HELP = `clario-agent: show what your Claude Code agent is doing on your Clario avatar
 
-  clario-agent setup [--api-url URL] [--global]   save an agent key and register the hook
-  clario-agent status                              show what is set up
-  clario-agent uninstall [--global]                remove the hook
+  clario-agent setup --key KEY [--api-url URL] [--global]   save your key and register the hook
+  clario-agent status                                        show what is set up
+  clario-agent uninstall [--global]                          remove the hook
 
+Get the setup command (with your key) from the Agent button in your Clario space.
 Without --global the hook is registered only for the project you run it in.
---api-url defaults to the saved server, then ${DEFAULT_API_URL}.`;
+Without --key, setup reuses the key you saved before. The server is ${DEFAULT_API_URL}
+unless you pass --api-url.`;
 
 export async function run(argv) {
   const [command = "help", ...rest] = argv;
-  const i = rest.indexOf("--api-url");
-  const opts = { global: rest.includes("--global"), apiUrl: i > -1 ? rest[i + 1] : undefined };
+  const value = (flag) => {
+    const i = rest.indexOf(flag);
+    return i > -1 ? rest[i + 1] : undefined;
+  };
+  const opts = { global: rest.includes("--global"), apiUrl: value("--api-url"), key: value("--key") };
   try {
     if (command === "setup") await setup(opts);
     else if (command === "status") status();
