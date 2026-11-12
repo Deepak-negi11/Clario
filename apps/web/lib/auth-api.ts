@@ -27,6 +27,11 @@ export function joinAsGuest(username: string) {
   });
 }
 
+/** The shared demo room, for a guest who didn't come from a space's link. */
+export function getDemoSpace(token: string) {
+  return apiRequest<{ spaceId: string }>("/api/v1/demo-space", { method: "GET", token });
+}
+
 export function signinUser(input: SigninInput) {
   return apiRequest<{ token: string }, SigninInput>("/api/v1/signin", {
     method: "POST",

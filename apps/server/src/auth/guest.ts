@@ -35,3 +35,28 @@ export async function isGuest(userId: string): Promise<boolean> {
 export function guestRefusal(what: string): Response {
   return Response.json({ message: `Create a free account to ${what}.`, guest: true }, { status: 403 });
 }
+
+// Guest accounts last as long as their login token (7 days), plus a day; then they and what they
+// made in spaces (tasks, attendance, notices) are deleted. Checked at start and every 6 hours.
+const GUEST_DAYS = 8;
+const CLEANUP_EVERY_MS = 6 * 60 * 60_000;
+let cleanupTimer: ReturnType<typeof setInterval> | null = null;
+
+export async function deleteOldGuests(now = Date.now()): Promise<number> {
+  const { count } = await prisma.user.deleteMany({
+    where: { role: "Guest", createdAt: { lt: new Date(now - GUEST_DAYS * 24 * 60 * 60_000) } },
+  });
+  return count;
+}
+
+export function startGuestCleanup() {
+  if (cleanupTimer) return;
+  const run = () => void deleteOldGuests().catch((error) => console.warn("[guest] cleanup failed:", error));
+  run();
+  cleanupTimer = setInterval(run, CLEANUP_EVERY_MS);
+}
+
+export function stopGuestCleanup() {
+  if (cleanupTimer) clearInterval(cleanupTimer);
+  cleanupTimer = null;
+}

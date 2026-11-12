@@ -9,6 +9,7 @@ import { TextField } from "../../components/TextField";
 import { signinUser, signupUser } from "../../lib/auth-api";
 import { getAuthToken, isGuestSession, saveAuthToken, saveAuthEmail } from "../../lib/auth-token";
 import { authLink, nextPathFromUrl } from "../../lib/next-path";
+import { ContinueAsGuest } from "../../components/continue-as-guest";
 import { useEffect } from "react";
 
 export default function SignupPage() {
@@ -127,6 +128,7 @@ export default function SignupPage() {
             Sign in
           </Link>
         </p>
+        <ContinueAsGuest next={next} />
       </div>
     </main>
   );

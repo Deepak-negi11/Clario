@@ -1,6 +1,7 @@
 import { handleSignup } from "./src/auth/signup";
 import { handleSignin } from "./src/auth/signin";
-import { handleGuest } from "./src/auth/guest";
+import { handleGuest, startGuestCleanup, stopGuestCleanup } from "./src/auth/guest";
+import { handleDemoSpace } from "./src/space/demo-space";
 import {
   handleCreateElement,
   handleCreateAvatar,
@@ -95,15 +96,18 @@ export function startServer(port: number) {
   jwtSecret(); // Enforced for every entry point, including direct imports of startServer.
   activeServers += 1;
   startPresenceRenewal();
+  startGuestCleanup();
   const authBudget = requestBudget(60, 60_000);
-  const limitedAuth = (handler: RouteHandler) => {
+  // Each guest is a new account, so fewer per address: 30 an hour.
+  const guestBudget = requestBudget(30, 60 * 60_000);
+  const limitedAuth = (handler: RouteHandler, budget = authBudget) => {
     const run = withCors(handler);
     return async (req: Request, instance: Server<SocketData>) => {
       // Forwarded headers are caller-controlled unless an operator explicitly trusts a proxy.
       const ip = process.env.TRUST_PROXY === "true"
         ? req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || instance.requestIP(req)?.address || "unknown"
         : instance.requestIP(req)?.address || "unknown";
-      const retry = authBudget(`${new URL(req.url).pathname}:${ip}`);
+      const retry = budget(`${new URL(req.url).pathname}:${ip}`);
       if (retry) return withCorsResponse(Response.json({ message: "Too many attempts. Try again shortly." },
         { status: 429, headers: { "Retry-After": String(retry) } }), req.headers.get("origin"));
       return run(req);
@@ -123,7 +127,8 @@ export function startServer(port: number) {
 
       "/api/v1/signup": { POST: limitedAuth(handleSignup), OPTIONS: handleCorsPreflight },
       "/api/v1/signin": { POST: limitedAuth(handleSignin), OPTIONS: handleCorsPreflight },
-      "/api/v1/guest": { POST: limitedAuth(handleGuest), OPTIONS: handleCorsPreflight },
+      "/api/v1/guest": { POST: limitedAuth(handleGuest, guestBudget), OPTIONS: handleCorsPreflight },
+      "/api/v1/demo-space": { GET: withCors(handleDemoSpace), OPTIONS: handleCorsPreflight },
 
 
       "/api/v1/user/metadata": {
@@ -240,6 +245,7 @@ export function startServer(port: number) {
 
       if (activeServers === 0) {
         stopPresenceRenewal();
+        stopGuestCleanup();
         void stopAllRoomEventSubscriptions();
       }
     }

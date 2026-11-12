@@ -2,6 +2,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import axios from "axios";
 import prisma from "@repo/db";
 import { startServer } from "../../index";
+import { deleteOldGuests } from "./guest";
 
 describe("Guests", () => {
   const PORT = 4050;
@@ -48,6 +49,29 @@ describe("Guests", () => {
     const space = await client.get(`/api/v1/space/${spaceId}`, guest);
     expect(space.status).toBe(200);
     expect(space.data.name).toBe("Guest test");
+  });
+
+  test("a guest from the sign-in page gets the shared demo room, the same one every time", async () => {
+    const guest = await joinAsGuest("Visitor");
+    const first = await client.get("/api/v1/demo-space", guest);
+    expect(first.status).toBe(200);
+    const again = await client.get("/api/v1/demo-space", member);
+    expect(again.data.spaceId).toBe(first.data.spaceId);
+    expect((await client.get(`/api/v1/space/${first.data.spaceId}`, guest)).status).toBe(200);
+    expect((await client.get("/api/v1/demo-space")).status).toBe(403);
+  });
+
+  test("old guests are deleted, new guests and members are kept", async () => {
+    const guest = await joinAsGuest("Old visitor");
+    const profile = await client.get("/api/v1/user/profile", guest);
+    const oldId = profile.data.userId as string;
+    await prisma.user.update({ where: { id: oldId }, data: { createdAt: new Date(Date.now() - 9 * 24 * 60 * 60_000) } });
+    const fresh = (await client.get("/api/v1/user/profile", await joinAsGuest("New visitor"))).data.userId as string;
+
+    expect(await deleteOldGuests()).toBeGreaterThanOrEqual(1);
+    expect(await prisma.user.findUnique({ where: { id: oldId } })).toBeNull();
+    expect(await prisma.user.findUnique({ where: { id: fresh } })).not.toBeNull();
+    expect((await client.get("/api/v1/user/profile", member)).status).toBe(200);
   });
 
   test("a guest can't create spaces, use the free AI or get an agent key", async () => {
