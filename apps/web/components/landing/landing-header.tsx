@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowUpRight, Menu, X } from "lucide-react";
+import { ArrowUpRight, Menu, Moon, Sun, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useTheme } from "next-themes";
 import { getAuthToken } from "../../lib/auth-token";
 import { BrandLogo } from "../brand-logo";
 import { GITHUB_URL } from "../../lib/site";
@@ -34,6 +35,7 @@ export function LandingHeader() {
           <a href="#features">Features</a>
         </nav>
         <div className={styles.headerActions}>
+          <ThemeToggle />
           <a
             href={GITHUB_URL}
             target="_blank"
@@ -68,6 +70,27 @@ export function LandingHeader() {
         </nav>
       )}
     </header>
+  );
+}
+
+// Sun in dark, moon in light. Rendered after mount: the theme is only known in the browser.
+function ThemeToggle() {
+  const { resolvedTheme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!mounted) return <span className={styles.themeToggle} aria-hidden="true" />;
+
+  const dark = resolvedTheme === "dark";
+  return (
+    <button
+      type="button"
+      className={styles.themeToggle}
+      onClick={() => setTheme(dark ? "light" : "dark")}
+      aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
+      title={dark ? "Light mode" : "Dark mode"}
+    >
+      {dark ? <Sun size={17} aria-hidden="true" /> : <Moon size={17} aria-hidden="true" />}
+    </button>
   );
 }
 

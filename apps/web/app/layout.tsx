@@ -3,6 +3,7 @@ import { Analytics } from "@vercel/analytics/next";
 import { DM_Serif_Display, IBM_Plex_Mono, Manrope, DM_Sans, Pixelify_Sans, Geist, Geist_Mono } from "next/font/google";
 import { SITE_NAME, SITE_URL } from "../lib/site";
 import "./globals.css";
+import { ThemeProvider } from "../components/theme-provider";
 
 const manrope = Manrope({
   subsets: ["latin"],
@@ -98,9 +99,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    // next-themes sets data-theme on <html> before React loads, so the server's copy differs.
+    <html lang="en" suppressHydrationWarning>
       <body className={`${manrope.variable} ${ibmPlexMono.variable} ${dmSerif.variable} ${dmSans.variable} ${pixelify.variable} ${geist.variable} ${geistMono.variable}`}>
-        {children}
+        <ThemeProvider>{children}</ThemeProvider>
         {/* Vercel Web Analytics: page views, no cookies. Turn it on in the Vercel project (Analytics tab). */}
         <Analytics />
       </body>

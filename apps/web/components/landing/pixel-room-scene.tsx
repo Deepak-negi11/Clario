@@ -104,21 +104,31 @@ function frameAt(time: number): Frame {
   };
 }
 
-function drawRoom(ctx: CanvasRenderingContext2D) {
-  ctx.fillStyle = "#f6f7fa";
+// The room's floor, grid, wall, desk and shadows in each theme; the monitor, plant and people
+// look the same in both. The page's theme is data-theme on <html> (components/theme-provider.tsx).
+const ROOM = {
+  light: { floor: "#f6f7fa", grid: "#eceff5", wall: "#e1e5ee", desk: "#d8dde8", deskEdge: "#c3cad8", shadow: "rgba(27,33,48,0.16)" },
+  dark: { floor: "#141414", grid: "#1e1e1e", wall: "#262626", desk: "#303030", deskEdge: "#3d3d3d", shadow: "rgba(0,0,0,0.5)" },
+};
+type RoomColors = (typeof ROOM)["light"];
+
+const roomColors = (): RoomColors => ROOM[document.documentElement.dataset.theme === "dark" ? "dark" : "light"];
+
+function drawRoom(ctx: CanvasRenderingContext2D, room: RoomColors) {
+  ctx.fillStyle = room.floor;
   ctx.fillRect(0, 0, W, H);
 
-  ctx.fillStyle = "#eceff5";
+  ctx.fillStyle = room.grid;
   for (let x = 0; x < W; x += 8) ctx.fillRect(x, 0, 1, H);
   for (let y = 0; y < H; y += 8) ctx.fillRect(0, y, W, 1);
 
-  ctx.fillStyle = "#e1e5ee";
+  ctx.fillStyle = room.wall;
   ctx.fillRect(0, 0, W, 3);
 
   // Desk with a monitor (top left)
-  ctx.fillStyle = "#d8dde8";
+  ctx.fillStyle = room.desk;
   ctx.fillRect(6, 14, 28, 7);
-  ctx.fillStyle = "#c3cad8";
+  ctx.fillStyle = room.deskEdge;
   ctx.fillRect(6, 21, 28, 3);
   ctx.fillStyle = "#2d3445";
   ctx.fillRect(14, 6, 12, 8);
@@ -167,9 +177,9 @@ function drawRing(ctx: CanvasRenderingContext2D, radius: number, alpha: number) 
   ctx.globalAlpha = 1;
 }
 
-function drawSprite(ctx: CanvasRenderingContext2D, image: HTMLImageElement | null, frame: number, x: number) {
+function drawSprite(ctx: CanvasRenderingContext2D, image: HTMLImageElement | null, frame: number, x: number, shadow: string) {
   const left = Math.round(x);
-  ctx.fillStyle = "rgba(27,33,48,0.16)";
+  ctx.fillStyle = shadow;
   ctx.fillRect(left + 3, FEET_Y - 1, 10, 2);
   if (!image || !image.complete || image.naturalWidth === 0) return;
   ctx.drawImage(image, frame * SPRITE_W, 0, SPRITE_W, SPRITE_H, left, FEET_Y - SPRITE_H, SPRITE_W, SPRITE_H);
@@ -197,11 +207,11 @@ function drawVoiceBars(ctx: CanvasRenderingContext2D, talkMs: number) {
   }
 }
 
-function drawFrame(ctx: CanvasRenderingContext2D, frame: Frame, sprites: (HTMLImageElement | null)[]) {
-  drawRoom(ctx);
+function drawFrame(ctx: CanvasRenderingContext2D, frame: Frame, sprites: (HTMLImageElement | null)[], room: RoomColors) {
+  drawRoom(ctx, room);
   drawRing(ctx, frame.ring, frame.ring / RING_RADIUS);
-  drawSprite(ctx, sprites[0] ?? null, frame.leftFrame, frame.leftX);
-  drawSprite(ctx, sprites[1] ?? null, frame.rightFrame, frame.rightX);
+  drawSprite(ctx, sprites[0] ?? null, frame.leftFrame, frame.leftX, room.shadow);
+  drawSprite(ctx, sprites[1] ?? null, frame.rightFrame, frame.rightX, room.shadow);
 
   if (frame.phase === "talk" && frame.talkMs > 520) {
     drawVoiceBars(ctx, frame.talkMs);
@@ -257,7 +267,7 @@ export function PixelRoomScene({ embedded = false }: { embedded?: boolean }) {
       ctx.setTransform(scale, 0, 0, scale, 0, 0);
       ctx.imageSmoothingEnabled = false;
       const frame = frameAt(time);
-      drawFrame(ctx, frame, sprites);
+      drawFrame(ctx, frame, sprites, roomColors());
       if (frame.phase !== lastPhase) {
         lastPhase = frame.phase;
         setPhase(frame.phase);
@@ -310,6 +320,9 @@ export function PixelRoomScene({ embedded = false }: { embedded?: boolean }) {
 
     const resizeObserver = new ResizeObserver(resize);
     resizeObserver.observe(wrap);
+    // A theme switch while paused (or with reduced motion) still repaints the room.
+    const themeObserver = new MutationObserver(() => render(reducedMotion ? staticTime : elapsed()));
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 
     const visibilityObserver = new IntersectionObserver(([entry]) => {
       visible = Boolean(entry?.isIntersecting);
@@ -330,6 +343,7 @@ export function PixelRoomScene({ embedded = false }: { embedded?: boolean }) {
       stop();
       controlsRef.current = null;
       resizeObserver.disconnect();
+      themeObserver.disconnect();
       visibilityObserver.disconnect();
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
