@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Pause, Play } from "lucide-react";
+import { MicOff, Pause, Play, VideoOff } from "lucide-react";
 import styles from "../../app/landing.module.css";
 
 // Logical canvas size in pixels; drawn at an integer scale so every pixel stays square.
@@ -32,7 +32,7 @@ export type ScenePhase = "walk" | "talk" | "leave";
 
 const PHASES: { id: ScenePhase; label: string }[] = [
   { id: "walk", label: "Walk over" },
-  { id: "talk", label: "Voice connects" },
+  { id: "talk", label: "In range to talk" },
   { id: "leave", label: "Step away" },
 ];
 
@@ -345,7 +345,7 @@ export function PixelRoomScene({ embedded = false }: { embedded?: boolean }) {
           ref={canvasRef}
           className={styles.sceneCanvas}
           role="img"
-          aria-label="Two pixel avatars walk toward each other. When they are close, a proximity ring appears and voice connects; when they step apart, it disconnects."
+          aria-label="Two pixel avatars walk toward each other. When they are close, a proximity ring shows they are in range to talk; when they step apart, the call ends."
         />
       </div>
       <ol className={styles.scenePhases} aria-hidden="true">
@@ -356,6 +356,11 @@ export function PixelRoomScene({ embedded = false }: { embedded?: boolean }) {
           </li>
         ))}
       </ol>
+      <p className={styles.sceneNote}>
+        <MicOff size={14} aria-hidden="true" />
+        <VideoOff size={14} aria-hidden="true" />
+        Mic and camera start off. Turn them on when you want to talk.
+      </p>
     </div>
   );
 }

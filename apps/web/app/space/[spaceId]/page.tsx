@@ -69,7 +69,8 @@ import { PrejoinScreen } from "../../../components/game-ui/prejoin-screen";
 import { getSpace, getSpaceLayout, getUsersMetadata, saveSpaceLayout } from "../../../lib/space-api";
 import { MapBuilder } from "../../../components/game-ui/map-builder";
 import { getMyProfile, updateProfile } from "../../../lib/auth-api";
-import { getAuthToken } from "../../../lib/auth-token";
+import { getAuthToken, isGuestSession } from "../../../lib/auth-token";
+import { GuestGate } from "../../../components/guest-gate";
 import { saveLook } from "../../../lib/avatar/saved-look";
 import { callPeers } from "../../../lib/proximity";
 
@@ -112,10 +113,15 @@ export default function SpacePage() {
     return false;
   });
 
+  // Opened from an invite link without signing in: the guest gate (join as a guest, or sign in or
+  // up and come back here). Joining as a guest bumps authVersion so the space loads.
+  const [needsAuth, setNeedsAuth] = useState(false);
+  const [authVersion, setAuthVersion] = useState(0);
+
   useEffect(() => {
     const token = getAuthToken();
     if (!token) {
-      router.replace("/signin");
+      setNeedsAuth(true);
       return;
     }
 
@@ -132,7 +138,19 @@ export default function SpacePage() {
     getMyProfile(token)
       .then((profile) => setSavedLevel(profile.level))
       .catch(() => {});
-  }, [params.spaceId, router]);
+  }, [params.spaceId, authVersion]);
+
+  if (needsAuth) {
+    return (
+      <GuestGate
+        spacePath={`/space/${params.spaceId}`}
+        onJoined={() => {
+          setNeedsAuth(false);
+          setAuthVersion((version) => version + 1);
+        }}
+      />
+    );
+  }
 
   if (loadError || !mapTemplate) {
     return <SpaceLoading error={loadError} />;
@@ -169,7 +187,8 @@ export default function SpacePage() {
       initialDisplayName={displayName}
       onLeave={() => {
         sessionStorage.removeItem(`metaverse:entered:${params.spaceId}`);
-        router.push("/spaces");
+        // A guest has no spaces of their own to go back to.
+        router.push(isGuestSession() ? "/" : "/spaces");
       }}
     />
   );
@@ -188,6 +207,8 @@ function LiveSpace({
   initialDisplayName: string;
   onLeave: () => void;
 }) {
+  // Guests (joined from a link) get no Email or Agent: both need an account.
+  const [guest] = useState(isGuestSession);
   // A map built in the map builder: its saved layout (rooms come from it, so it's needed first).
   const isCustomMap = mapTemplate === "custom-office";
   const [customMap, setCustomMap] = useState<CustomMap | null>(null);
@@ -502,6 +523,7 @@ function LiveSpace({
         errandsLeft={isHq ? ERRANDS.filter((errand) => !errands.progress.done[errand.id]).length : undefined}
         canBuild={isCustomMap && canBuild && !!customMap}
         agentSetup={true}
+        guest={guest}
         onLeave={onLeave}
       />
       {status === "reconnecting" && (

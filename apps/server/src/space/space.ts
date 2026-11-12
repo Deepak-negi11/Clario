@@ -15,6 +15,7 @@ import {
 import { requireAuth } from "../middleware/auth";
 import { formatDimensions, parseDimensions } from "../utils/dimensions";
 import { jsonMessage } from "../utils/http";
+import { guestRefusal, isGuest } from "../auth/guest";
 
 
 
@@ -38,6 +39,7 @@ type AddElementBody = {
 export async function handleCreateSpace(req: Request): Promise<Response> {
   const auth = await requireAuth(req);
   if (auth instanceof Response) return auth;
+  if (await isGuest(auth.userId)) return guestRefusal("create your own space");
 
   const body = (await req.json().catch(() => null)) as CreateSpaceBody | null;
   const { name, dimensions, mapId, mapTemplate, teamSize } = body ?? {};

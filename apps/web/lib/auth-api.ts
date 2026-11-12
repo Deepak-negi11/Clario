@@ -20,6 +20,13 @@ export function signupUser(input: SignupInput) {
   });
 }
 
+export function joinAsGuest(username: string) {
+  return apiRequest<{ token: string; userId: string }, { username: string }>("/api/v1/guest", {
+    method: "POST",
+    body: { username },
+  });
+}
+
 export function signinUser(input: SigninInput) {
   return apiRequest<{ token: string }, SigninInput>("/api/v1/signin", {
     method: "POST",
@@ -40,6 +47,7 @@ export type MyProfile = {
   email: string;
   avatarLook: AvatarLook | null;
   level: WorkLevel | null;
+  guest?: boolean;
 };
 
 export function getMyProfile(token: string) {

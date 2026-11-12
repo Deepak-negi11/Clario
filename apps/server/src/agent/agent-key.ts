@@ -1,12 +1,14 @@
 import prisma from "@repo/db";
+import { guestRefusal, isGuest } from "../auth/guest";
 import { requireAuth, signAgentKey } from "../middleware/auth";
 
 // POST /api/v1/agent-key: the signed-in user's key for the Claude Code hook. The space
 // sidebar shows it as `npx clario-agent setup --key …`. It's the same key every time for
-// the same user. Needs a login token: an agent key can't be used to fetch keys.
-export function handleCreateAgentKey(req: Request): Response {
+// the same user. Needs a login token: an agent key can't be used to fetch keys. Not for guests.
+export async function handleCreateAgentKey(req: Request): Promise<Response> {
   const auth = requireAuth(req);
   if (auth instanceof Response) return auth;
+  if (await isGuest(auth.userId)) return guestRefusal("connect a coding agent");
 
   return Response.json({ key: signAgentKey(auth.userId) });
 }

@@ -7,6 +7,10 @@ export const SignupSchema = z.object({
     // Privileged roles are provisioned by a trusted operator, never public signup.
     type: z.literal("user").optional().default("user"),
 })
+// Joining a space from its link without an account: just a name to show.
+export const GuestSchema = z.object({
+    username: z.string().trim().min(1).max(40),
+})
 export const SigninSchema = z.object({
     email: z.email(),
     password: z.string().min(8).max(30),

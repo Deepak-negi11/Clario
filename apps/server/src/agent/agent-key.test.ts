@@ -9,7 +9,7 @@ const withBearer = (token?: string) =>
   new Request("http://localhost/api/v1/agent-key", { method: "POST", headers: token ? { Authorization: `Bearer ${token}` } : {} });
 
 async function createKey(userId: string) {
-  const res = handleCreateAgentKey(withBearer(loginToken(userId)));
+  const res = await handleCreateAgentKey(withBearer(loginToken(userId)));
   expect(res.status).toBe(200);
   return (await res.json()) as { key: string };
 }
@@ -33,7 +33,7 @@ describe("agent keys", () => {
     const { key } = await createKey("u-key");
     expect((requireAuth(withBearer(key)) as Response).status).toBe(403);
     expect(getUserIdFromToken(key)).toBeNull(); // what the WebSocket join uses
-    expect(handleCreateAgentKey(withBearer(key)).status).toBe(403);
+    expect((await handleCreateAgentKey(withBearer(key))).status).toBe(403);
   });
 
   test("login tokens still work for agent activity and everything else", () => {
@@ -42,13 +42,13 @@ describe("agent keys", () => {
     expect(requireAgentAuth(withBearer(token))).toEqual({ userId: "u-login" });
   });
 
-  test("expired, tampered, other-scope and missing keys are refused", () => {
+  test("expired, tampered, other-scope and missing keys are refused", async () => {
     const expired = jwt.sign({ userId: "u", scope: "agent" }, SECRET, { expiresIn: -10 });
     const forged = jwt.sign({ userId: "u", scope: "agent" }, "not-the-secret", { expiresIn: "180d" });
     const otherScope = jwt.sign({ userId: "u", scope: "admin" }, SECRET, { expiresIn: "180d" });
     for (const token of [expired, forged, otherScope, "garbage", undefined]) {
       expect((requireAgentAuth(withBearer(token)) as Response).status).toBe(403);
     }
-    expect(handleCreateAgentKey(withBearer()).status).toBe(403);
+    expect((await handleCreateAgentKey(withBearer())).status).toBe(403);
   });
 });

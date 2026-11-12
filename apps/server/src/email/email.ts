@@ -5,6 +5,7 @@ import { isUserOnline } from "../ws/presence";
 import { redis } from "../ws/redis";
 import { getEmailConfig, sendWithResend, type OutgoingEmail, type SendResult } from "./resend";
 import { getSmtpConfig, sendWithSmtp } from "./smtp";
+import { guestRefusal } from "../auth/guest";
 
 export const MAX_SUBJECT_LENGTH = 150;
 export const MAX_BODY_LENGTH = 5000;
@@ -109,11 +110,14 @@ export async function handleSendEmail(req: Request): Promise<Response> {
 
   const [space, sender, recipient] = await Promise.all([
     prisma.space.findUnique({ where: { id: spaceId }, select: { name: true } }),
-    prisma.user.findUnique({ where: { id: auth.userId }, select: { username: true, email: true } }),
-    prisma.user.findUnique({ where: { id: input.recipientId }, select: { email: true } }),
+    prisma.user.findUnique({ where: { id: auth.userId }, select: { username: true, email: true, role: true } }),
+    prisma.user.findUnique({ where: { id: input.recipientId }, select: { email: true, role: true } }),
   ]);
   if (!space) return jsonMessage("Space not found", 404);
   if (!sender || !recipient) return jsonMessage("That person has left the space.", 404);
+  // Guests have no real address: they can't send, and mail to them would go nowhere.
+  if (sender.role === "Guest") return guestRefusal("send email");
+  if (recipient.role === "Guest") return jsonMessage("They joined as a guest, so they have no email address.", 400);
 
   const slot = await takeSendSlot(auth.userId);
   if (!slot.allowed) {

@@ -16,13 +16,13 @@ const steps = [
     id: "share",
     number: "02",
     title: "Invite with one link",
-    body: "Share a direct room link so teammates can enter the same workspace without setup, scheduling, or another meeting app.",
+    body: "Share the room's link. Teammates can join as a guest with just a name, or sign in, and land straight in the room. No setup, scheduling, or another meeting app.",
   },
   {
     id: "meet",
     number: "03",
     title: "Walk over to talk",
-    body: "Move near a teammate to start voice and video naturally. Step away when the conversation is done.",
+    body: "Move with the arrow keys, or click a spot to walk there. Within six tiles of someone in the same room, you're in range to talk. Your mic and camera stay off until you turn them on, and the browser only asks for permission then. Step away and the call ends.",
   },
 ] as const;
 

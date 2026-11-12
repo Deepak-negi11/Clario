@@ -18,6 +18,8 @@ type SpaceSidebarProps = {
   canBuild?: boolean;
   /** Claude Code isn't connected yet: shows the Agent setup button, which goes away once it is. */
   agentSetup?: boolean;
+  /** Joined from a link without an account: no Email or Agent, which need one. */
+  guest?: boolean;
   onLeave: () => void;
 };
 
@@ -31,6 +33,7 @@ export function SpaceSidebar({
   errandsLeft,
   canBuild,
   agentSetup,
+  guest,
   onLeave,
 }: SpaceSidebarProps) {
   const toggle = (next: SidePanel) => onPanelChange(panel === next ? null : next);
@@ -43,9 +46,11 @@ export function SpaceSidebar({
       <RailButton label="People" title={`People, ${peopleCount} in this space`} active={panel === "people"} badge={peopleCount} badgeTone="muted" onClick={() => toggle("people")}>
         <Users size={20} aria-hidden="true" />
       </RailButton>
-      <RailButton label="Email" title="Write an email" active={panel === "email"} onClick={() => toggle("email")}>
-        <Mail size={20} aria-hidden="true" />
-      </RailButton>
+      {!guest && (
+        <RailButton label="Email" title="Write an email" active={panel === "email"} onClick={() => toggle("email")}>
+          <Mail size={20} aria-hidden="true" />
+        </RailButton>
+      )}
       <RailButton
         label="Tasks"
         title={newTaskCount > 0 ? `Tasks, ${newTaskCount} not started` : "Tasks"}
@@ -55,7 +60,7 @@ export function SpaceSidebar({
       >
         <ClipboardList size={20} aria-hidden="true" />
       </RailButton>
-      {agentSetup && (
+      {agentSetup && !guest && (
         <RailButton label="Agent" title="Show your coding agent in this space" active={panel === "agent"} onClick={() => toggle("agent")}>
           <Bot size={20} aria-hidden="true" />
         </RailButton>

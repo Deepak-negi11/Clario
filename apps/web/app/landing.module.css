@@ -116,6 +116,8 @@
 .scenePhases li span { color: var(--line-strong); font-family: var(--pixel); font-size: .82rem; transition: color .3s ease; }
 .scenePhases .scenePhaseActive { border-color: rgba(58,110,232,.18); background: var(--accent-soft); color: var(--ink); }
 .scenePhases .scenePhaseActive span { color: var(--accent); }
+.sceneNote { display: flex; margin: .7rem .3rem 0; align-items: center; gap: .4rem; color: var(--soft); font-size: .76rem; line-height: 1.35; }
+.sceneNote svg { flex: none; color: var(--muted); }
 
 /* Cursor avatar */
 .globalAvatar { position: fixed; z-index: 45; top: 0; left: 0; width: 6rem; height: 8rem; margin: -4rem 0 0 -3rem; pointer-events: none; will-change: transform; }

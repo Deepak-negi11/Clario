@@ -10,6 +10,8 @@ datasource db {
 enum Role {
   Admin
   User
+  // Joined a space from its link without an account (POST /api/v1/guest).
+  Guest
 }
 
 // WorkLevel in @repo/shared, in rank order. Tasks only go to someone with a lower level.

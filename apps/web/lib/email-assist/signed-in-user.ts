@@ -24,8 +24,9 @@ export async function signedInUserId(request: Request): Promise<string | null> {
     signal: AbortSignal.timeout(CHECK_TIMEOUT_MS),
   });
   if (!response.ok) return null;
-  const profile = (await response.json().catch(() => null)) as { userId?: unknown } | null;
-  if (typeof profile?.userId !== "string") return null;
+  const profile = (await response.json().catch(() => null)) as { userId?: unknown; guest?: unknown } | null;
+  // Guests (joined from a link, no account) don't get the site's AI.
+  if (typeof profile?.userId !== "string" || profile.guest === true) return null;
 
   // Oldest first, so the first key is the one to drop.
   if (known.size >= MAX_KEPT) known.delete(known.keys().next().value ?? "");

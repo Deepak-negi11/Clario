@@ -10,6 +10,7 @@ import {
 import { getAuthToken } from "../lib/auth-token";
 import { getSpaceMessages, type ChatScope } from "../lib/space-api";
 import { createPrivateChatKeys } from "../lib/private-chat-keys";
+import { reconnectDelay } from "../lib/reconnect";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 const WS_URL = API_BASE.replace(/^http/, "ws") + "/ws";
@@ -20,9 +21,9 @@ export type Others = Record<string, Position>;
 // is being retried; the map stays on screen meanwhile.
 type Status = "connecting" | "joined" | "reconnecting" | "error";
 
-// Waits 0.5 s, 1 s, 2 s, 4 s, then 8 s between tries: about a minute before giving up.
+// About 1 s, 2 s, 4 s, then 8 s between tries, each spread at random (lib/reconnect.ts) so a
+// server restart isn't met by everyone rejoining at once: about a minute before giving up.
 const MAX_RECONNECTS = 10;
-const reconnectDelay = (attempt: number) => Math.min(8000, 500 * 2 ** attempt);
 // A server that accepts the connection but never answers the join (it hung, or an older version
 // crashed mid-join) would keep the loading screen up forever: drop the connection and retry.
 const JOIN_TIMEOUT_MS = 10_000;

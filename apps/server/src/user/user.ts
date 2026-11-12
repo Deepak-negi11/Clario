@@ -133,7 +133,7 @@ export async function handleGetProfile(req: Request): Promise<Response> {
 
   const user = await prisma.user.findUnique({
     where: { id: auth.userId },
-    select: { id: true, username: true, email: true, avatarLook: true, level: true },
+    select: { id: true, username: true, email: true, avatarLook: true, level: true, role: true },
   });
   if (!user) return Response.json({ message: "User not found" }, { status: 404 });
 
@@ -143,5 +143,6 @@ export async function handleGetProfile(req: Request): Promise<Response> {
     email: user.email,
     avatarLook: parseAvatarLook(user.avatarLook),
     level: fromDbWorkLevel(user.level),
+    guest: user.role === "Guest",
   });
 }

@@ -7,7 +7,8 @@ import { type FormEvent, useState } from "react";
 import { ArrowRight } from "lucide-react";
 import { TextField } from "../../components/TextField";
 import { signinUser, signupUser } from "../../lib/auth-api";
-import { getAuthToken, saveAuthToken, saveAuthEmail } from "../../lib/auth-token";
+import { getAuthToken, isGuestSession, saveAuthToken, saveAuthEmail } from "../../lib/auth-token";
+import { authLink, nextPathFromUrl } from "../../lib/next-path";
 import { useEffect } from "react";
 
 export default function SignupPage() {
@@ -18,11 +19,15 @@ export default function SignupPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // From the invite link that sent them here; the other auth page's link keeps it.
+  const [next, setNext] = useState<string | null>(null);
 
   useEffect(() => {
+    // Signed in already: on to where the invite link pointed. A guest stays, to sign in or up.
+    setNext(nextPathFromUrl());
     const token = getAuthToken();
-    if (token) {
-      router.replace("/spaces");
+    if (token && !isGuestSession()) {
+      router.replace(nextPathFromUrl() ?? "/spaces");
     }
   }, [router]);
 
@@ -43,7 +48,7 @@ export default function SignupPage() {
       const { token } = await signinUser({ email, password });
       saveAuthToken(token);
       saveAuthEmail(email);
-      router.push("/spaces");
+      router.push(nextPathFromUrl() ?? "/spaces");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to create account");
     } finally {
@@ -118,7 +123,7 @@ export default function SignupPage() {
 
         <p className="mt-7 border-t border-[#b9c7d9] pt-5 text-sm text-[#52627b]">
           Already have an account?{" "}
-          <Link href="/signin" className="font-bold text-[#183a8f] underline decoration-[#8da6c9] underline-offset-4 hover:text-[#111827]">
+          <Link href={authLink("/signin", next)} className="font-bold text-[#183a8f] underline decoration-[#8da6c9] underline-offset-4 hover:text-[#111827]">
             Sign in
           </Link>
         </p>

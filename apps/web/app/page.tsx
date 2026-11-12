@@ -17,9 +17,9 @@ const crew = [
 
 const features: { index: string; title: string; body: string; glyph: GlyphName }[] = [
   { index: "01", title: "See presence in real time", body: "Know who is available and where conversations are happening inside the shared 2D room.", glyph: "pin" },
-  { index: "02", title: "Talk by proximity", body: "Voice and video begin when teammates move close, then disconnect naturally when they step away.", glyph: "voice" },
+  { index: "02", title: "Talk by proximity", body: "Walk up to a teammate and you're in range to talk; step away and the call ends. Your mic and camera stay off until you choose to turn them on.", glyph: "voice" },
   { index: "03", title: "Keep shared context", body: "Return through one link to the same persistent room, layout, and recent team conversation.", glyph: "clock" },
-  { index: "04", title: "Collaborate without friction", body: "Use chat, reactions, and keyboard controls without scheduling another call or opening another tool.", glyph: "chat" },
+  { index: "04", title: "Collaborate without friction", body: "Use chat, reactions, and arrow-key movement without scheduling another call or opening another tool. Guests join from a link with just a name.", glyph: "chat" },
 ];
 
 const heroTags: { label: string; glyph: GlyphName }[] = [

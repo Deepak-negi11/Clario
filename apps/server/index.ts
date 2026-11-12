@@ -1,5 +1,6 @@
 import { handleSignup } from "./src/auth/signup";
 import { handleSignin } from "./src/auth/signin";
+import { handleGuest } from "./src/auth/guest";
 import {
   handleCreateElement,
   handleCreateAvatar,
@@ -122,6 +123,7 @@ export function startServer(port: number) {
 
       "/api/v1/signup": { POST: limitedAuth(handleSignup), OPTIONS: handleCorsPreflight },
       "/api/v1/signin": { POST: limitedAuth(handleSignin), OPTIONS: handleCorsPreflight },
+      "/api/v1/guest": { POST: limitedAuth(handleGuest), OPTIONS: handleCorsPreflight },
 
 
       "/api/v1/user/metadata": {

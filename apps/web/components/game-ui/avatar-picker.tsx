@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import { ImageUp, LoaderCircle, RotateCcw } from "lucide-react";
 import { AVATAR_BASES, PHOTO_AI_SIZE, lookForAiHair, type AvatarBase, type AvatarLook, type HairShape, type PhotoAiReading } from "@repo/shared";
 import { readPhoto } from "../../lib/avatar/photo-detect";
-import { getAuthToken } from "../../lib/auth-token";
+import { getAuthToken, isGuestSession } from "../../lib/auth-token";
 import { FRAME_HEIGHT, FRAME_WIDTH, originalLook, recolorSheet, sheetUrl } from "../../lib/avatar/recolor";
 
 const STYLE_LABELS: Record<AvatarBase, string> = {
@@ -156,7 +156,10 @@ export function AvatarPicker({ look, onChange, view = "2d" }: { look: AvatarLook
   const [stage, setStage] = useState<"loading" | "reading" | null>(null);
   const reading = stage !== null;
   const [note, setNote] = useState<{ tone: "ok" | "warn"; text: string } | null>(null);
-  const [useAi, setUseAi] = useState(readPhotoAiChoice);
+  // Guests (joined from a link) can't use the site's AI, so they don't get the switch.
+  const [aiAllowed] = useState(() => !isGuestSession());
+  const [aiChoice, setUseAi] = useState(readPhotoAiChoice);
+  const useAi = aiAllowed && aiChoice;
   // The photo, shown beside the avatar to compare. It stays in this browser tab.
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   useEffect(() => () => {
@@ -350,23 +353,25 @@ export function AvatarPicker({ look, onChange, view = "2d" }: { look: AvatarLook
           <RotateCcw size={15} aria-hidden="true" />
         </button>
       </div>
-      <label className="mt-2 flex cursor-pointer items-center gap-2 text-xs font-medium text-[#404040]">
-        <input
-          type="checkbox"
-          checked={useAi}
-          disabled={reading}
-          onChange={(event) => {
-            setUseAi(event.target.checked);
-            try {
-              localStorage.setItem(PHOTO_AI_KEY, event.target.checked ? "on" : "off");
-            } catch {
-              // Private mode: the choice lasts until the page reloads.
-            }
-          }}
-          className="h-3.5 w-3.5 cursor-pointer accent-[#3f4ae8]"
-        />
-        Use AI to read my photo
-      </label>
+      {aiAllowed && (
+        <label className="mt-2 flex cursor-pointer items-center gap-2 text-xs font-medium text-[#404040]">
+          <input
+            type="checkbox"
+            checked={aiChoice}
+            disabled={reading}
+            onChange={(event) => {
+              setUseAi(event.target.checked);
+              try {
+                localStorage.setItem(PHOTO_AI_KEY, event.target.checked ? "on" : "off");
+              } catch {
+                // Private mode: the choice lasts until the page reloads.
+              }
+            }}
+            className="h-3.5 w-3.5 cursor-pointer accent-[#3f4ae8]"
+          />
+          Use AI to read my photo
+        </label>
+      )}
       <p className="mt-1 text-[11px] leading-4 text-[#7a7a7a]">
         {stage === "loading"
           ? `The first time, this downloads the face detector (about 8 MB).${useAi ? "" : " Your photo isn't uploaded."}`
