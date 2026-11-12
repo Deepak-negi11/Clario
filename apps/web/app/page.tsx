@@ -79,7 +79,6 @@ export default function Home() {
         <section className={styles.hero} aria-labelledby="hero-title">
           <div className={styles.heroGrid}>
             <div className={styles.heroContent}>
-              <p className={styles.eyebrow}><i aria-hidden="true" /> Spatial workspace for remote teams</p>
               <h1 id="hero-title">
                 <span>Work together like you’re</span>
                 <em>in the same room.</em>
@@ -108,16 +107,14 @@ export default function Home() {
 
         <section id="how-it-works" className={styles.howSection} aria-labelledby="how-title">
           <div className={styles.sectionHeading}>
-            <p className={styles.eyebrow}>How it works</p>
             <h2 id="how-title">One room.<br /><em>Three simple steps.</em></h2>
-            <p>Create one persistent workspace, share its link, and walk up to teammates whenever a conversation needs to happen.</p>
+            <p>Walk up to teammates whenever a conversation needs to happen, in one persistent room you share with a link.</p>
           </div>
           <InteractiveHowItWorks />
         </section>
 
         <section id="features" className={styles.featureSection} aria-labelledby="feature-title">
           <div className={styles.featureIntro}>
-            <p className={styles.eyebrow}>Built for presence</p>
             <h2 id="feature-title">Everything your team needs to feel <em>present.</em></h2>
           </div>
           <div className={styles.featureGrid}>
@@ -125,7 +122,6 @@ export default function Home() {
               <article key={index} className={styles.featureCard}>
                 <div className={styles.featureCardTop}>
                   <PixelGlyph name={glyph} size={56} />
-                  <span>{index}</span>
                 </div>
                 <h3>{title}</h3>
                 <p>{body}</p>
@@ -137,7 +133,6 @@ export default function Home() {
         <section className={styles.finalCta} aria-labelledby="final-title">
           <div className={styles.finalInner}>
             <PixelGlyph name="avatar" size={44} className={styles.finalGlyph} />
-            <p className={styles.eyebrow}>Your team has enough tools</p>
             <h2 id="final-title">Now give them <em>a place.</em></h2>
             <p>Bring your team into one shared room where conversation feels visible, immediate, and human.</p>
             <LandingPrimaryCta />

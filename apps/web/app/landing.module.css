@@ -71,12 +71,6 @@
 .hero::before { position: absolute; z-index: -1; inset: 0; background-image: radial-gradient(circle, #d6dae2 1px, transparent 1.3px); background-size: 18px 18px; content: ""; opacity: .75; mask-image: radial-gradient(ellipse 75% 65% at 50% 42%, #000 15%, transparent 72%); }
 .heroGrid { display: flex; max-width: 64rem; margin: auto; flex-direction: column; align-items: center; text-align: center; }
 .heroContent { display: flex; min-width: 0; flex-direction: column; align-items: center; }
-.eyebrow { display: flex; align-items: center; gap: .6rem; margin: 0 0 1.4rem; color: var(--accent-ink); font-family: var(--mono); font-size: .72rem; font-weight: 500; letter-spacing: .12em; text-transform: uppercase; }
-.eyebrow i { width: .45rem; height: .45rem; flex: none; background: var(--accent); box-shadow: .6rem 0 0 rgba(58,110,232,.35); margin-right: .6rem; }
-@media (prefers-reduced-motion: no-preference) {
-  .eyebrow i { animation: pixelBlink 1.6s steps(2, jump-none) infinite; }
-}
-@keyframes pixelBlink { 50% { opacity: .25; } }
 .hero h1 { margin: 0; font-family: var(--pixel); font-size: clamp(2.6rem, 6vw, 4.6rem); font-weight: 500; line-height: 1.04; letter-spacing: -.01em; text-wrap: balance; }
 .hero h1 > span { display: block; }
 .hero h1 em { display: block; margin-top: .06em; color: var(--accent); font-style: normal; }
@@ -103,7 +97,7 @@
 
 /* Hero pixel scene */
 .sceneCard { position: relative; z-index: 46; min-width: 0; margin: 0; padding: 1rem; border: 1px solid var(--line); border-radius: 1.5rem; background: var(--surface); box-shadow: 0 1px 2px rgba(18,21,28,.04), 0 30px 60px -36px rgba(30,52,110,.35); }
-.sceneTop { display: flex; padding: .2rem .3rem .9rem; align-items: center; justify-content: space-between; gap: 1rem; color: var(--soft); font-size: .8rem; }
+.sceneTop { display: flex; padding: .2rem .3rem .9rem; align-items: center; justify-content: flex-end; gap: 1rem; color: var(--soft); font-size: .8rem; }
 .sceneEmbedded { z-index: auto; width: min(100%, 34rem); padding: 1.25rem; border: 0; background: transparent; box-shadow: none; }
 .sceneTopEnd { display: flex; align-items: center; gap: .45rem; }
 .scenePause { display: grid; width: 1.9rem; height: 1.9rem; place-items: center; border: 1px solid var(--line); border-radius: .5rem; background: var(--surface); color: var(--muted); cursor: pointer; transition: color .2s ease, border-color .2s ease; }
@@ -112,10 +106,10 @@
 .sceneCanvasWrap { overflow: hidden; border: 1px solid var(--line); border-radius: 1rem; background: #f6f7fa; }
 .sceneCanvas { display: block; width: 100%; height: auto; image-rendering: pixelated; }
 .scenePhases { display: grid; margin: .8rem 0 0; padding: 0; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .45rem; list-style: none; }
-.scenePhases li { display: flex; padding: .6rem .7rem; flex-direction: column; gap: .25rem; border: 1px solid transparent; border-radius: .75rem; color: var(--soft); font-size: .78rem; font-weight: 500; transition: background .3s ease, color .3s ease, border-color .3s ease; }
-.scenePhases li span { color: var(--line-strong); font-family: var(--pixel); font-size: .82rem; transition: color .3s ease; }
+.scenePhases button { width: 100%; padding: .6rem .7rem; border: 1px solid transparent; border-radius: .75rem; background: transparent; color: var(--soft); cursor: pointer; font: inherit; font-size: .78rem; font-weight: 500; text-align: left; transition: background .3s ease, color .3s ease, border-color .3s ease; }
+.scenePhases button:hover { color: var(--ink); }
+.scenePhases button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .scenePhases .scenePhaseActive { border-color: rgba(58,110,232,.18); background: var(--accent-soft); color: var(--ink); }
-.scenePhases .scenePhaseActive span { color: var(--accent); }
 .sceneNote { display: flex; margin: .7rem .3rem 0; align-items: center; gap: .4rem; color: var(--soft); font-size: .76rem; line-height: 1.35; }
 .sceneNote svg { flex: none; color: var(--muted); }
 
@@ -133,7 +127,6 @@
 .howSection,.featureSection { max-width: 72rem; margin: auto; padding: clamp(5rem, 9vw, 8rem) 1.5rem; color: var(--ink); scroll-margin-top: 1rem; }
 .howSection { background: var(--band); box-shadow: 0 0 0 100vmax var(--band); clip-path: inset(0 -100vmax); }
 .sectionHeading { display: grid; margin-bottom: 3.25rem; grid-template-columns: 1fr 1fr; align-items: end; column-gap: 5rem; }
-.sectionHeading .eyebrow { grid-column: 1 / -1; }
 .sectionHeading h2,.featureIntro h2,.finalCta h2 { margin: 0; font-family: var(--pixel); font-size: clamp(2.1rem, 4vw, 3.5rem); font-weight: 500; line-height: 1.06; letter-spacing: -.01em; text-wrap: balance; }
 .sectionHeading h2 em,.featureIntro h2 em,.finalCta h2 em { color: var(--accent); font-style: normal; }
 .sectionHeading > p:last-child { max-width: 29rem; margin: 0; color: var(--muted); line-height: 1.7; text-wrap: pretty; }
@@ -149,8 +142,7 @@
 .stepTabs .activeStep span { color: var(--accent); }
 .stepTabs .activeStep::after { transform: scaleX(1); transform-origin: left; }
 .stepPanel { display: grid; min-height: 24rem; padding-top: 2.5rem; grid-template-columns: .8fr 1.2fr; align-items: center; gap: 4.5rem; }
-.stepCopy > span { color: var(--accent-ink); font-family: var(--mono); font-size: .72rem; letter-spacing: .08em; }
-.stepCopy h3 { margin: .8rem 0; font-family: var(--pixel); font-size: clamp(1.8rem, 2.8vw, 2.6rem); font-weight: 500; line-height: 1.08; }
+.stepCopy h3 { margin: 0 0 .8rem; font-family: var(--pixel); font-size: clamp(1.8rem, 2.8vw, 2.6rem); font-weight: 500; line-height: 1.08; }
 .stepCopy p { max-width: 28rem; margin: 0; color: var(--muted); line-height: 1.7; }
 .stepDemo { position: relative; display: grid; min-height: 19rem; place-items: center; border: 1px solid var(--line); border-radius: 1.25rem; background-color: var(--surface); background-image: radial-gradient(circle, #dfe3ea 1px, transparent 1.3px); background-size: 16px 16px; }
 .templateDemo { display: grid; width: min(27rem, 84%); grid-template-columns: 1fr 1fr; gap: .7rem; }
@@ -171,7 +163,6 @@
 .featureCard:nth-child(2),.featureCard:nth-child(3) { grid-column: span 5; }
 .featureCard:hover { border-color: rgba(58,110,232,.32); transform: translateY(-2px); box-shadow: 0 22px 40px -30px rgba(30,52,110,.45); }
 .featureCardTop { display: flex; margin-bottom: auto; align-items: flex-start; justify-content: space-between; gap: 1rem; }
-.featureCardTop > span { color: var(--soft); font-family: var(--pixel); font-size: .95rem; }
 .featureCard h3 { margin: 2rem 0 .5rem; font-family: var(--pixel); font-size: 1.45rem; font-weight: 500; line-height: 1.15; }
 .featureCard p { max-width: 34rem; margin: 0; color: var(--muted); font-size: .94rem; line-height: 1.65; }
 @media (prefers-reduced-motion: no-preference) {
@@ -182,9 +173,8 @@
 .finalCta { position: relative; margin-top: clamp(1rem, 4vw, 3rem); overflow: hidden; text-align: center; }
 .finalInner { display: flex; max-width: 44rem; margin: auto; padding: clamp(4rem, 8vw, 6rem) 1.5rem clamp(5rem, 9vw, 7rem); align-items: center; flex-direction: column; }
 .finalGlyph { margin-bottom: 1.6rem; }
-.finalCta .eyebrow { justify-content: center; }
 .finalCta h2 { font-size: clamp(2.4rem, 5vw, 4.2rem); }
-.finalInner > p:not(.eyebrow) { max-width: 33rem; margin: 1.3rem auto 2rem; color: var(--muted); line-height: 1.7; text-wrap: pretty; }
+.finalInner > p { max-width: 33rem; margin: 1.3rem auto 2rem; color: var(--muted); line-height: 1.7; text-wrap: pretty; }
 
 /* Footer */
 .footer { padding: 2.5rem 1.5rem 0; border-top: 1px solid var(--line); background: var(--bg); }
@@ -236,12 +226,12 @@
   .heroActions { align-items: stretch; flex-direction: column; }
   .secondaryCta,.heroActions .primaryCta { justify-content: center; }
   .sceneCard { padding: .7rem; border-radius: 1.2rem; }
-  .scenePhases li { padding: .5rem; font-size: .7rem; }
+  .scenePhases button { padding: .5rem; font-size: .7rem; }
   .shareDemo { align-items: stretch; flex-direction: column; }
   .shareDemo b { justify-content: center; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .headerInner,.headerCta,.primaryCta,.secondaryCta,.secondaryCta svg,.stepTabs button::after,.featureCard,.scenePhases li { transition: none; }
+  .headerInner,.headerCta,.primaryCta,.secondaryCta,.secondaryCta svg,.stepTabs button::after,.featureCard,.scenePhases button { transition: none; }
   .globalAvatar { display: none; }
 }

@@ -36,6 +36,9 @@ const PHASES: { id: ScenePhase; label: string }[] = [
   { id: "leave", label: "Step away" },
 ];
 
+// Where each phase starts in the loop, for jumping to it when its button is clicked.
+const PHASE_START: Record<ScenePhase, number> = { walk: 0, talk: WALK_MS, leave: WALK_MS + TALK_MS };
+
 type Frame = {
   phase: ScenePhase;
   leftX: number;
@@ -214,12 +217,18 @@ export function PixelRoomScene({ embedded = false }: { embedded?: boolean }) {
   const [phase, setPhase] = useState<ScenePhase>("walk");
   const [canAnimate, setCanAnimate] = useState(false);
   const [paused, setPaused] = useState(false);
-  const controlsRef = useRef<{ pause: () => void; resume: () => void } | null>(null);
+  const controlsRef = useRef<{ pause: () => void; resume: () => void; seek: (time: number) => void } | null>(null);
 
   const togglePaused = () => {
     if (paused) controlsRef.current?.resume();
     else controlsRef.current?.pause();
     setPaused(!paused);
+  };
+
+  // Jumps the scene to the start of a phase; while paused it stays there.
+  const showPhase = (id: ScenePhase) => {
+    controlsRef.current?.seek(PHASE_START[id]);
+    setPhase(id);
   };
 
   useEffect(() => {
@@ -292,6 +301,11 @@ export function PixelRoomScene({ embedded = false }: { embedded?: boolean }) {
         isPaused = false;
         start();
       },
+      seek: (time: number) => {
+        elapsedBeforePause = time;
+        resumedAt = performance.now();
+        render(time);
+      },
     };
 
     const resizeObserver = new ResizeObserver(resize);
@@ -324,7 +338,6 @@ export function PixelRoomScene({ embedded = false }: { embedded?: boolean }) {
   return (
     <div className={`${styles.sceneCard} ${embedded ? styles.sceneEmbedded : ""}`}>
       <div className={styles.sceneTop}>
-        <span>Live room preview</span>
         <div className={styles.sceneTopEnd}>
           <b translate="no">team-hq · 2 online</b>
           {canAnimate && (
@@ -348,11 +361,17 @@ export function PixelRoomScene({ embedded = false }: { embedded?: boolean }) {
           aria-label="Two pixel avatars walk toward each other. When they are close, a proximity ring shows they are in range to talk; when they step apart, the call ends."
         />
       </div>
-      <ol className={styles.scenePhases} aria-hidden="true">
-        {PHASES.map((item, index) => (
-          <li key={item.id} className={phase === item.id ? styles.scenePhaseActive : ""}>
-            <span>0{index + 1}</span>
-            {item.label}
+      <ol className={styles.scenePhases} aria-label="Show a moment of the conversation">
+        {PHASES.map((item) => (
+          <li key={item.id}>
+            <button
+              type="button"
+              onClick={() => showPhase(item.id)}
+              aria-pressed={phase === item.id}
+              className={phase === item.id ? styles.scenePhaseActive : ""}
+            >
+              {item.label}
+            </button>
           </li>
         ))}
       </ol>

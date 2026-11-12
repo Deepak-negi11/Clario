@@ -7,29 +7,29 @@ import styles from "../../app/landing.module.css";
 
 const steps = [
   {
-    id: "create",
+    id: "meet",
     number: "01",
+    title: "Walk over to talk",
+    body: "Move with the arrow keys, or click a spot to walk there. Within six tiles of someone in the same room, you're in range to talk. Your mic and camera stay off until you turn them on, and the browser only asks for permission then. Step away and the call ends.",
+  },
+  {
+    id: "create",
+    number: "02",
     title: "Create a persistent room",
     body: "Choose a layout for your team. The space, its context, and recent conversation stay ready between visits.",
   },
   {
     id: "share",
-    number: "02",
+    number: "03",
     title: "Invite with one link",
     body: "Share the room's link. Teammates can join as a guest with just a name, or sign in, and land straight in the room. No setup, scheduling, or another meeting app.",
-  },
-  {
-    id: "meet",
-    number: "03",
-    title: "Walk over to talk",
-    body: "Move with the arrow keys, or click a spot to walk there. Within six tiles of someone in the same room, you're in range to talk. Your mic and camera stay off until you turn them on, and the browser only asks for permission then. Step away and the call ends.",
   },
 ] as const;
 
 type StepId = (typeof steps)[number]["id"];
 
 export function InteractiveHowItWorks() {
-  const [active, setActive] = useState<StepId>("create");
+  const [active, setActive] = useState<StepId>("meet");
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const activeStep = steps.find((step) => step.id === active)!;
 
@@ -75,7 +75,6 @@ export function InteractiveHowItWorks() {
 
       <div id="step-panel" role="tabpanel" aria-labelledby={`step-tab-${active}`} className={styles.stepPanel}>
         <div className={styles.stepCopy}>
-          <span>{activeStep.number} / 03</span>
           <h3>{activeStep.title}</h3>
           <p>{activeStep.body}</p>
         </div>
