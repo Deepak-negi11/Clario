@@ -303,8 +303,11 @@
 .officeCard:hover { border-color: rgba(58,110,232,.32); transform: translateY(-2px); box-shadow: 0 22px 40px -30px rgb(var(--shade) / .45); }
 .officeShot { aspect-ratio: 16 / 10; overflow: hidden; border-bottom: 1px solid var(--line); background: var(--canvas); }
 .officeShot img { display: block; width: 100%; height: 100%; object-fit: cover; transition: transform .6s cubic-bezier(.2,.7,.2,1); }
+/* The wide 3D shot keeps its own shape so the whole building shows. */
+.officeWide .officeShot { aspect-ratio: 2000 / 722; }
 /* The card beside the wide one is shorter; let its picture fill the extra height. */
-.officeCard:nth-child(2) .officeShot { flex: 1; aspect-ratio: auto; min-height: 12rem; }
+.officeCard:nth-child(2) .officeShot { position: relative; flex: 1; aspect-ratio: auto; min-height: 12rem; }
+.officeCard:nth-child(2) .officeShot img { position: absolute; inset: 0; }
 .officeCard:hover .officeShot img { transform: scale(1.03); }
 .officeCard figcaption { padding: 1.25rem 1.4rem 1.45rem; }
 .officeCard h3 { margin: 0 0 .4rem; font-family: var(--pixel); font-size: 1.25rem; font-weight: 500; line-height: 1.15; }
@@ -338,8 +341,8 @@
 
 @media (max-width: 960px) {
   .officeCard:nth-child(n),.officeWide { grid-column: span 6; }
-  .officeWide { grid-column: 1 / -1; }
-  .officeCard:nth-child(2) .officeShot { flex: none; aspect-ratio: 16 / 10; }
+  .officeCard.officeWide { grid-column: 1 / -1; }
+  .officeCard:nth-child(2) .officeShot { flex: none; aspect-ratio: 16 / 10; min-height: 0; }
   .useSection { grid-template-columns: 1fr; }
   .useIntro { position: static; }
 }

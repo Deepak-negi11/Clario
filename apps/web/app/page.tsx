@@ -29,11 +29,11 @@ const features: { index: string; title: string; body: string; glyph: GlyphName }
 const offices: { name: string; body: string; image: string; alt: string; width: number; height: number; wide?: boolean }[] = [
   {
     name: "Clario HQ 3D",
-    body: "Walk a whole office in 3D: focus rooms, a meeting room, a kitchen, a demo stage, a game room and a hack space.",
+    body: "Walk the whole office in 3D: meeting rooms, a kitchen, a server room, a demo stage, a game room, a hack space, lounges and cubicles.",
     image: "/assets/landing/office-hq-3d.webp",
-    alt: "Clario HQ 3D virtual office with a lounge, a meeting room, a demo stage and a game room with arcade machines and ping-pong",
+    alt: "The whole Clario HQ 3D virtual office from above: focus rooms, a meeting room, a kitchen, a server room, a demo stage, a game room, a hack space, lounges and cubicles, with trees outside",
     width: 2000,
-    height: 738,
+    height: 722,
     wide: true,
   },
   {
