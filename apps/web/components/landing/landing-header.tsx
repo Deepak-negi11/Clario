@@ -23,6 +23,8 @@ export function LandingHeader() {
 
   const destination = isLoggedIn ? "/spaces" : "/signup";
   const label = isLoggedIn ? "Open your spaces" : "Create a space";
+  // Shown in the header on narrower screens, where the full label would wrap.
+  const shortLabel = isLoggedIn ? "Spaces" : "Create";
 
   return (
     <header className={`${styles.header} ${scrolled ? styles.headerScrolled : ""}`}>
@@ -50,7 +52,11 @@ export function LandingHeader() {
             </svg>
           </a>
           {!isLoggedIn && <Link href="/signin" className={styles.signInLink}>Sign in</Link>}
-          <Link href={destination} className={styles.headerCta}>{label}<ArrowUpRight size={16} /></Link>
+          <Link href={destination} className={styles.headerCta} aria-label={label}>
+            <span className={styles.ctaLong}>{label}</span>
+            <span className={styles.ctaShort} aria-hidden="true">{shortLabel}</span>
+            <ArrowUpRight size={16} aria-hidden="true" />
+          </Link>
           <button
             type="button"
             className={styles.menuButton}

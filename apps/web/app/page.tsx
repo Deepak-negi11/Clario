@@ -29,44 +29,44 @@ const features: { index: string; title: string; body: string; glyph: GlyphName }
 const offices: { name: string; body: string; image: string; alt: string; width: number; height: number; wide?: boolean }[] = [
   {
     name: "Clario HQ 3D",
-    body: "Walk a whole office in 3D: meeting rooms, a kitchen, a demo stage, a game room and a hack space.",
-    image: "/assets/maps/clario-hq-3d.png",
-    alt: "Clario HQ 3D virtual office with meeting rooms, a lounge, a demo stage, a game room and a hack space",
-    width: 1024,
-    height: 576,
+    body: "Walk a whole office in 3D: focus rooms, a meeting room, a kitchen, a demo stage, a game room and a hack space.",
+    image: "/assets/landing/office-hq-3d.webp",
+    alt: "Clario HQ 3D virtual office with a lounge, a meeting room, a demo stage and a game room with arcade machines and ping-pong",
+    width: 2000,
+    height: 738,
     wide: true,
   },
   {
     name: "Coworking Campus",
-    body: "Team desk pods, lounges, meeting rooms, a café and a pond courtyard.",
-    image: "/assets/maps/coworking-campus-v2.png",
-    alt: "Pixel-art coworking campus with desk pods, a lounge, meeting rooms and a ping-pong table",
-    width: 1024,
-    height: 592,
+    body: "Two work areas of desk pods around a lounge, with a conference room, a café and a meeting room.",
+    image: "/assets/landing/office-coworking.webp",
+    alt: "Pixel-art coworking campus with two work areas, a lounge, a café, a conference room and a reception",
+    width: 2000,
+    height: 1090,
   },
   {
     name: "Clario HQ",
-    body: "The full 2D office: desks, a library, a tech wing, a coffee corner and cubicles.",
-    image: "/assets/maps/clario-hq.png",
-    alt: "Clario HQ 2D virtual office map with desks, meeting rooms, a kitchen and a tech wing",
-    width: 1024,
-    height: 594,
+    body: "The full 2D office: workrooms, a server room, a maker lab, a demo stage, a game room, a hack space and cubicles.",
+    image: "/assets/landing/office-hq.webp",
+    alt: "Clario HQ 2D virtual office with a demo stage, game room, hack space, lounges and cubicles",
+    width: 2000,
+    height: 1077,
   },
   {
-    name: "Classic Office",
-    body: "Private offices, meeting rooms, a lounge, a café and a game corner.",
-    image: "/assets/maps/classic-office-v2.png",
-    alt: "Classic pixel-art office with private offices, meeting rooms and a lounge",
-    width: 1024,
-    height: 602,
+    name: "Team office",
+    body: "Workrooms, focus rooms, rows of desks, a lounge, a reception and a coffee corner, laid out for a team of 25.",
+    image: "/assets/landing/office-team.webp",
+    alt: "Team office with three workrooms, a kitchen, rows of desks, a lounge, a reception and a coffee corner",
+    width: 2000,
+    height: 1088,
   },
   {
     name: "Build your own",
     body: "Start from an empty plot and lay out walls, floors, rooms, furniture and outdoor buildings.",
-    image: "/assets/maps/custom-office.png",
-    alt: "Empty plot in the Clario office builder, ready for walls, rooms and furniture",
-    width: 1024,
-    height: 768,
+    image: "/assets/landing/office-builder.png",
+    alt: "An empty office in the Clario map builder with AI coworkers and a notice board, ready for rooms and furniture",
+    width: 1758,
+    height: 1358,
   },
 ];
 
@@ -260,9 +260,8 @@ export default function Home() {
         </section>
 
         <section id="offices" className={styles.officeSection} aria-labelledby="offices-title">
-          <div className={styles.sectionHeading}>
+          <div className={styles.featureIntro}>
             <h2 id="offices-title">A 2D or 3D virtual office, <em>ready in a minute.</em></h2>
-            <p>Pick a ready-made office or build your own. Every space keeps its layout, so your team comes back to the same desks each day.</p>
           </div>
           <div className={styles.officeGrid}>
             {offices.map(({ name, body, image, alt, width, height, wide }) => (
@@ -285,29 +284,34 @@ export default function Home() {
             <p>Teams, friends, classes and clubs use Clario as their online office, coworking room or hangout.</p>
             <LandingPrimaryCta />
           </div>
-          <ul className={styles.useList}>
-            {useCases.map(({ title, body }) => (
-              <li key={title}>
-                <h3>{title}</h3>
+          {/* Native dropdowns: keyboard and screen-reader friendly, and the text stays in the HTML
+              for search engines even while closed. */}
+          <div className={styles.useList}>
+            {useCases.map(({ title, body }, index) => (
+              <details key={title} className={styles.dropdown} open={index === 0}>
+                <summary>
+                  <h3>{title}</h3>
+                </summary>
                 <p>{body}</p>
-              </li>
+              </details>
             ))}
-          </ul>
+          </div>
         </section>
 
-        <section id="faq" className={styles.faqSection} aria-labelledby="faq-title">
-          <div className={styles.sectionHeading}>
+        <section id="faq" className={styles.useSection} aria-labelledby="faq-title">
+          <div className={styles.useIntro}>
             <h2 id="faq-title">Questions people <em>ask us.</em></h2>
-            <p>Short answers about price, setup, guests and what is inside the office.</p>
           </div>
-          <dl className={styles.faqList}>
+          <div className={styles.faqList}>
             {faqs.map(({ question, answer }) => (
-              <div key={question}>
-                <dt>{question}</dt>
-                <dd>{answer}</dd>
-              </div>
+              <details key={question} className={styles.dropdown}>
+                <summary>
+                  <h3>{question}</h3>
+                </summary>
+                <p>{answer}</p>
+              </details>
             ))}
-          </dl>
+          </div>
         </section>
 
         <section className={styles.finalCta} aria-labelledby="final-title">

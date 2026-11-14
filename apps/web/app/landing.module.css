@@ -302,8 +302,7 @@
 .officeWide { grid-column: span 7; }
 .officeCard:hover { border-color: rgba(58,110,232,.32); transform: translateY(-2px); box-shadow: 0 22px 40px -30px rgb(var(--shade) / .45); }
 .officeShot { aspect-ratio: 16 / 10; overflow: hidden; border-bottom: 1px solid var(--line); background: var(--canvas); }
-.officeShot img { display: block; width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated; transition: transform .6s cubic-bezier(.2,.7,.2,1); }
-.officeWide .officeShot img { image-rendering: auto; }
+.officeShot img { display: block; width: 100%; height: 100%; object-fit: cover; transition: transform .6s cubic-bezier(.2,.7,.2,1); }
 /* The card beside the wide one is shorter; let its picture fill the extra height. */
 .officeCard:nth-child(2) .officeShot { flex: 1; aspect-ratio: auto; min-height: 12rem; }
 .officeCard:hover .officeShot img { transform: scale(1.03); }
@@ -311,20 +310,31 @@
 .officeCard h3 { margin: 0 0 .4rem; font-family: var(--pixel); font-size: 1.25rem; font-weight: 500; line-height: 1.15; }
 .officeCard p { margin: 0; color: var(--muted); font-size: .92rem; line-height: 1.6; text-wrap: pretty; }
 
-.useSection { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); align-items: start; gap: clamp(2.5rem, 6vw, 5.5rem); }
+.useSection { display: grid; grid-template-columns: minmax(0, 4.5fr) minmax(0, 7.5fr); align-items: start; gap: clamp(2rem, 4.5vw, 3.75rem); }
 .useIntro { position: sticky; top: 6.5rem; }
 .useIntro h2 { margin: 0; font-family: var(--pixel); font-size: clamp(2.1rem, 4vw, 3.5rem); font-weight: 500; line-height: 1.06; letter-spacing: -.01em; text-wrap: balance; }
 .useIntro h2 em { color: var(--accent); font-style: normal; }
 .useIntro > p { max-width: 26rem; margin: 1.2rem 0 1.8rem; color: var(--muted); line-height: 1.7; text-wrap: pretty; }
-.useList { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
-.useList li { display: grid; padding: 1.6rem 0 1.75rem; grid-template-columns: minmax(0, 15rem) minmax(0, 1fr); gap: .5rem 2rem; border-bottom: 1px solid var(--line); }
-.useList h3 { margin: 0; font-size: 1.02rem; font-weight: 600; line-height: 1.35; letter-spacing: -.01em; text-wrap: balance; }
-.useList p { max-width: 34rem; margin: 0; color: var(--muted); font-size: .94rem; line-height: 1.65; text-wrap: pretty; }
+.useList { border-top: 1px solid var(--line); }
+.faqList { border-top: 1px solid var(--line); }
 
-.faqList { display: grid; margin: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 3.5rem; }
-.faqList > div { padding: 1.5rem 0 1.65rem; border-top: 1px solid var(--line); }
-.faqList dt { margin: 0 0 .55rem; font-size: 1.02rem; font-weight: 600; line-height: 1.4; letter-spacing: -.01em; }
-.faqList dd { max-width: 33rem; margin: 0; color: var(--muted); font-size: .94rem; line-height: 1.7; text-wrap: pretty; }
+/* Dropdowns (use cases and FAQ): native <details>, the whole row is the click target. */
+.dropdown { border-bottom: 1px solid var(--line); }
+.dropdown summary { display: flex; padding: 1.35rem 0; align-items: center; justify-content: space-between; gap: 1.5rem; cursor: pointer; list-style: none; border-radius: .5rem; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+.dropdown summary::-webkit-details-marker { display: none; }
+.dropdown summary h3 { margin: 0; font-size: 1.02rem; font-weight: 600; line-height: 1.4; letter-spacing: -.01em; text-wrap: balance; transition: color .2s ease; }
+.dropdown summary::after { content: ""; flex: none; width: .55rem; height: .55rem; margin-right: .35rem; border-right: 2px solid var(--soft); border-bottom: 2px solid var(--soft); transform: translateY(-25%) rotate(45deg); transition: transform .25s ease, border-color .2s ease; }
+.dropdown[open] summary::after { border-color: var(--dropdown-active); transform: translateY(15%) rotate(225deg); }
+/* Active question: #7BBEF8 in dark mode; in light mode a deeper mix of it that stays readable on white. */
+.dropdown { --dropdown-active: #3a70d4; }
+:global([data-theme="dark"]) .dropdown { --dropdown-active: #7bbef8; }
+.dropdown summary:hover h3,.dropdown[open] summary h3 { color: var(--dropdown-active); }
+.dropdown summary:hover::after,.dropdown summary:focus-visible::after { border-color: #7bbef8; }
+/* Hover and keyboard focus draw a #7BBEF8 ring inside the row, so it never covers the open
+   answer below it. */
+.dropdown summary { padding-inline: .6rem; margin-inline: -.6rem; outline: 2px solid transparent; outline-offset: -2px; transition: outline-color .2s ease; }
+.dropdown summary:hover,.dropdown summary:focus-visible { outline-color: #7bbef8; }
+.dropdown > p { max-width: 40rem; margin: -.35rem 0 0; padding: 0 2rem 1.5rem 0; color: var(--muted); font-size: .95rem; line-height: 1.7; text-wrap: pretty; }
 
 @media (max-width: 960px) {
   .officeCard:nth-child(n),.officeWide { grid-column: span 6; }
@@ -332,16 +342,29 @@
   .officeCard:nth-child(2) .officeShot { flex: none; aspect-ratio: 16 / 10; }
   .useSection { grid-template-columns: 1fr; }
   .useIntro { position: static; }
-  .useList li { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 760px) {
   .officeSection,.useSection,.faqSection { padding: 4.5rem 1rem; }
   .officeCard:nth-child(n) { grid-column: 1 / -1; }
-  .faqList { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .officeCard,.officeShot img { transition: none; }
+  .officeCard,.officeShot img,.dropdown summary,.dropdown summary::after,.dropdown summary h3 { transition: none; }
   .officeCard:hover,.officeCard:hover .officeShot img { transform: none; }
+}
+
+/* Header labels stay on one line. Below 1100px the CTA says just "Create", and below 960px the
+   GitHub icon leaves the header (it is still in the footer) so the nav keeps its room. */
+.desktopNav a,.signInLink,.headerCta { white-space: nowrap; }
+.ctaShort { display: none; }
+@media (max-width: 1100px) {
+  .desktopNav { gap: 1.35rem; }
+  .ctaLong { display: none; }
+  .ctaShort { display: inline; }
+}
+@media (max-width: 960px) {
+  .headerInner { gap: 1rem; }
+  .desktopNav { gap: 1.1rem; }
+  .githubLink { display: none; }
 }
