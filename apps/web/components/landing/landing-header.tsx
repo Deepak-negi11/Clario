@@ -33,6 +33,8 @@ export function LandingHeader() {
         <nav className={styles.desktopNav} aria-label="Landing page navigation">
           <a href="#how-it-works">How it works</a>
           <a href="#features">Features</a>
+          <a href="#offices">Offices</a>
+          <a href="#faq">FAQ</a>
         </nav>
         <div className={styles.headerActions}>
           <ThemeToggle />
@@ -65,6 +67,8 @@ export function LandingHeader() {
         <nav id="landing-mobile-nav" className={styles.mobileNav} aria-label="Mobile navigation">
           <a href="#how-it-works" onClick={() => setMenuOpen(false)}>How it works</a>
           <a href="#features" onClick={() => setMenuOpen(false)}>Features</a>
+          <a href="#offices" onClick={() => setMenuOpen(false)}>Offices</a>
+          <a href="#faq" onClick={() => setMenuOpen(false)}>FAQ</a>
           {!isLoggedIn && <Link href="/signin">Sign in</Link>}
           <Link href={destination} className={styles.mobileNavCta} onClick={() => setMenuOpen(false)}>{label}</Link>
         </nav>

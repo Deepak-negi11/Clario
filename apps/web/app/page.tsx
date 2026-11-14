@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import Image from "next/image";
 import { ArrowDown } from "lucide-react";
 import { BrandLogo } from "../components/brand-logo";
 import { LandingHeader, LandingPrimaryCta } from "../components/landing/landing-header";
@@ -22,6 +23,115 @@ const features: { index: string; title: string; body: string; glyph: GlyphName }
   { index: "04", title: "Collaborate without friction", body: "Use chat, reactions, and arrow-key movement without scheduling another call or opening another tool. Guests join from a link with just a name.", glyph: "chat" },
 ];
 
+// Search-facing sections. The headings follow what people type into Google ("virtual office for
+// remote teams", "virtual coworking space", "study with friends online", "gather alternative"),
+// and every claim matches a feature in the app.
+const offices: { name: string; body: string; image: string; alt: string; width: number; height: number; wide?: boolean }[] = [
+  {
+    name: "Clario HQ 3D",
+    body: "Walk a whole office in 3D: meeting rooms, a kitchen, a demo stage, a game room and a hack space.",
+    image: "/assets/maps/clario-hq-3d.png",
+    alt: "Clario HQ 3D virtual office with meeting rooms, a lounge, a demo stage, a game room and a hack space",
+    width: 1024,
+    height: 576,
+    wide: true,
+  },
+  {
+    name: "Coworking Campus",
+    body: "Team desk pods, lounges, meeting rooms, a café and a pond courtyard.",
+    image: "/assets/maps/coworking-campus-v2.png",
+    alt: "Pixel-art coworking campus with desk pods, a lounge, meeting rooms and a ping-pong table",
+    width: 1024,
+    height: 592,
+  },
+  {
+    name: "Clario HQ",
+    body: "The full 2D office: desks, a library, a tech wing, a coffee corner and cubicles.",
+    image: "/assets/maps/clario-hq.png",
+    alt: "Clario HQ 2D virtual office map with desks, meeting rooms, a kitchen and a tech wing",
+    width: 1024,
+    height: 594,
+  },
+  {
+    name: "Classic Office",
+    body: "Private offices, meeting rooms, a lounge, a café and a game corner.",
+    image: "/assets/maps/classic-office-v2.png",
+    alt: "Classic pixel-art office with private offices, meeting rooms and a lounge",
+    width: 1024,
+    height: 602,
+  },
+  {
+    name: "Build your own",
+    body: "Start from an empty plot and lay out walls, floors, rooms, furniture and outdoor buildings.",
+    image: "/assets/maps/custom-office.png",
+    alt: "Empty plot in the Clario office builder, ready for walls, rooms and furniture",
+    width: 1024,
+    height: 768,
+  },
+];
+
+const useCases: { title: string; body: string }[] = [
+  {
+    title: "Virtual office for remote teams",
+    body: "Give a distributed team one place to work. See who is at their desk, walk over to ask a quick question, and leave when you are done, without booking another meeting.",
+  },
+  {
+    title: "Virtual coworking space",
+    body: "Work next to friends or other freelancers with your mic off, then say hi when you take a break at the coffee machine.",
+  },
+  {
+    title: "Team building games for remote teams",
+    body: "The Game Room has Ping-pong, Breakout, Snake, Chair Sumo and Tetris. Use it for a Friday break or an onboarding icebreaker.",
+  },
+  {
+    title: "Study with friends online",
+    body: "Make a study room, share the link and keep the same desks every session. Talk to the friend beside you without disturbing everyone else.",
+  },
+  {
+    title: "Hackathons and demo days",
+    body: "Give each team its own room, then gather everyone at the demo stage, with a projector and a whiteboard in the room.",
+  },
+  {
+    title: "A 3D office for AI agents",
+    body: "AI coworkers live in the office and answer questions. Connect Claude Code, Codex or Cursor and teammates see what your coding agent is working on, right above your avatar.",
+  },
+];
+
+const faqs: { question: string; answer: string }[] = [
+  {
+    question: "Is Clario free?",
+    answer: "Yes. Creating a space, inviting your team, proximity voice and video, chat, screen sharing and the Game Room are free. AI coworkers give every account 20 free replies; after that you add your own key from NVIDIA, Google Gemini, Anthropic, OpenAI or OpenRouter.",
+  },
+  {
+    question: "Do I need to download anything?",
+    answer: "No. Clario runs in a desktop web browser. Open the link, pick an avatar and walk in.",
+  },
+  {
+    question: "How does proximity voice chat work?",
+    answer: "Walk your avatar up to a teammate and you can talk; step away and the call ends. Your mic and camera stay off until you choose to turn them on.",
+  },
+  {
+    question: "Can guests join without an account?",
+    answer: "Yes. Send them the space link and they join with just a name, no sign-up needed.",
+  },
+  {
+    question: "Is Clario a Gather alternative?",
+    answer: "Yes. Like Gather, Clario gives your team a shared map with avatars and proximity video. Clario also has a 3D office, AI coworkers, coding-agent status on avatars and a Game Room, and it is free.",
+  },
+  {
+    question: "What are AI coworkers?",
+    answer: "Characters in your office you can chat with. They answer questions, can read a GitHub link you share, and walk to a room when you ask them to.",
+  },
+  {
+    question: "Can I design my own office?",
+    answer: "Yes. Start from an empty plot and add walls, floors, rooms, furniture and outdoor buildings, or pick one of the ready-made 2D and 3D offices.",
+  },
+  {
+    question: "Can my team see what my coding agent is doing?",
+    answer: "Yes. Run one setup command and Claude Code, Codex or Cursor show a badge above your avatar while they work, with the project and branch.",
+  },
+];
+
 const heroTags: { label: string; glyph: GlyphName }[] = [
   { label: "Proximity voice", glyph: "voice" },
   { label: "Room chat", glyph: "chat" },
@@ -36,7 +146,7 @@ const structuredData = {
       "@id": `${SITE_URL}/#organization`,
       name: SITE_NAME,
       url: SITE_URL,
-      logo: `${SITE_URL}/clario-mark.svg`,
+      logo: `${SITE_URL}/icon-512.png`,
       sameAs: [GITHUB_URL],
     },
     {
@@ -44,7 +154,7 @@ const structuredData = {
       "@id": `${SITE_URL}/#website`,
       name: SITE_NAME,
       url: SITE_URL,
-      description: "A shared 2D spatial workspace for remote teams.",
+      description: "A free virtual office for remote teams.",
       publisher: { "@id": `${SITE_URL}/#organization` },
     },
     {
@@ -53,13 +163,32 @@ const structuredData = {
       url: SITE_URL,
       applicationCategory: "BusinessApplication",
       operatingSystem: "Web",
-      description: "A shared 2D spatial workspace where remote teams move together, talk by proximity, chat, and return to the same persistent room.",
+      description: "A free virtual office for remote teams: walk around a 2D or 3D office, talk to teammates nearby, chat, play games and ask AI coworkers for help.",
+      image: `${SITE_URL}/og-clario.png`,
+      screenshot: `${SITE_URL}/og-clario.png`,
+      featureList: [
+        "Proximity voice and video",
+        "Room chat and reactions",
+        "Persistent 2D and 3D offices",
+        "AI coworkers",
+        "Office game room",
+        "Guest links with just a name",
+      ],
       offers: {
         "@type": "Offer",
         price: "0",
         priceCurrency: "USD",
       },
       publisher: { "@id": `${SITE_URL}/#organization` },
+    },
+    {
+      "@type": "FAQPage",
+      "@id": `${SITE_URL}/#faq`,
+      mainEntity: faqs.map(({ question, answer }) => ({
+        "@type": "Question",
+        name: question,
+        acceptedAnswer: { "@type": "Answer", text: answer },
+      })),
     },
   ],
 };
@@ -83,7 +212,7 @@ export default function Home() {
                 <span>Work together like you’re</span>
                 <em>in the same room.</em>
               </h1>
-              <p className={styles.heroLead}>Move through a shared 2D space, talk when teammates are nearby, and return to the same room anytime.</p>
+              <p className={styles.heroLead}>A free virtual office for remote teams. Move through a shared 2D or 3D space, talk when teammates are nearby, and return to the same room anytime.</p>
               <div className={styles.heroActions}>
                 <LandingPrimaryCta />
                 <a href="#how-it-works" className={styles.secondaryCta}>See how it works <ArrowDown size={16} aria-hidden="true" /></a>
@@ -128,6 +257,57 @@ export default function Home() {
               </article>
             ))}
           </div>
+        </section>
+
+        <section id="offices" className={styles.officeSection} aria-labelledby="offices-title">
+          <div className={styles.sectionHeading}>
+            <h2 id="offices-title">A 2D or 3D virtual office, <em>ready in a minute.</em></h2>
+            <p>Pick a ready-made office or build your own. Every space keeps its layout, so your team comes back to the same desks each day.</p>
+          </div>
+          <div className={styles.officeGrid}>
+            {offices.map(({ name, body, image, alt, width, height, wide }) => (
+              <figure key={name} className={`${styles.officeCard} ${wide ? styles.officeWide : ""}`}>
+                <div className={styles.officeShot}>
+                  <Image src={image} alt={alt} width={width} height={height} sizes={wide ? "(max-width: 760px) 100vw, 60vw" : "(max-width: 760px) 100vw, 30vw"} />
+                </div>
+                <figcaption>
+                  <h3>{name}</h3>
+                  <p>{body}</p>
+                </figcaption>
+              </figure>
+            ))}
+          </div>
+        </section>
+
+        <section id="use-cases" className={styles.useSection} aria-labelledby="use-title">
+          <div className={styles.useIntro}>
+            <h2 id="use-title">One space, <em>many ways to use it.</em></h2>
+            <p>Teams, friends, classes and clubs use Clario as their online office, coworking room or hangout.</p>
+            <LandingPrimaryCta />
+          </div>
+          <ul className={styles.useList}>
+            {useCases.map(({ title, body }) => (
+              <li key={title}>
+                <h3>{title}</h3>
+                <p>{body}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <section id="faq" className={styles.faqSection} aria-labelledby="faq-title">
+          <div className={styles.sectionHeading}>
+            <h2 id="faq-title">Questions people <em>ask us.</em></h2>
+            <p>Short answers about price, setup, guests and what is inside the office.</p>
+          </div>
+          <dl className={styles.faqList}>
+            {faqs.map(({ question, answer }) => (
+              <div key={question}>
+                <dt>{question}</dt>
+                <dd>{answer}</dd>
+              </div>
+            ))}
+          </dl>
         </section>
 
         <section className={styles.finalCta} aria-labelledby="final-title">

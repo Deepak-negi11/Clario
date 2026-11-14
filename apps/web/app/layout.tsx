@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Analytics } from "@vercel/analytics/next";
 import { DM_Serif_Display, IBM_Plex_Mono, Manrope, DM_Sans, Pixelify_Sans, Geist, Geist_Mono } from "next/font/google";
 import { SITE_NAME, SITE_URL } from "../lib/site";
@@ -51,8 +51,19 @@ const geistMono = Geist_Mono({
 });
 
 const siteUrl = new URL(SITE_URL);
-const siteTitle = `${SITE_NAME} — Work together like you’re in the same room`;
-const siteDescription = "A shared 2D spatial workspace where remote teams move together, talk by proximity, chat, and return to the same persistent room.";
+// The search-result title leads with what people search for ("virtual office"); the share
+// cards keep the tagline.
+const siteTitle = `${SITE_NAME}: free virtual office for remote teams`;
+const shareTitle = `${SITE_NAME} — Work together like you’re in the same room`;
+const siteDescription =
+  "Clario is a free virtual office for remote teams: walk around a 2D or 3D office, talk to teammates nearby, chat, play games and ask AI coworkers for help.";
+
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#fbfbfa" },
+    { media: "(prefers-color-scheme: dark)", color: "#0a0a0a" },
+  ],
+};
 
 export const metadata: Metadata = {
   metadataBase: siteUrl,
@@ -62,7 +73,7 @@ export const metadata: Metadata = {
     template: `%s · ${SITE_NAME}`,
   },
   description: siteDescription,
-  keywords: ["spatial workspace", "remote teams", "virtual office", "2D workspace", "proximity chat", "team collaboration"],
+  keywords: ["virtual office", "online office", "remote teams", "spatial workspace", "proximity chat", "3D virtual office", "AI coworkers", "team collaboration"],
   authors: [{ name: SITE_NAME, url: siteUrl }],
   creator: SITE_NAME,
   publisher: SITE_NAME,
@@ -70,14 +81,17 @@ export const metadata: Metadata = {
   alternates: {
     canonical: "/",
   },
+  // /favicon.ico comes from app/favicon.ico. iPhones ignore SVG touch icons, so apple is a PNG.
   icons: {
-    icon: [{ url: "/clario-mark.svg", type: "image/svg+xml" }],
-    shortcut: "/clario-mark.svg",
-    apple: "/clario-mark.svg",
+    icon: [
+      { url: "/clario-mark.svg", type: "image/svg+xml" },
+      { url: "/icon-192.png", type: "image/png", sizes: "192x192" },
+    ],
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180" }],
   },
   manifest: "/manifest.webmanifest",
   openGraph: {
-    title: siteTitle,
+    title: shareTitle,
     description: siteDescription,
     url: "/",
     siteName: SITE_NAME,
@@ -87,7 +101,8 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: siteTitle,
+    creator: "@depx___",
+    title: shareTitle,
     description: siteDescription,
     images: ["/og-clario.png"],
   },

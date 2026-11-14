@@ -293,3 +293,55 @@
   .headerInner,.headerCta,.primaryCta,.secondaryCta,.secondaryCta svg,.stepTabs button::after,.featureCard,.scenePhases button { transition: none; }
   .globalAvatar { display: none; }
 }
+
+/* Offices, use cases and FAQ: the search-facing sections under the features. */
+.officeSection,.useSection,.faqSection { max-width: 72rem; margin: auto; padding: clamp(5rem, 9vw, 8rem) 1.5rem; color: var(--ink); scroll-margin-top: 1rem; }
+.officeGrid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 1rem; }
+.officeCard { display: flex; margin: 0; grid-column: span 4; flex-direction: column; overflow: hidden; border: 1px solid var(--line); border-radius: 1.25rem; background: var(--surface); transition: border-color .25s ease, transform .25s ease, box-shadow .25s ease; }
+.officeCard:nth-child(2) { grid-column: span 5; }
+.officeWide { grid-column: span 7; }
+.officeCard:hover { border-color: rgba(58,110,232,.32); transform: translateY(-2px); box-shadow: 0 22px 40px -30px rgb(var(--shade) / .45); }
+.officeShot { aspect-ratio: 16 / 10; overflow: hidden; border-bottom: 1px solid var(--line); background: var(--canvas); }
+.officeShot img { display: block; width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated; transition: transform .6s cubic-bezier(.2,.7,.2,1); }
+.officeWide .officeShot img { image-rendering: auto; }
+/* The card beside the wide one is shorter; let its picture fill the extra height. */
+.officeCard:nth-child(2) .officeShot { flex: 1; aspect-ratio: auto; min-height: 12rem; }
+.officeCard:hover .officeShot img { transform: scale(1.03); }
+.officeCard figcaption { padding: 1.25rem 1.4rem 1.45rem; }
+.officeCard h3 { margin: 0 0 .4rem; font-family: var(--pixel); font-size: 1.25rem; font-weight: 500; line-height: 1.15; }
+.officeCard p { margin: 0; color: var(--muted); font-size: .92rem; line-height: 1.6; text-wrap: pretty; }
+
+.useSection { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); align-items: start; gap: clamp(2.5rem, 6vw, 5.5rem); }
+.useIntro { position: sticky; top: 6.5rem; }
+.useIntro h2 { margin: 0; font-family: var(--pixel); font-size: clamp(2.1rem, 4vw, 3.5rem); font-weight: 500; line-height: 1.06; letter-spacing: -.01em; text-wrap: balance; }
+.useIntro h2 em { color: var(--accent); font-style: normal; }
+.useIntro > p { max-width: 26rem; margin: 1.2rem 0 1.8rem; color: var(--muted); line-height: 1.7; text-wrap: pretty; }
+.useList { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
+.useList li { display: grid; padding: 1.6rem 0 1.75rem; grid-template-columns: minmax(0, 15rem) minmax(0, 1fr); gap: .5rem 2rem; border-bottom: 1px solid var(--line); }
+.useList h3 { margin: 0; font-size: 1.02rem; font-weight: 600; line-height: 1.35; letter-spacing: -.01em; text-wrap: balance; }
+.useList p { max-width: 34rem; margin: 0; color: var(--muted); font-size: .94rem; line-height: 1.65; text-wrap: pretty; }
+
+.faqList { display: grid; margin: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 3.5rem; }
+.faqList > div { padding: 1.5rem 0 1.65rem; border-top: 1px solid var(--line); }
+.faqList dt { margin: 0 0 .55rem; font-size: 1.02rem; font-weight: 600; line-height: 1.4; letter-spacing: -.01em; }
+.faqList dd { max-width: 33rem; margin: 0; color: var(--muted); font-size: .94rem; line-height: 1.7; text-wrap: pretty; }
+
+@media (max-width: 960px) {
+  .officeCard:nth-child(n),.officeWide { grid-column: span 6; }
+  .officeWide { grid-column: 1 / -1; }
+  .officeCard:nth-child(2) .officeShot { flex: none; aspect-ratio: 16 / 10; }
+  .useSection { grid-template-columns: 1fr; }
+  .useIntro { position: static; }
+  .useList li { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 760px) {
+  .officeSection,.useSection,.faqSection { padding: 4.5rem 1rem; }
+  .officeCard:nth-child(n) { grid-column: 1 / -1; }
+  .faqList { grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .officeCard,.officeShot img { transition: none; }
+  .officeCard:hover,.officeCard:hover .officeShot img { transform: none; }
+}

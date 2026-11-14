@@ -3,7 +3,7 @@
 // Postgres (apps/server, /api/v1/user/free-ai), so it survives reloads and is the same on every
 // web server. Replies on the visitor's own key, saved lines and movement commands don't count.
 
-export const FREE_AI_REPLIES = 3;
+export const FREE_AI_REPLIES = 20;
 
 export type FreeAiTries = { used: number; limit: number; left: number };
 

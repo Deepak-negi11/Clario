@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { AI_KEY_HEADER, freeAiTries, freeTriesUsedUpNotice, type CoworkerChatResponse } from "@repo/shared";
+import { AI_KEY_HEADER, FREE_AI_REPLIES, freeAiTries, freeTriesUsedUpNotice, type CoworkerChatResponse } from "@repo/shared";
 import { POST } from "./route";
 
 // The game server's free-reply count and the AI, faked behind fetch.
@@ -14,7 +14,7 @@ function fakeFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Respon
     const token = auth.replace("Bearer ", "");
     if (!(token in used)) return Promise.resolve(Response.json({ message: "Unauthorized" }, { status: 403 }));
     if (init?.method === "POST") {
-      if (used[token]! >= 3) return Promise.resolve(Response.json(freeAiTries(used[token]!), { status: 409 }));
+      if (used[token]! >= FREE_AI_REPLIES) return Promise.resolve(Response.json(freeAiTries(used[token]!), { status: 409 }));
       used[token]! += 1;
     }
     return Promise.resolve(Response.json(freeAiTries(used[token]!)));
@@ -57,16 +57,16 @@ describe("coworker chat: free AI replies on the site key", () => {
     process.env.NVIDIA_API_KEY = siteKey;
   });
 
-  test("a new user gets exactly 3 AI replies, then a prompt for their own key", async () => {
-    for (const left of [2, 1, 0]) {
+  test(`a new user gets exactly ${FREE_AI_REPLIES} AI replies, then a prompt for their own key`, async () => {
+    for (let left = FREE_AI_REPLIES - 1; left >= 0; left--) {
       const reply = await answer("What's going on here?", { token: "alice" });
       expect(reply).toMatchObject({ source: "ai", freeTriesLeft: left });
       expect(reply.needsKey).toBeUndefined();
     }
-    const fourth = await answer("And now?", { token: "alice" });
-    expect(fourth).toMatchObject({ source: "saved", freeTriesLeft: 0, needsKey: true, notice: freeTriesUsedUpNotice() });
-    expect(aiCalls).toHaveLength(3);
-    expect(used.alice).toBe(3);
+    const oneMore = await answer("And now?", { token: "alice" });
+    expect(oneMore).toMatchObject({ source: "saved", freeTriesLeft: 0, needsKey: true, notice: freeTriesUsedUpNotice() });
+    expect(aiCalls).toHaveLength(FREE_AI_REPLIES);
+    expect(used.alice).toBe(FREE_AI_REPLIES);
     expect(used.bob).toBe(0);
   });
 
@@ -81,7 +81,7 @@ describe("coworker chat: free AI replies on the site key", () => {
     fetchSpy.mockImplementation(((input: RequestInfo | URL, init?: RequestInit) =>
       String(input).includes("nvidia.com") ? Promise.resolve(new Response("busy", { status: 503 })) : fakeFetch(input, init)) as typeof fetch);
     const reply = await answer("Hello", { token: "alice" });
-    expect(reply).toMatchObject({ source: "saved", freeTriesLeft: 3 });
+    expect(reply).toMatchObject({ source: "saved", freeTriesLeft: FREE_AI_REPLIES });
     expect(used.alice).toBe(0);
   });
 
@@ -95,11 +95,11 @@ describe("coworker chat: free AI replies on the site key", () => {
   });
 
   test("their own key keeps working after the free replies, and never counts", async () => {
-    used.alice = 3;
+    used.alice = FREE_AI_REPLIES;
     const reply = await answer("Hello", { token: "alice", ownKey: "sk-proj-abcdefghijklmnopqrstuvwxyz" });
     expect(reply.source).toBe("ai");
     expect(reply.freeTriesLeft).toBeUndefined();
     expect(aiCalls).toEqual([{ url: "https://api.openai.com/v1/chat/completions", auth: "Bearer sk-proj-abcdefghijklmnopqrstuvwxyz" }]);
-    expect(used.alice).toBe(3);
+    expect(used.alice).toBe(FREE_AI_REPLIES);
   });
 });

@@ -2,16 +2,20 @@ import { describe, expect, test } from "bun:test";
 import { FREE_AI_REPLIES, freeAiTries } from "./free-ai";
 
 describe("freeAiTries", () => {
+  test("each user gets 20 free replies", () => {
+    expect(FREE_AI_REPLIES).toBe(20);
+  });
+
   test("counts down from the limit and never goes below zero", () => {
-    expect(FREE_AI_REPLIES).toBe(3);
-    expect(freeAiTries(0)).toEqual({ used: 0, limit: 3, left: 3 });
-    expect(freeAiTries(2)).toEqual({ used: 2, limit: 3, left: 1 });
-    expect(freeAiTries(3)).toEqual({ used: 3, limit: 3, left: 0 });
-    expect(freeAiTries(7)).toEqual({ used: 7, limit: 3, left: 0 });
+    const limit = FREE_AI_REPLIES;
+    expect(freeAiTries(0)).toEqual({ used: 0, limit, left: limit });
+    expect(freeAiTries(limit - 1)).toEqual({ used: limit - 1, limit, left: 1 });
+    expect(freeAiTries(limit)).toEqual({ used: limit, limit, left: 0 });
+    expect(freeAiTries(limit + 4)).toEqual({ used: limit + 4, limit, left: 0 });
   });
 
   test("odd stored values read as safe counts", () => {
-    expect(freeAiTries(-2)).toEqual({ used: 0, limit: 3, left: 3 });
-    expect(freeAiTries(1.6)).toEqual({ used: 1, limit: 3, left: 2 });
+    expect(freeAiTries(-2)).toEqual({ used: 0, limit: FREE_AI_REPLIES, left: FREE_AI_REPLIES });
+    expect(freeAiTries(1.6)).toEqual({ used: 1, limit: FREE_AI_REPLIES, left: FREE_AI_REPLIES - 1 });
   });
 });
